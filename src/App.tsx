@@ -55,7 +55,8 @@ import {
   Upload,
   Smartphone,
   Laptop,
-  BarChart3
+  BarChart3,
+  MoreHorizontal
 } from 'lucide-react';
 import {
   Card,
