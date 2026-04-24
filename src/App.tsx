@@ -879,8 +879,8 @@ export default function App() {
     if (appModeSetting === 'laptop') return 'laptop';
     if (appModeSetting === 'mobile') return 'mobile';
     
-    // Auto mode breakpoints: Mobile < 768px, Tablet/Desktop >= 768px
-    return windowWidth < 768 ? 'mobile' : 'laptop';
+    // Auto mode breakpoints: Mobile < 640px, Tablet/Desktop >= 640px
+    return windowWidth < 640 ? 'mobile' : 'laptop';
   }, [appModeSetting, windowWidth]);
 
   // Persist preference
@@ -1964,7 +1964,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground font-sans overflow-hidden" dir="rtl">
+    <div className="flex min-h-screen bg-background text-foreground font-sans overflow-x-hidden w-full" dir="rtl">
       {/* Sidebar Navigation */}
       <aside 
         className={`fixed top-0 right-0 z-50 h-screen bg-sidebar border-l border-border transition-all duration-300 flex flex-col ${
@@ -2110,26 +2110,26 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col transition-all duration-300 ${effectiveAppMode === 'laptop' ? (isSidebarCollapsed ? 'mr-20' : 'mr-64') : 'mr-0 pb-16 md:pb-0'}`}>
-        <header className="sticky top-0 z-40 h-20 border-b border-border bg-background/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between gap-4 md:gap-8">
-          <div className="flex items-center gap-2 md:gap-6 flex-1 max-w-xl">
+      <div className={`flex-1 flex flex-col transition-all duration-300 w-full min-w-0 ${effectiveAppMode === 'laptop' ? (isSidebarCollapsed ? 'mr-20' : 'mr-64') : 'mr-0 pb-20 md:pb-0'}`}>
+        <header className="sticky top-0 z-40 h-16 md:h-20 border-b border-border bg-background/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between gap-3 md:gap-8">
+          <div className="flex items-center gap-2 md:gap-6 flex-1 max-w-xl min-w-0">
             {effectiveAppMode === 'mobile' && (
-              <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(true)}>
+              <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(true)} className="shrink-0">
                 <Menu className="h-5 w-5" />
               </Button>
             )}
-            <div className="relative flex-1 group">
-               <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+            <div className="relative flex-1 group min-w-0">
+               <Search className="absolute right-3 md:right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                <Input 
                  placeholder={effectiveAppMode === 'mobile' ? "بحث..." : "ابحث عن مورد، فاتورة، أو عملية..."} 
-                 className="w-full bg-muted/50 border-border pr-12 h-11 rounded-xl text-sm focus:ring-primary/20 focus:border-primary/50 transition-all text-foreground"
+                 className="w-full bg-muted/50 border-border pr-10 md:pr-12 h-10 md:h-11 rounded-xl text-xs md:text-sm focus:ring-primary/20 focus:border-primary/50 transition-all text-foreground"
                  value={globalSearch}
                  onChange={(e) => setGlobalSearch(e.target.value)}
                />
              </div>
           </div>
 
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-2 md:gap-4 shrink-0">
             <div className="hidden lg:flex flex-col items-start gap-1">
               <span className="text-[10px] text-muted-foreground font-bold tracking-widest uppercase">مكان العمل الحالي</span>
               <DropdownMenu>
@@ -2183,9 +2183,9 @@ export default function App() {
             <div className="flex items-center gap-2">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="gap-2 border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 font-bold h-11 px-6 rounded-xl">
+                  <Button variant="outline" className={`${effectiveAppMode === 'mobile' ? 'w-10 h-10 p-0' : 'h-11 px-6'} gap-2 border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 font-bold rounded-xl`}>
                      <Plus className="h-4 w-4" />
-                     إجراء سريع
+                     {effectiveAppMode !== 'mobile' && "إجراء سريع"}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-56 p-2 rounded-xl">
@@ -2247,13 +2247,13 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 custom-scrollbar">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6 w-full">
             {/* TabsList removed as navigation is now in the sidebar */}
 
           <TabsContent value="finance" className="space-y-8">
             {/* Conditional Stats: Branch specific vs Unified */}
-            <div className={`grid gap-6 ${effectiveAppMode === 'laptop' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4' : 'grid-cols-2'}`}>
+            <div className={`grid gap-4 md:gap-6 ${effectiveAppMode === 'laptop' ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1'}`}>
               {currentBranchId ? (
                 // Branch Specific Stats
                 [
@@ -2262,20 +2262,20 @@ export default function App() {
                   { label: 'ديون الموردين', value: stats.supplierDues, icon: Users, color: 'text-emerald-900 dark:text-emerald-400', bg: 'bg-emerald-900/10' },
                   { label: 'فواتير مستحقة', value: stats.dueInvoices, icon: FileText, color: 'text-amber-600', bg: 'bg-amber-500/10', isCount: true },
                 ].map((stat, idx) => (
-                  <Card key={idx} className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl">
+                  <Card key={idx} className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl w-full">
                     <div className={`absolute top-0 right-0 w-32 h-32 ${stat.bg} blur-3xl -mr-16 -mt-16 opacity-30 group-hover:opacity-50 transition-opacity`} />
-                    <CardHeader className="pb-2 space-y-0 flex flex-row items-center justify-between relative z-10">
-                      <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                      <CardTitle className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{stat.label}</CardTitle>
+                    <CardHeader className="pb-1 md:pb-2 space-y-0 flex flex-row items-center justify-between relative z-10">
+                      <stat.icon className={`h-4 w-4 md:h-5 md:w-5 ${stat.color}`} />
+                      <CardTitle className="text-[10px] md:text-[10px] font-black text-muted-foreground uppercase tracking-widest">{stat.label}</CardTitle>
                     </CardHeader>
-                    <CardContent className="relative z-10">
-                      <div className="text-3xl font-black text-foreground font-mono tracking-tighter">
+                    <CardContent className="relative z-10 pb-4 md:pb-6">
+                      <div className="text-2xl md:text-3xl font-black text-foreground font-mono tracking-tighter">
                         {stat.isCount ? stat.value : stat.value.toLocaleString()}
-                        {!stat.isCount && <span className="text-[10px] text-muted-foreground mr-2 font-sans font-bold">د.ع</span>}
+                        {!stat.isCount && <span className="text-[10px] text-muted-foreground mr-1 md:mr-2 font-sans font-bold whitespace-nowrap">د.ع</span>}
                       </div>
-                      <div className="mt-2 flex items-center gap-1.5">
-                         <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-                         <span className="text-[10px] text-muted-foreground font-bold">تحديث تلقائي</span>
+                      <div className="mt-1 md:mt-2 flex items-center gap-1.5">
+                         <div className="h-1 w-1 md:h-1.5 md:w-1.5 rounded-full bg-primary animate-pulse" />
+                         <span className="text-[9px] md:text-[10px] text-muted-foreground font-bold">تحديث تلقائي</span>
                       </div>
                     </CardContent>
                   </Card>
@@ -2288,20 +2288,20 @@ export default function App() {
                   { label: 'صافي الربح الكلي', value: stats.totalNetProfit, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-500/10' },
                   { label: 'ديون الموردين المجمعة', value: stats.supplierDues, icon: Users, color: 'text-amber-900 dark:text-amber-400', bg: 'bg-amber-900/10' },
                 ].map((stat, idx) => (
-                  <Card key={idx} className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl">
+                  <Card key={idx} className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl w-full">
                     <div className={`absolute top-0 right-0 w-32 h-32 ${stat.bg} blur-3xl -mr-16 -mt-16 opacity-30 group-hover:opacity-50 transition-opacity`} />
-                    <CardHeader className="pb-2 space-y-0 flex flex-row items-center justify-between relative z-10">
-                      <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                      <CardTitle className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{stat.label}</CardTitle>
+                    <CardHeader className="pb-1 md:pb-2 space-y-0 flex flex-row items-center justify-between relative z-10">
+                      <stat.icon className={`h-4 w-4 md:h-5 md:w-5 ${stat.color}`} />
+                      <CardTitle className="text-[10px] md:text-[10px] font-black text-muted-foreground uppercase tracking-widest">{stat.label}</CardTitle>
                     </CardHeader>
-                    <CardContent className="relative z-10">
-                      <div className="text-3xl font-black text-foreground font-mono tracking-tighter">
+                    <CardContent className="relative z-10 pb-4 md:pb-6">
+                      <div className="text-2xl md:text-3xl font-black text-foreground font-mono tracking-tighter">
                         {stat.value.toLocaleString()}
-                        <span className="text-[10px] text-muted-foreground mr-2 font-sans font-bold">د.ع</span>
+                        <span className="text-[10px] text-muted-foreground mr-1 md:mr-2 font-sans font-bold whitespace-nowrap">د.ع</span>
                       </div>
-                      <div className="mt-2 flex items-center gap-1.5">
-                         <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-                         <span className="text-[10px] text-muted-foreground font-bold">عرض موحد للفروع</span>
+                      <div className="mt-1 md:mt-2 flex items-center gap-1.5">
+                         <div className="h-1 w-1 md:h-1.5 md:w-1.5 rounded-full bg-primary animate-pulse" />
+                         <span className="text-[9px] md:text-[10px] text-muted-foreground font-bold">عرض موحد للفروع</span>
                       </div>
                     </CardContent>
                   </Card>
@@ -2310,28 +2310,28 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <Card className={`${!currentBranchId && branches.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'} bg-card border-border p-8 rounded-2xl`}>
-                <div className="flex items-center justify-between mb-10">
+              <Card className={`${!currentBranchId && branches.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'} bg-card border-border p-4 md:p-8 rounded-2xl overflow-hidden w-full`}>
+                <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 md:mb-10 gap-4">
                   <div>
-                    <CardTitle className="text-xl font-black text-foreground">
+                    <CardTitle className="text-lg md:text-xl font-black text-foreground">
                       {currentBranchId ? 'التحليل المالي للفرع' : 'التحليل المالي الموحد'}
                     </CardTitle>
-                    <CardDescription className="text-muted-foreground font-bold font-sans">
+                    <CardDescription className="text-xs text-muted-foreground font-bold font-sans">
                       {currentBranchId ? 'حركة الإيرادات والمصاريف لآخر 7 أيام' : 'مقارنة الأداء المالي لكل الفروع مجمعة'}
                     </CardDescription>
                   </div>
-                  <div className="flex gap-4 p-1.5 bg-muted/30 border border-border rounded-xl">
-                    <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-primary font-black">
-                      <div className="h-2 w-2 rounded-full bg-primary" />
+                  <div className="flex gap-2 md:gap-4 p-1 md:p-1.5 bg-muted/30 border border-border rounded-xl w-fit">
+                    <div className="flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1 md:py-1.5 text-[10px] md:text-xs text-primary font-black">
+                      <div className="h-1.5 md:h-2 w-1.5 md:w-2 rounded-full bg-primary" />
                       الدخل
                     </div>
-                    <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-rose-500 font-black">
-                      <div className="h-2 w-2 rounded-full bg-rose-500" />
+                    <div className="flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1 md:py-1.5 text-[10px] md:text-xs text-rose-500 font-black">
+                      <div className="h-1.5 md:h-2 w-1.5 md:w-2 rounded-full bg-rose-500" />
                       المصاريف
                     </div>
                   </div>
                 </div>
-                <div className="h-[320px] w-full">
+                <div className="h-[240px] md:h-[320px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData}>
                       <defs>
@@ -3253,7 +3253,7 @@ export default function App() {
                  </div>
                </div>
 
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
+               <div className={`grid gap-4 md:gap-8 ${effectiveAppMode === 'laptop' ? 'grid-cols-3' : 'grid-cols-1'}`}>
                  {[
                    { label: 'إجمالي الأرباح', value: stats.netProfit, icon: TrendingUp, color: 'text-emerald-500', border: 'border-t-emerald-500', trend: `+${stats.profitPercentage.toFixed(1)}%` },
                    { label: 'إجمالي المصروفات', value: transactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0), icon: ArrowUpCircle, color: 'text-rose-500', border: 'border-t-rose-500', sub: 'خلال الفترة' },
@@ -3265,13 +3265,13 @@ export default function App() {
                         {card.label}
                      </div>
                      <div className="text-2xl md:text-3xl font-black text-foreground font-mono tracking-tighter mb-4">{card.value.toLocaleString()}</div>
-                     {card.trend ? (
-                        <div className="flex items-center gap-2 text-xs text-emerald-500 bg-emerald-500/5 px-2 py-1 rounded-full font-bold">
+                  {card.trend ? (
+                        <div className="flex items-center gap-2 text-xs text-emerald-500 bg-emerald-500/5 px-3 py-1.5 rounded-full font-bold">
                            <TrendingUp className="h-3 w-3" />
                            {card.trend} زيادة
                         </div>
                      ) : card.sub && (
-                        <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest leading-none">{card.sub}</div>
+                        <div className="text-[10px] md:text-[10px] text-muted-foreground font-bold uppercase tracking-widest leading-none bg-muted px-2 py-1 rounded">{card.sub}</div>
                      )}
                    </Card>
                  ))}
