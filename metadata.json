@@ -1,0 +1,5 @@
+{
+  "name": "صيدليتي",
+  "description": "نظام الحسابات الذكية للصيدليات",
+  "requestFramePermissions": ["camera"]
+}
