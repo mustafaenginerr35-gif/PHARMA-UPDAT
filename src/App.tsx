@@ -1264,10 +1264,15 @@ export default function App() {
       .filter(tx => tx.type === 'income' && startOfDay(new Date(tx.date)).getTime() === today.getTime())
       .reduce((acc, tx) => acc + tx.amount, 0);
 
-    // Monthly revenue (Income this month)
+    // Monthly stats
     const monthlyRevenue = transactions
       .filter(tx => tx.type === 'income' && new Date(tx.date) >= monthStart)
       .reduce((acc, tx) => acc + tx.amount, 0);
+
+    // GROSS Profit from sales this month
+    const monthlyGrossProfit = transactions
+      .filter(tx => tx.type === 'income' && new Date(tx.date) >= monthStart)
+      .reduce((acc, tx) => acc + (tx.netProfit || 0), 0);
 
     const monthlySalary = employeeAttendance
       .filter(record => new Date(record.date) >= monthStart)
@@ -1278,8 +1283,8 @@ export default function App() {
       .filter(tx => tx.type === 'expense' && new Date(tx.date) >= monthStart)
       .reduce((acc, tx) => acc + tx.amount, 0) + monthlySalary;
 
-    // Net Profit & Percentage (This Month)
-    const netProfit = monthlyRevenue - monthlyExpense;
+    // Net Profit (Monthly) = Gross Profit from Sales - Expenses
+    const netProfit = monthlyGrossProfit - monthlyExpense;
     const profitPercentage = monthlyRevenue > 0 ? (netProfit / monthlyRevenue) * 100 : 0;
 
     // Supplier Dues
@@ -1294,7 +1299,7 @@ export default function App() {
     const bTx = transactions;
     const bEntities = entities;
     
-    // Total Revenue (All time or monthly? User usually means monthly for current performance)
+    // Total Revenue (All time)
     const histSales = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalSales || 0), 0) : 0;
     const histProfits = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalProfits || 0) + (r.retainedEarnings || 0), 0) : 0;
     const histExpenses = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalExpenses || 0) + (r.accumulatedExpenses || 0), 0) : 0;
@@ -1304,6 +1309,22 @@ export default function App() {
     const totalRevenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0) + histSales;
     const totalExpense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0) + 
       employeeAttendance.reduce((acc, record) => acc + record.dailyWage, 0) + histExpenses;
+    
+    // Total Gross Profit from transactions
+    const totalGrossProfit = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.netProfit || 0), 0) + histProfits;
+    
+    // TOTAL Net Profit = Total Gross Profit - Total Expenses
+    const totalNetProfit = totalGrossProfit - totalExpense;
+
+    console.log("Accurate Financial Reports Logic:", { 
+      totalRevenue, 
+      totalExpense, 
+      totalGrossProfit,
+      totalNetProfit,
+      monthlyGrossProfit,
+      monthlyExpense,
+      monthlyNetProfit: netProfit
+    });
     
     return {
       dailyRevenue,
@@ -1315,7 +1336,7 @@ export default function App() {
       dueInvoices: dueInvoicesCount,
       totalRevenue,
       totalExpense,
-      totalNetProfit: (totalRevenue - totalExpense) + histProfits // Profits are usually added separately or part of revenue
+      totalNetProfit
     };
   }, [transactions, entities, allLedgerEntries, employeeAttendance, historicalRecords, includeHistorical]);
 
@@ -1323,12 +1344,11 @@ export default function App() {
     if (branches.length === 0) return [];
     
     return branches.map(branch => {
-      // In master mode, transactions/entities contain everything but with branchId
-      // In branch mode, they are already filtered but we still group to be consistent
       const bTx = transactions.filter(t => t.branchId === branch.id);
       const bEntities = entities.filter(e => e.branchId === branch.id);
       
       const revenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+      const grossProfit = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.netProfit || 0), 0);
       const expense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
       const dues = bEntities.reduce((acc, e) => acc + e.balance, 0);
       
@@ -1337,7 +1357,7 @@ export default function App() {
         name: branch.name,
         revenue,
         expense,
-        profit: revenue - expense,
+        profit: grossProfit - expense,
         dues
       };
     });
@@ -1354,6 +1374,10 @@ export default function App() {
         .filter(tx => tx.type === 'income' && format(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
         .reduce((acc, tx) => acc + tx.amount, 0);
       
+      const dayGrossProfit = transactions
+        .filter(tx => tx.type === 'income' && format(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
+        .reduce((acc, tx) => acc + (tx.netProfit || 0), 0);
+      
       const daySalary = employeeAttendance
         .filter(record => format(new Date(record.date), 'yyyy-MM-dd') === dateStr)
         .reduce((acc, record) => acc + record.dailyWage, 0);
@@ -1366,7 +1390,7 @@ export default function App() {
         name: format(new Date(dateStr), 'EEE', { locale: ar }),
         income: dayIncome,
         expense: dayExpense,
-        profit: dayIncome - dayExpense
+        profit: dayGrossProfit - dayExpense
       };
     });
   }, [transactions, employeeAttendance]);
@@ -2555,9 +2579,9 @@ export default function App() {
               ) : (
                 // Unified Master Stats
                 [
-                  { label: 'إجمالي الوارد مجمع', value: stats.totalRevenue, icon: BarChart3, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
-                  { label: 'إجمالي المصروف مجمع', value: stats.totalExpense, icon: ArrowDownCircle, color: 'text-rose-600', bg: 'bg-rose-500/10' },
-                  { label: 'صافي الربح الكلي', value: stats.totalNetProfit, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-500/10' },
+                  { label: 'إجمالي الوارد', value: stats.totalRevenue, icon: BarChart3, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
+                  { label: 'إجمالي المصروفات', value: stats.totalExpense, icon: ArrowDownCircle, color: 'text-rose-600', bg: 'bg-rose-500/10' },
+                  { label: 'إجمالي الأرباح', value: stats.totalNetProfit, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-500/10' },
                   { label: 'ديون الموردين المجمعة', value: stats.supplierDues, icon: Users, color: 'text-amber-900 dark:text-amber-400', bg: 'bg-amber-900/10' },
                 ].map((stat, idx) => (
                   <Card key={idx} className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl w-full">
@@ -3572,9 +3596,9 @@ export default function App() {
 
                <div className={`grid gap-4 md:gap-8 ${effectiveAppMode === 'laptop' ? 'grid-cols-3' : 'grid-cols-1'}`}>
                  {[
-                   { label: 'إجمالي الأرباح', value: stats.netProfit, icon: TrendingUp, color: 'text-emerald-500', border: 'border-t-emerald-500', trend: `+${stats.profitPercentage.toFixed(1)}%` },
-                   { label: 'إجمالي المصروفات', value: transactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0), icon: ArrowUpCircle, color: 'text-rose-500', border: 'border-t-rose-500', sub: 'خلال الفترة' },
-                   { label: 'مستحقات الموردين', value: stats.supplierDues, icon: Building2, color: 'text-blue-500', border: 'border-t-blue-500', sub: `${entities.length} مورد نشط` },
+                   { label: 'إجمالي الوارد', value: stats.totalRevenue, icon: BarChart3, color: 'text-blue-500', border: 'border-t-blue-500', sub: 'إجمالي المبيعات والواردات' },
+                   { label: 'إجمالي المصروفات', value: stats.totalExpense, icon: ArrowUpCircle, color: 'text-rose-500', border: 'border-t-rose-500', sub: 'إجمالي رواتب ومصاريف' },
+                   { label: 'إجمالي الأرباح', value: stats.totalNetProfit, icon: TrendingUp, color: 'text-emerald-500', border: 'border-t-emerald-500', trend: `+${stats.totalRevenue > 0 ? ((stats.totalNetProfit / stats.totalRevenue) * 100).toFixed(1) : '0'}%` },
                  ].map((card, i) => (
                    <Card key={i} className={`bg-card border-border border-t-4 ${card.border} shadow-xl p-6 md:p-8 flex flex-col items-center text-center group hover:scale-[1.02] transition-transform`}>
                      <div className="text-xs font-bold text-muted-foreground mb-2 flex items-center gap-2 group-hover:text-foreground transition-colors">
