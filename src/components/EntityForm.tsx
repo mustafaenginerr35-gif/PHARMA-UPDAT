@@ -17,6 +17,8 @@ import {
   SelectValue 
 } from '@/components/ui/select';
 import { format } from 'date-fns';
+import { CurrencyInput } from '@/components/ui/CurrencyInput';
+import { parseFormattedNumber } from '@/src/lib/formatters';
 
 interface EntityFormProps {
   onSubmit: (data: any) => void;
@@ -31,8 +33,8 @@ export const EntityForm = ({ onSubmit, onClose, entity }: EntityFormProps) => {
     const data = Object.fromEntries(formData.entries());
     onSubmit({
       ...data,
-      initialBalance: Number(data.initialBalance || 0),
-      limit: Number(data.limit || 0),
+      initialBalance: parseFormattedNumber(data.initialBalance as string),
+      limit: parseFormattedNumber(data.limit as string),
     });
   };
 
@@ -89,19 +91,17 @@ export const EntityForm = ({ onSubmit, onClose, entity }: EntityFormProps) => {
                 <DollarSign className="h-3 w-3" />
                 رصيد الافتتاح (المبلغ المطلوب حالياً)
               </Label>
-              <Input 
+              <CurrencyInput 
                 name="initialBalance" 
-                type="number" 
-                defaultValue="0" 
+                defaultValue={0} 
                 className="bg-muted border-emerald-500/20 text-emerald-600 h-14 rounded-xl font-mono text-xl font-black shadow-sm" 
               />
             </div>
             <div className="space-y-2">
               <Label className="text-rose-500 font-black text-[10px] uppercase tracking-widest">تحذير سقف الدين (الحد الائتماني)</Label>
-              <Input 
+              <CurrencyInput 
                 name="limit" 
-                type="number" 
-                defaultValue={entity?.limit || "0"} 
+                defaultValue={entity?.limit || 0} 
                 className="bg-muted border-rose-500/20 text-rose-500 h-14 rounded-xl font-mono text-xl font-black shadow-sm" 
               />
             </div>

@@ -13,6 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
+import { formatNumberWithCommas, parseFormattedNumber } from '@/src/lib/formatters';
+import { CurrencyInput } from '@/components/ui/CurrencyInput';
 
 interface RevenueFormProps {
   onSubmit: (data: any) => void;
@@ -27,9 +29,9 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
 
   // Sync profit when amount or percentage changes
   useEffect(() => {
-    const amountNum = parseFloat(saleAmount) || 0;
+    const amountNum = parseFormattedNumber(saleAmount);
     const percentNum = parseFloat(saleProfitPercentage) || 0;
-    setSaleNetProfit(((amountNum * percentNum) / 100).toFixed(0));
+    setSaleNetProfit(formatNumberWithCommas(((amountNum * percentNum) / 100).toFixed(0)));
   }, [saleAmount, saleProfitPercentage]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -39,8 +41,8 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
     onSubmit({
       ...data,
       incomeType,
-      amount: Number(saleAmount),
-      netProfit: Number(saleNetProfit),
+      amount: parseFormattedNumber(saleAmount),
+      netProfit: parseFormattedNumber(saleNetProfit),
       profitPercentage: Number(saleProfitPercentage),
       date: new Date(data.date as string),
       dueDate: data.dueDate ? new Date(data.dueDate as string) : undefined,
@@ -98,34 +100,44 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
               <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 blur-2xl rounded-full" />
               <Label className="text-primary font-black text-[10px] uppercase tracking-widest block mb-2">القيمة الإجمالية للمبيعات</Label>
               <div className="relative">
-                <Input 
+                <CurrencyInput 
                   name="amount" 
-                  type="number" 
                   required 
-                  value={saleAmount}
-                  onChange={(e) => setSaleAmount(e.target.value)}
-                  placeholder="0.000" 
+                  value={parseFormattedNumber(saleAmount)}
+                  onChange={(val) => setSaleAmount(formatNumberWithCommas(val))}
+                  placeholder="0,000" 
                   className="bg-muted border-primary/20 text-foreground h-14 rounded-xl font-mono text-2xl font-black pr-12" 
                 />
                 <TrendingUp className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-primary" />
               </div>
             </div>
 
+            <div className="space-y-2">
+              <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">نوع الإيراد (التصنيف)</Label>
+              <select 
+                name="incomeTypeCustom" 
+                defaultValue="مبيعات"
+                className="w-full bg-muted border border-border text-foreground h-11 rounded-xl px-4 font-bold focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all appearance-none"
+              >
+                <option value="مبيعات">مبيعات</option>
+                <option value="خدمات">خدمات</option>
+                <option value="أخرى">أخرى</option>
+              </select>
+            </div>
+
             <div className="grid grid-cols-2 gap-4 p-5 bg-emerald-500/5 rounded-2xl border border-emerald-500/10 shadow-sm">
               <div className="space-y-2">
                 <Label className="text-emerald-700 font-black text-[10px] uppercase tracking-widest">صافي الربح المتحقق</Label>
                 <div className="relative">
-                  <Input 
+                  <CurrencyInput 
                     name="netProfit" 
-                    type="number" 
-                    value={saleNetProfit}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSaleNetProfit(val);
-                      const num = parseFloat(val) || 0;
-                      const sAmount = parseFloat(saleAmount) || 0;
+                    value={parseFormattedNumber(saleNetProfit)}
+                    onChange={(val) => {
+                      const formatted = formatNumberWithCommas(val);
+                      setSaleNetProfit(formatted);
+                      const sAmount = parseFormattedNumber(saleAmount);
                       if (sAmount > 0) {
-                        setSaleProfitPercentage(((num / sAmount) * 100).toFixed(1));
+                        setSaleProfitPercentage(((val / sAmount) * 100).toFixed(1));
                       }
                     }}
                     className="bg-background border-emerald-500/20 text-emerald-600 font-black font-mono h-12 rounded-xl text-lg shadow-inner" 

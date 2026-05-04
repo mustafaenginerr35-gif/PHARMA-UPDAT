@@ -42,6 +42,7 @@ import {
   CloudLightning,
   Check,
   Package,
+  PackageSearch,
   Info,
   Sun,
   Moon,
@@ -56,7 +57,10 @@ import {
   Smartphone,
   Laptop,
   BarChart3,
-  MoreHorizontal
+  MoreHorizontal,
+  PlusCircle,
+  AlertTriangle,
+  Bug
 } from 'lucide-react';
 import {
   Card,
@@ -148,6 +152,7 @@ import {
 import { ImageCapture } from './components/ImageCapture';
 import { googleDriveService, type SyncSettings, type ImageManagementSettings, type DriveFile } from './services/googleDriveService';
 import { useGoogleAuth } from './components/AuthProvider';
+import { cn, fileToBase64 } from '@/lib/utils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { NumericFormat } from 'react-number-format';
@@ -162,6 +167,11 @@ import { EmployeeForm } from './components/EmployeeForm';
 import { AttendanceForm } from './components/AttendanceForm';
 import { BranchesPage } from './components/BranchesPage';
 import { BranchForm } from './components/BranchForm';
+import { HistoricalMigrationPage } from './components/HistoricalMigrationPage';
+import { MedicineRequestsPage } from './components/MedicineRequestsPage';
+import { DataPersistenceService } from './services/dataPersistenceService';
+import { formatIQD, formatNumberWithCommas, parseFormattedNumber } from './lib/formatters';
+import { CurrencyInput } from '@/components/ui/CurrencyInput';
 
 // Re-using the Invoice Details Dialog fragment from the corrupted file
 type Theme = 'light' | 'dark' | 'system';
@@ -169,12 +179,10 @@ type Theme = 'light' | 'dark' | 'system';
 const ThemeToggle = ({ theme, setTheme }: { theme: Theme, setTheme: (t: Theme) => void }) => {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="text-slate-400 hover:text-foreground hover:bg-slate-800 rounded-xl">
-          {theme === 'light' && <Sun className="h-5 w-5" />}
-          {theme === 'dark' && <Moon className="h-5 w-5" />}
-          {theme === 'system' && <Monitor className="h-5 w-5" />}
-        </Button>
+      <DropdownMenuTrigger className="size-8 flex items-center justify-center text-slate-400 hover:text-foreground hover:bg-slate-800 rounded-xl outline-none transition-colors">
+        {theme === 'light' && <Sun className="h-5 w-5" />}
+        {theme === 'dark' && <Moon className="h-5 w-5" />}
+        {theme === 'system' && <Monitor className="h-5 w-5" />}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="bg-card border-border text-foreground p-2 rounded-xl">
         <DropdownMenuItem className="gap-3 p-3 cursor-pointer hover:bg-muted rounded-lg" onClick={() => setTheme('light')}>
@@ -284,10 +292,9 @@ const EditInvoiceDialog = ({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit_amount" className="text-muted-foreground font-bold">المبلغ الصافي</Label>
-                <Input 
+                <CurrencyInput 
                   id="edit_amount" 
                   name="amount" 
-                  type="number" 
                   required 
                   defaultValue={invoice.amount}
                   className="bg-muted border-border text-foreground h-11 rounded-xl font-mono" 
@@ -295,10 +302,9 @@ const EditInvoiceDialog = ({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit_discount" className="text-muted-foreground font-bold text-rose-500">الخصم</Label>
-                <Input 
+                <CurrencyInput 
                   id="edit_discount" 
                   name="discount" 
-                  type="number" 
                   defaultValue={invoice.discount}
                   className="bg-muted border-border text-rose-500 h-11 rounded-xl font-mono" 
                 />
@@ -308,7 +314,7 @@ const EditInvoiceDialog = ({
             <div className="grid grid-cols-2 gap-4 p-4 bg-blue-500/5 rounded-2xl border border-blue-500/10">
               <div className="space-y-2">
                 <Label className="text-blue-700 dark:text-blue-400 font-bold text-xs uppercase">البونص</Label>
-                <Input name="bonus" type="number" defaultValue={invoice.bonus} className="bg-background border-blue-500/20 text-blue-500 font-bold font-mono h-10 rounded-lg" />
+                <CurrencyInput name="bonus" defaultValue={invoice.bonus} className="bg-background border-blue-500/20 text-blue-500 font-bold font-mono h-10 rounded-lg" />
               </div>
               <div className="space-y-2">
                 <Label className="text-blue-700 dark:text-blue-400 font-bold text-xs uppercase">وصول البونص</Label>
@@ -351,6 +357,7 @@ const SupplierAccountPage = ({
   onRefundInvoice,
   onPartialPayment,
   onFullPayment,
+  onShowImage,
   appMode = 'laptop'
 }: { 
   entity: Entity; 
@@ -367,6 +374,7 @@ const SupplierAccountPage = ({
   onRefundInvoice: (invoice: LedgerEntry) => void;
   onPartialPayment: (invoice: LedgerEntry) => void;
   onFullPayment: (invoice: LedgerEntry) => void;
+  onShowImage?: (url: string) => void;
   appMode?: 'laptop' | 'mobile';
 }) => {
   const stats = useMemo(() => {
@@ -407,11 +415,9 @@ const SupplierAccountPage = ({
             تعديل
           </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 gap-2 text-white shadow-lg shadow-emerald-600/20 whitespace-nowrap flex-1 md:flex-none">
-                <Plus className="h-4 w-4" />
-                إجراء سريع
-              </Button>
+            <DropdownMenuTrigger className="h-7 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 flex items-center gap-2 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all outline-none">
+              <Plus className="h-4 w-4" />
+              إجراء سريع
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-48 p-2 rounded-xl">
               <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={onAddInvoice}>
@@ -444,7 +450,7 @@ const SupplierAccountPage = ({
             <CardContent className="p-4 md:p-6 text-center">
               <div className="text-[10px] font-black text-muted-foreground uppercase mb-2 tracking-widest leading-tight">{stat.label}</div>
               <div className={`text-lg md:text-xl font-black ${stat.color} font-mono tracking-tighter`}>
-                {stat.isCount ? stat.value : stat.value.toLocaleString()}
+                {stat.isCount ? stat.value : formatNumberWithCommas(stat.value)}
               </div>
             </CardContent>
           </Card>
@@ -490,7 +496,7 @@ const SupplierAccountPage = ({
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <div className="text-xs text-muted-foreground">الرصيد الابتدائي</div>
-                      <div className="font-bold text-foreground font-mono">{entity.initialBalance.toLocaleString()} د.ع</div>
+                      <div className="font-bold text-foreground font-mono">{formatIQD(entity.initialBalance)}</div>
                     </div>
                     <div className="space-y-1">
                       <div className="text-xs text-muted-foreground">تاريخ الإنشاء</div>
@@ -498,7 +504,7 @@ const SupplierAccountPage = ({
                     </div>
                     <div className="space-y-1">
                       <div className="text-xs text-muted-foreground">السقف المالي</div>
-                      <div className="font-bold text-rose-500 font-mono">{entity.limit?.toLocaleString() || 0} د.ع</div>
+                      <div className="font-bold text-rose-500 font-mono">{formatIQD(entity.limit || 0)}</div>
                     </div>
                     <div className="space-y-1">
                       <div className="text-xs text-muted-foreground">حالة الحساب</div>
@@ -537,7 +543,7 @@ const SupplierAccountPage = ({
                           </div>
                         </div>
                         <div className={`font-bold font-mono text-sm ${entry.operationType === 'invoice' ? 'text-blue-500' : 'text-emerald-500'}`}>
-                          {entry.operationType === 'invoice' ? '+' : '-'}{entry.netAmount.toLocaleString()}
+                          {entry.operationType === 'invoice' ? '+' : '-'}{formatNumberWithCommas(entry.netAmount)}
                         </div>
                       </div>
                     ))}
@@ -572,9 +578,9 @@ const SupplierAccountPage = ({
                         <tr key={invoice.id} className="hover:bg-muted/30 transition-colors group">
                           <td className="px-6 py-4 font-bold text-foreground">{invoice.invoiceNumber}</td>
                           <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{format(invoice.date, 'yyyy/MM/dd')}</td>
-                          <td className="px-6 py-4 font-bold font-mono">{invoice.amount.toLocaleString()}</td>
-                          <td className="px-6 py-4 font-bold font-mono text-amber-500">{(invoice.remainingAmount || 0).toLocaleString()}</td>
-                          <td className="px-6 py-4 font-bold font-mono text-emerald-500">{invoice.discount?.toLocaleString() || 0}</td>
+                          <td className="px-6 py-4 font-bold font-mono">{formatNumberWithCommas(invoice.amount)}</td>
+                          <td className="px-6 py-4 font-bold font-mono text-amber-500">{formatNumberWithCommas(invoice.remainingAmount || 0)}</td>
+                          <td className="px-6 py-4 font-bold font-mono text-emerald-500">{formatNumberWithCommas(invoice.discount || 0)}</td>
                           <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{invoice.dueDate ? format(invoice.dueDate, 'yyyy/MM/dd') : '-'}</td>
                           <td className="px-6 py-4 text-center">
                             <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${
@@ -590,10 +596,8 @@ const SupplierAccountPage = ({
                           </td>
                           <td className="px-6 py-4 text-center">
                             <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
+                              <DropdownMenuTrigger className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-muted outline-none transition-colors">
+                                <MoreVertical className="h-4 w-4" />
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-48 p-2 rounded-xl">
                                 <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onViewInvoice(invoice)}>
@@ -648,10 +652,8 @@ const SupplierAccountPage = ({
                             <div className="text-[10px] text-muted-foreground font-bold">{format(invoice.date, 'yyyy/MM/dd')}</div>
                           </div>
                           <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
+                            <DropdownMenuTrigger className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-muted outline-none transition-colors">
+                              <MoreVertical className="h-4 w-4" />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-48 p-2 rounded-xl">
                               <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onViewInvoice(invoice)}>
@@ -676,11 +678,11 @@ const SupplierAccountPage = ({
                         <div className="grid grid-cols-2 gap-2 text-xs font-bold">
                            <div className="p-2 bg-muted rounded-lg flex justify-between">
                               <span className="text-muted-foreground">الصافي:</span>
-                              <span className="font-mono text-foreground">{invoice.amount.toLocaleString()}</span>
+                              <span className="font-mono text-foreground">{formatNumberWithCommas(invoice.amount)}</span>
                            </div>
                            <div className={`p-2 rounded-lg flex justify-between ${invoice.remainingAmount && invoice.remainingAmount > 0 ? 'bg-amber-500/5 text-amber-600' : 'bg-emerald-500/5 text-emerald-600'}`}>
                               <span className="opacity-70">المتبقي:</span>
-                              <span className="font-mono">{invoice.remainingAmount?.toLocaleString() || 0}</span>
+                              <span className="font-mono">{formatNumberWithCommas(invoice.remainingAmount || 0)}</span>
                            </div>
                         </div>
                         <div className="flex justify-between items-center">
@@ -726,12 +728,12 @@ const SupplierAccountPage = ({
                                 <div className="text-[10px] text-muted-foreground">{format(payment.date, 'yyyy/MM/dd HH:mm')}</div>
                              </div>
                           </div>
-                          <div className="text-lg font-black text-emerald-500 font-mono">-{payment.amount.toLocaleString()}</div>
+                          <div className="text-lg font-black text-emerald-500 font-mono">-{formatNumberWithCommas(payment.amount)}</div>
                        </CardHeader>
                        <CardContent className="p-4 pt-0">
                           <p className="text-xs text-muted-foreground mb-4">{payment.notes || 'لا يوجد ملاحظات على هذه الدفعة'}</p>
                           {payment.imageUrl && (
-                             <div className="w-32 h-32 rounded-lg border border-border overflow-hidden cursor-zoom-in" onClick={() => window.open(payment.imageUrl, '_blank')}>
+                             <div className="w-32 h-32 rounded-lg border border-border overflow-hidden cursor-zoom-in" onClick={() => onShowImage?.(payment.imageUrl)}>
                                 <img src={payment.imageUrl} alt="Bond" className="w-full h-full object-cover" />
                              </div>
                           )}
@@ -761,7 +763,7 @@ const SupplierAccountPage = ({
                     </CardHeader>
                     <CardContent className="p-4 pt-0 space-y-4">
                        <div className="flex justify-between items-center">
-                          <div className="text-xl font-black text-foreground font-mono">{bonus.amount?.toLocaleString() || 0}</div>
+                          <div className="text-xl font-black text-foreground font-mono">{formatNumberWithCommas(bonus.amount || 0)}</div>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                              bonus.status === 'received' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'
                           }`}>
@@ -781,7 +783,7 @@ const SupplierAccountPage = ({
           <TabsContent value="attachments" className="animate-in fade-in zoom-in-95 duration-300">
              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                 {ledgerEntries.filter(e => e.imageUrl || e.receiptImageUrl).map((e) => (
-                  <Card key={e.id} className="group relative aspect-square overflow-hidden border-border bg-muted cursor-zoom-in hover:border-emerald-500 transition-all" onClick={() => window.open(e.imageUrl || e.receiptImageUrl, '_blank')}>
+                  <Card key={e.id} className="group relative aspect-square overflow-hidden border-border bg-muted cursor-zoom-in hover:border-emerald-500 transition-all" onClick={() => onShowImage?.(e.imageUrl || e.receiptImageUrl || '')}>
                     <img src={e.imageUrl || e.receiptImageUrl} alt="Attachment" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-all">
                        <span className="text-[10px] text-white font-bold">{e.operationType === 'invoice' ? 'صورة فاتورة' : 'صورة وصل'}</span>
@@ -812,7 +814,7 @@ const SupplierAccountPage = ({
                          <div className="flex justify-between items-center">
                             <h4 className="text-sm font-bold text-foreground">
                                {item.operationType === 'invoice' ? `أضافة فاتورة جديدة رقم ${item.invoiceNumber}` :
-                                item.operationType === 'payment' ? `تسديد دفعة مالية بمبلغ ${item.amount.toLocaleString()}` :
+                                item.operationType === 'payment' ? `تسديد دفعة مالية بمبلغ ${formatIQD(item.amount)}` :
                                 `تسجيل بونص جديد: ${item.description}`}
                             </h4>
                             <span className="text-[10px] text-muted-foreground font-mono">{format(item.createdAt, 'yyyy/MM/dd HH:mm')}</span>
@@ -830,7 +832,7 @@ const SupplierAccountPage = ({
 };
 
 export default function App() {
-  const { user, isDriveLinked, loading: authLoading } = useGoogleAuth();
+  const { user, isDriveLinked, loading: authLoading, linkDrive, unlinkDrive } = useGoogleAuth();
   
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('theme') as Theme) || 'dark');
 
@@ -859,7 +861,22 @@ export default function App() {
   
   // States from hooks.txt
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState('finance');
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('pharma-active-tab') || 'finance');
+  
+  // Database health check
+  useEffect(() => {
+    localDb.open().then(() => {
+      console.log("Database connection established");
+    }).catch(err => {
+      console.error("Database connection failed:", err);
+      toast.error('حدث خطأ في الاتصال بقاعدة البيانات');
+    });
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('pharma-active-tab', activeTab);
+  }, [activeTab]);
+
   const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [appModeSetting, setAppModeSetting] = useState<'auto' | 'laptop' | 'mobile'>(() => {
@@ -890,7 +907,25 @@ export default function App() {
 
   const [currentBranchId, setCurrentBranchId] = useState<string | null>(localStorage.getItem('pharma-current-branch-id'));
 
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [includeHistorical, setIncludeHistorical] = useState(() => localStorage.getItem('pharma-include-historical') !== 'false');
+  useEffect(() => {
+    localStorage.setItem('pharma-include-historical', includeHistorical.toString());
+  }, [includeHistorical]);
+
+  const handleUpdateInvoiceImage = async (invoice: LedgerEntry, imageUrl: string | null) => {
+    if (!invoice.id) return;
+    try {
+      await localDb.ledgerEntries.update(invoice.id, { imageUrl: imageUrl || '' });
+      setViewingInvoice(prev => prev ? { ...prev, imageUrl: imageUrl || '' } : null);
+      toast.success(imageUrl ? 'تم تحديث الصورة بنجاح' : 'تم حذف الصورة بنجاح');
+    } catch (err) {
+      toast.error('حدث خطأ أثناء تحديث الصورة');
+    }
+  };
+
   const handleSelectBranch = (id: string | null) => {
+    console.log("Setting selected branch:", id);
     setCurrentBranchId(id);
     if (id) {
       localStorage.setItem('pharma-current-branch-id', id);
@@ -900,9 +935,19 @@ export default function App() {
     toast.success(id ? 'تم التبديل لمكان العمل المختار' : 'تم تفعيل العرض الموحد');
   };
 
+  // Persist selected branch
+  useEffect(() => {
+    if (currentBranchId) {
+      localStorage.setItem('pharma-current-branch-id', currentBranchId);
+    } else {
+      localStorage.removeItem('pharma-current-branch-id');
+    }
+  }, [currentBranchId]);
+
   const branches = useLiveQuery(() => localDb.branches.toArray()) || [];
 
   const transactions = useLiveQuery(() => {
+    console.log("Loading records... (Transactions)");
     let query = localDb.transactions.orderBy('date').reverse();
     if (currentBranchId) {
       return localDb.transactions.where('branchId').equals(currentBranchId).reverse().sortBy('date');
@@ -911,8 +956,15 @@ export default function App() {
   }, [currentBranchId]) || [];
 
   const entities = useLiveQuery(() => {
+    console.log("Loading records... (Entities)");
     if (currentBranchId) return localDb.entities.where('branchId').equals(currentBranchId).toArray();
     return localDb.entities.toArray();
+  }, [currentBranchId]) || [];
+
+  const customerDebts = useLiveQuery(() => {
+    console.log("Loading records... (CustomerDebts)");
+    if (currentBranchId) return localDb.customerDebts.where('branchId').equals(currentBranchId).toArray();
+    return localDb.customerDebts.toArray();
   }, [currentBranchId]) || [];
 
   const notifications = useLiveQuery(() => {
@@ -940,12 +992,47 @@ export default function App() {
     return localDb.ledgerEntries.toArray();
   }, [currentBranchId]) || [];
 
-  const customerDebts = useLiveQuery(() => {
-    if (currentBranchId) return localDb.customerDebts.where('branchId').equals(currentBranchId).toArray();
-    return localDb.customerDebts.toArray();
+  const historicalRecords = useLiveQuery(() => {
+    if (currentBranchId) return localDb.historicalRecords.where('branchId').equals(currentBranchId).toArray();
+    return localDb.historicalRecords.toArray();
   }, [currentBranchId]) || [];
 
   const [appUser, setAppUser] = useState<AppUser | null>(null);
+
+  // Assign branchId to orphaned records if a branch is selected
+  useEffect(() => {
+    const migrateOrphanedRecords = async () => {
+      if (!currentBranchId) return;
+      
+      console.log("Checking for orphaned records to assign to current branch:", currentBranchId);
+      
+      const orphanedTransactions = await localDb.transactions.filter(t => !t.branchId).toArray();
+      if (orphanedTransactions.length > 0) {
+        console.log(`Migrating ${orphanedTransactions.length} transactions to branch ${currentBranchId}`);
+        for (const tx of orphanedTransactions) {
+          if (tx.id) await localDb.transactions.update(tx.id, { branchId: currentBranchId });
+        }
+      }
+
+      const orphanedEntities = await localDb.entities.filter(e => !e.branchId).toArray();
+      if (orphanedEntities.length > 0) {
+        console.log(`Migrating ${orphanedEntities.length} entities to branch ${currentBranchId}`);
+        for (const ent of orphanedEntities) {
+          if (ent.id) await localDb.entities.update(ent.id, { branchId: currentBranchId });
+        }
+      }
+
+      const orphanedDebts = await localDb.customerDebts.filter(d => !d.branchId).toArray();
+      if (orphanedDebts.length > 0) {
+        console.log(`Migrating ${orphanedDebts.length} customer debts to branch ${currentBranchId}`);
+        for (const debt of orphanedDebts) {
+          if (debt.id) await localDb.customerDebts.update(debt.id, { branchId: currentBranchId });
+        }
+      }
+    };
+
+    migrateOrphanedRecords();
+  }, [currentBranchId, (branches || []).length]);
   const userPermissions = useMemo(() => {
     if (!appUser) return { canManageBranches: false, canViewReports: false, canEditTransactions: false };
     const isAdmin = appUser.role === 'admin';
@@ -958,6 +1045,7 @@ export default function App() {
 
   const navItems = [
     { id: 'finance', label: 'الرئيسية', icon: LayoutDashboard },
+    { id: 'daily-entry', label: 'الإدخال اليومي', icon: PlusCircle },
     { id: 'revenues', label: 'الإيرادات', icon: CreditCard },
     { id: 'entities', label: 'الموردون والمذاخر', icon: Building2 },
     { id: 'employees', label: 'الموظفون', icon: Users },
@@ -966,7 +1054,9 @@ export default function App() {
     { id: 'transactions', label: 'المصاريف العامة', icon: ArrowUpCircle },
     { id: 'notifications', label: 'الإشعارات', icon: Bell, badge: (notifications || []).filter(n => !n.read).length },
     { id: 'reports', label: 'التقارير', icon: PieChart },
+    { id: 'medicine-requests', label: 'طلبات الأدوية', icon: PackageSearch },
     { id: 'branches', label: 'إدارة الصيدليات', icon: Building2 },
+    { id: 'historical', label: 'الأرصدة والترحيل التاريخي', icon: History },
     { id: 'settings', label: 'الإعدادات', icon: Settings },
   ].filter(item => {
     if (item.id === 'branches') return userPermissions.canManageBranches;
@@ -1024,7 +1114,7 @@ export default function App() {
   const [invPurchaseType, setInvPurchaseType] = useState<'cash' | 'credit'>('credit');
   const [invBonus, setInvBonus] = useState<string>('0');
   
-  const [payAmount, setPayAmount] = useState<string>('');
+  const [payAmount, setPayAmount] = useState<number>(0);
   const [payDiscount, setPayDiscount] = useState<string>('0');
   const [payRefund, setPayRefund] = useState<string>('0');
   const [payLinkedInvoice, setPayLinkedInvoice] = useState<string>('');
@@ -1041,7 +1131,7 @@ export default function App() {
   const [dlRecImageFile, setDlRecImageFile] = useState<File | null>(null);
   const [editLeImageFile, setEditLeImageFile] = useState<File | null>(null);
 
-  const [isAppAuthenticated, setIsAppAuthenticated] = useState(false);
+  const [isAppAuthenticated, setIsAppAuthenticated] = useState(() => localStorage.getItem('pharma-is-authenticated') === 'true');
   const [authStatusLoading, setAuthStatusLoading] = useState(true);
   const [authUsername, setAuthUsername] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -1117,6 +1207,53 @@ export default function App() {
     }
   };
 
+  // Requirement: Auto-create default branch if none exist
+  useEffect(() => {
+    const initDefaultBranch = async () => {
+      if (branches.length === 0 && authStep === 'authenticated') {
+        process.env.NODE_ENV !== 'production' && console.log("No branches found, creating default branch...");
+        
+        const defaultBranch = {
+          id: 'main',
+          name: 'الفرع الرئيسي',
+          code: 'MAIN01',
+          ownerId: appUser?.userId || user?.uid || 'guest',
+          status: 'active',
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as any;
+        
+        try {
+          // Check if main branch already exists to avoid collisions if branches.length cache was stale
+          const existingMain = await localDb.branches.get('main');
+          if (!existingMain) {
+            await localDb.branches.add(defaultBranch);
+            console.log("Default branch 'main' created successfully");
+          }
+        } catch (err) {
+          console.error("Failed to create default branch:", err);
+        }
+      }
+    };
+    initDefaultBranch();
+  }, [branches.length, authStep, appUser?.userId, user?.uid]);
+
+  // Requirement: Auto-select first branch if none selected and branches exist
+  useEffect(() => {
+    if (!currentBranchId && branches.length > 0) {
+      const savedBranchId = localStorage.getItem('pharma-current-branch-id');
+      if (savedBranchId && branches.some(b => b.id === savedBranchId)) {
+        console.log("Restoring selected branch from localStorage:", savedBranchId);
+        setCurrentBranchId(savedBranchId);
+      } else {
+        const firstActive = branches.find(b => b.status === 'active') || branches[0];
+        console.log("Auto-selecting first active branch:", firstActive.name);
+        setCurrentBranchId(firstActive.id || null);
+        localStorage.setItem('pharma-current-branch-id', firstActive.id || '');
+      }
+    }
+  }, [branches.length, currentBranchId]);
+
   // Stats logic
   const stats = useMemo(() => {
     const today = startOfDay(new Date());
@@ -1158,9 +1295,15 @@ export default function App() {
     const bEntities = entities;
     
     // Total Revenue (All time or monthly? User usually means monthly for current performance)
-    const totalRevenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+    const histSales = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalSales || 0), 0) : 0;
+    const histProfits = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalProfits || 0) + (r.retainedEarnings || 0), 0) : 0;
+    const histExpenses = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalExpenses || 0) + (r.accumulatedExpenses || 0), 0) : 0;
+    const histPurchases = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalPurchases || 0), 0) : 0;
+    const histDues = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalDebtOwed || 0) + (r.officeDebts || 0) + (r.warehouseDebts || 0), 0) : 0;
+
+    const totalRevenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0) + histSales;
     const totalExpense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0) + 
-      employeeAttendance.reduce((acc, record) => acc + record.dailyWage, 0);
+      employeeAttendance.reduce((acc, record) => acc + record.dailyWage, 0) + histExpenses;
     
     return {
       dailyRevenue,
@@ -1168,13 +1311,13 @@ export default function App() {
       monthlyExpense,
       netProfit,
       profitPercentage,
-      supplierDues,
+      supplierDues: supplierDues + histDues,
       dueInvoices: dueInvoicesCount,
       totalRevenue,
       totalExpense,
-      totalNetProfit: totalRevenue - totalExpense
+      totalNetProfit: (totalRevenue - totalExpense) + histProfits // Profits are usually added separately or part of revenue
     };
-  }, [transactions, entities, allLedgerEntries, employeeAttendance]);
+  }, [transactions, entities, allLedgerEntries, employeeAttendance, historicalRecords, includeHistorical]);
 
   const branchComparison = useMemo(() => {
     if (branches.length === 0) return [];
@@ -1239,6 +1382,8 @@ export default function App() {
   };
 
   const handleAddEntity = async (data: any) => {
+    console.log("Saving record... (Entity)");
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
     const initialBalance = Number(data.initialBalance) || 0;
     const newEntity: Omit<Entity, 'id'> = {
       name: data.name as string,
@@ -1250,42 +1395,57 @@ export default function App() {
       totalInvoices: 0,
       totalPayments: 0,
       limit: Number(data.limit) || 0,
-      branchId: currentBranchId || undefined,
+      branchId: (targetBranchId as string) || undefined,
       ownerId: user?.uid || 'guest',
       createdAt: new Date()
-    };
+    } as any;
     
+    // Add updatedAt if it's missing in interface (cast as any)
+    (newEntity as any).updatedAt = new Date();
+
     try {
       await localDb.entities.add(newEntity as Entity);
+      console.log("Saved successfully (Entity)");
       setIsAddEntityOpen(false);
       toast.success('تم إضافة المورد بنجاح');
     } catch (err) {
+      console.error("Failed to save entity:", err);
       toast.error('حدث خطأ أثناء إضافة المورد');
     }
   };
 
   const handleAddEmployee = async (data: Partial<Employee>) => {
+    console.log("Saving record... (Employee)");
     if (!appUser) return;
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+
     try {
       await localDb.employees.add({
         ...data as Employee,
-        branchId: currentBranchId || undefined,
+        branchId: (targetBranchId as string) || undefined,
         ownerId: appUser.userId,
         createdAt: new Date(),
-      });
+        updatedAt: new Date(),
+      } as any);
+      console.log("Saved successfully (Employee)");
       toast.success('تم إضافة الموظف بنجاح');
     } catch (error) {
-      console.error(error);
+      console.error("Failed to save employee:", error);
       toast.error('فشل في إضافة الموظف');
     }
   };
 
   const handleUpdateEmployee = async (id: string, data: Partial<Employee>) => {
+    console.log("Updating record... (Employee)");
     try {
-      await localDb.employees.update(id, data);
+      await localDb.employees.update(id, {
+        ...data,
+        updatedAt: new Date()
+      } as any);
+      console.log("Updated successfully (Employee)");
       toast.success('تم تحديث بيانات الموظف');
     } catch (error) {
-      console.error(error);
+      console.error("Failed to update employee:", error);
       toast.error('فشل في تحديث البيانات');
     }
   };
@@ -1304,17 +1464,22 @@ export default function App() {
   };
 
   const handleAddAttendance = async (data: Partial<EmployeeAttendance>) => {
+    console.log("Saving record... (Attendance)");
     if (!appUser) return;
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+    
     try {
       await localDb.employeeAttendance.add({
         ...data as EmployeeAttendance,
-        branchId: currentBranchId || undefined,
+        branchId: targetBranchId as string | undefined,
         ownerId: appUser.userId,
         createdAt: new Date(),
-      });
+        updatedAt: new Date(),
+      } as any);
+      console.log("Saved successfully (Attendance)");
       toast.success('تم تسجيل الحضور بنجاح');
     } catch (error) {
-      console.error(error);
+      console.error("Failed to save attendance:", error);
       toast.error('فشل في تسجيل الحضور');
     }
   };
@@ -1340,18 +1505,33 @@ export default function App() {
   };
 
   const handleAddBranch = async (data: Partial<PharmacyBranch>) => {
+    console.log("Saving record... (Branch)");
     if (!appUser) return;
     try {
-      await localDb.branches.add({
-        ...data as PharmacyBranch,
+      const allBranches = await localDb.branches.toArray();
+      const nextNum = (allBranches.length > 0) 
+        ? Math.max(...allBranches.map(b => {
+             const num = parseInt(b.code?.split('-')[1] || '0');
+             return isNaN(num) ? 0 : num;
+          })) + 1 
+        : 1;
+      const code = `BR-${nextNum.toString().padStart(4, '0')}`;
+      
+      const newBranch: PharmacyBranch = {
+        ...data as any,
+        code,
         ownerId: appUser.userId,
         createdAt: new Date(),
-        status: 'active'
-      });
-      toast.success('تم إضافة الصيدلية/الفرع بنجاح');
+        updatedAt: new Date(),
+        status: data.activationCode ? 'active' : 'pending' 
+      } as any;
+
+      await localDb.branches.add(newBranch);
+      console.log("Saved successfully (Branch)");
+      toast.success(newBranch.status === 'active' ? 'تم تفعيل وربط الفرع الجديد بنجاح' : 'تم تسجيل الفرع. بانتظار التفعيل الإداري');
     } catch (error) {
-      console.error(error);
-      toast.error('فشل في الإضافة');
+      console.error("Failed to save branch:", error);
+      toast.error('فشل في عملية التسجيل');
     }
   };
 
@@ -1389,6 +1569,9 @@ export default function App() {
   };
 
   const handleAddInvoice = async (data: any) => {
+    console.log("Saving record... (Invoice)");
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+
     const entityToInvoice = entities.find(e => e.id === data.accountId) || selectedEntity;
     if (!entityToInvoice?.id) return;
     
@@ -1400,7 +1583,11 @@ export default function App() {
     
     let imageUrl = '';
     if (invImageFile) {
-      imageUrl = URL.createObjectURL(invImageFile);
+      try {
+        imageUrl = await fileToBase64(invImageFile);
+      } catch (e) {
+        console.error('Error converting image to base64', e);
+      }
     }
 
     const newEntry: Omit<LedgerEntry, 'id'> = {
@@ -1424,33 +1611,39 @@ export default function App() {
       imageUrl,
       notes: data.notes as string,
       ownerId: user?.uid || 'guest',
-      branchId: currentBranchId || undefined,
+      branchId: (targetBranchId as string) || undefined,
       createdAt: new Date()
-    };
+    } as any;
     
+    // Add updatedAt
+    (newEntry as any).updatedAt = new Date();
+
     try {
-      await localDb.ledgerEntries.add(newEntry as LedgerEntry);
+      const addedId = await localDb.ledgerEntries.add(newEntry as LedgerEntry);
       await localDb.entities.update(entityToInvoice.id, {
         balance: entityToInvoice.balance + netAmount,
-        totalInvoices: entityToInvoice.totalInvoices + 1
-      });
+        totalInvoices: entityToInvoice.totalInvoices + 1,
+        updatedAt: new Date()
+      } as any);
 
       if (newEntry.dueDate) {
         await localDb.deadlines.add({
           accountId: entityToInvoice.id,
           accountName: entityToInvoice.name,
-          invoiceId: '', 
+          invoiceId: addedId.toString(), 
           invoiceNumber: newEntry.invoiceNumber || '',
           amount: newEntry.amount,
           requiredPayment: newEntry.netAmount,
           dueDate: newEntry.dueDate,
           status: 'pending',
           ownerId: user?.uid || 'guest',
-          branchId: currentBranchId || undefined,
-          createdAt: new Date()
-        });
+          branchId: targetBranchId as string | undefined,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as any);
       }
 
+      console.log("Saved successfully (Invoice)");
       setIsAddInvoiceOpen(false);
       setInvAmount('');
       setInvDiscount('0');
@@ -1458,12 +1651,14 @@ export default function App() {
       setInvImageFile(null);
       toast.success('تم إضافة الفاتورة بنجاح');
     } catch (err) {
+      console.error("Failed to save invoice:", err);
       toast.error('حدث خطأ أثناء إضافة الفاتورة');
     }
   };
 
   const handleAddDeadline = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("Saving record... (Deadline)");
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
     
@@ -1476,6 +1671,8 @@ export default function App() {
       return;
     }
 
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : undefined);
+
     const newDeadline: Omit<Deadline, 'id'> = {
       accountId: entityId,
       accountName: targetEntity.name,
@@ -1487,23 +1684,30 @@ export default function App() {
       notes: formData.get('notes') as string,
       status: 'pending',
       ownerId: user?.uid || 'guest',
-      branchId: currentBranchId || undefined,
+      branchId: (targetBranchId as string) || undefined,
       createdAt: new Date()
-    };
+    } as any;
     
+    (newDeadline as any).updatedAt = new Date();
+
     try {
       await localDb.deadlines.add(newDeadline as Deadline);
+      console.log("Saved successfully (Deadline)");
       setIsAddDeadlineOpen(false);
       toast.success('تم إضافة موعد السداد بنجاح');
     } catch (err) {
+      console.error("Failed to save deadline:", err);
       toast.error('حدث خطأ أثناء إضافة موعد السداد');
     }
   };
 
   const handleAddBonus = async (data: any) => {
+    console.log("Saving record... (Bonus)");
     const bonusEntity = entities.find(e => e.id === data.entityId) || viewingEntityDetail || selectedEntity;
     if (!bonusEntity?.id) return;
     
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+
     const newBonus: Omit<Bonus, 'id'> = {
       entityId: bonusEntity.id,
       entityName: bonusEntity.name,
@@ -1513,23 +1717,30 @@ export default function App() {
       status: data.status,
       notes: data.notes as string,
       ownerId: user?.uid || 'guest',
-      branchId: currentBranchId || undefined,
+      branchId: (targetBranchId as string) || undefined,
       createdAt: new Date()
-    };
+    } as any;
     
+    (newBonus as any).updatedAt = new Date();
+
     try {
       await localDb.bonuses.add(newBonus as Bonus);
+      console.log("Saved successfully (Bonus)");
       setIsAddBonusOpen(false);
       toast.success('تم إضافة البونص بنجاح');
     } catch (err) {
+      console.error("Failed to save bonus:", err);
       toast.error('حدث خطأ أثناء إضافة البونص');
     }
   };
 
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("Saving record... (Payment)");
     if (!selectedEntity?.id) return;
     
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
     
@@ -1540,7 +1751,11 @@ export default function App() {
     
     let receiptImageUrl = '';
     if (payImageFile) {
-      receiptImageUrl = URL.createObjectURL(payImageFile);
+      try {
+        receiptImageUrl = await fileToBase64(payImageFile);
+      } catch (e) {
+        console.error('Error converting receipt image to base64', e);
+      }
     }
 
     const newEntry: Omit<LedgerEntry, 'id'> = {
@@ -1559,12 +1774,15 @@ export default function App() {
       receiptImageUrl,
       notes: formData.get('notes') as string,
       ownerId: user?.uid || 'guest',
-      branchId: currentBranchId || undefined,
+      branchId: (targetBranchId as string) || undefined,
       createdAt: new Date()
-    };
+    } as any;
     
+    (newEntry as any).updatedAt = new Date();
+
     try {
       await localDb.ledgerEntries.add(newEntry as LedgerEntry);
+      console.log("Saved successfully (Payment)");
       
       // Update linked invoice status if applicable
       if (viewingInvoice?.id) {
@@ -1581,14 +1799,16 @@ export default function App() {
         await localDb.ledgerEntries.update(viewingInvoice.id, {
           paidAmount: currentPaid,
           remainingAmount: currentRemaining,
-          paymentStatus: status
-        });
+          paymentStatus: status,
+          updatedAt: new Date()
+        } as any);
       }
 
       await localDb.entities.update(selectedEntity.id, {
         balance: selectedEntity.balance - totalEffect,
-        totalPayments: selectedEntity.totalPayments + 1
-      });
+        totalPayments: selectedEntity.totalPayments + 1,
+        updatedAt: new Date()
+      } as any);
 
       setIsAddPaymentOpen(false);
       setViewingInvoice(null);
@@ -1599,12 +1819,14 @@ export default function App() {
       setPayImageFile(null);
       toast.success('تم إضافة الدفعة بنجاح');
     } catch (err) {
+      console.error("Failed to save payment:", err);
       toast.error('حدث خطأ أثناء إضافة الدفعة');
     }
   };
 
   const handleEditInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("Updating record... (Invoice)");
     if (!viewingInvoice?.id || !selectedEntity?.id) return;
     
     const form = e.target as HTMLFormElement;
@@ -1629,8 +1851,8 @@ export default function App() {
       dueDate: formData.get('dueDate') ? new Date(formData.get('dueDate') as string) : undefined,
       purchaseType: formData.get('purchaseType') as 'cash' | 'credit',
       notes: formData.get('notes') as string,
-      // Status update logic below
-    };
+      updatedAt: new Date()
+    } as any;
 
     // Correctly update paid and remaining based on edits
     updatedInvoice.remainingAmount = Math.max(0, netAmount - (updatedInvoice.paidAmount || 0));
@@ -1650,15 +1872,18 @@ export default function App() {
     }
 
     try {
-      await localDb.ledgerEntries.update(viewingInvoice.id, updatedInvoice);
+      await localDb.ledgerEntries.update(viewingInvoice.id, updatedInvoice as any);
       await localDb.entities.update(selectedEntity.id, {
-        balance: selectedEntity.balance + balanceDiff
-      });
+        balance: selectedEntity.balance + balanceDiff,
+        updatedAt: new Date()
+      } as any);
       
+      console.log("Updated successfully (Invoice)");
       setIsEditInvoiceOpen(false);
       setViewingInvoice(null);
-      toast.success('تم تحديث الفاتورة بنجاح');
+      toast.success('تم تحديث الفاتورة والميزانية بنجاح');
     } catch (err) {
+      console.error("Failed to update invoice:", err);
       toast.error('حدث خطأ أثناء تحديث الفاتورة');
     }
   };
@@ -1690,7 +1915,10 @@ export default function App() {
 
   const handleAddRefund = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("Saving record... (Refund)");
     if (!viewingInvoice?.id || !selectedEntity?.id) return;
+    
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : undefined);
     
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
@@ -1713,12 +1941,14 @@ export default function App() {
       notes: reason,
       balanceAfterOperation: selectedEntity.balance - refundAmount,
       ownerId: user?.uid || 'guest',
-      branchId: currentBranchId || undefined,
-      createdAt: new Date()
-    };
+      branchId: (targetBranchId as string) || undefined,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as any;
 
     try {
       await localDb.ledgerEntries.add(newRefundEntry as LedgerEntry);
+      console.log("Saved successfully (Refund)");
       
       const newRefundTotal = (viewingInvoice.refundAmount || 0) + refundAmount;
       const newPaid = (viewingInvoice.paidAmount || 0) + refundAmount; // Refund acts as reducing balance/paid? 
@@ -1739,12 +1969,14 @@ export default function App() {
         paidAmount: currentPaid,
         remainingAmount: currentRemaining,
         paymentStatus: status,
-        refundAmount: newRefundTotal
-      });
+        refundAmount: newRefundTotal,
+        updatedAt: new Date()
+      } as any);
       
       await localDb.entities.update(selectedEntity.id, {
-        balance: selectedEntity.balance - refundAmount
-      });
+        balance: selectedEntity.balance - refundAmount,
+        updatedAt: new Date()
+      } as any);
       
       setIsRefundInvoiceOpen(false);
       setViewingInvoice(null);
@@ -1755,9 +1987,14 @@ export default function App() {
   };
 
   const handleAddRevenue = async (data: any) => {
+    console.log("Saving record... (Revenue)");
+    
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+
     const newTx: Omit<Transaction, 'id'> = {
       type: 'income',
       incomeType: data.incomeType,
+      incomeClassification: data.incomeTypeCustom,
       category: 'revenue',
       amount: Number(data.amount),
       netProfit: Number(data.netProfit) || 0,
@@ -1765,15 +2002,17 @@ export default function App() {
       customerName: data.customerName as string || '',
       dueDate: data.dueDate,
       date: data.date,
-      description: data.incomeType === 'cash' ? 'وارد نقدي' : 'وارد دين (آجل)',
+      description: `${data.incomeTypeCustom || 'مبيعات'} - ${data.incomeType === 'cash' ? 'نقدي' : 'دين'}`,
       notes: data.notes as string,
-      branchId: currentBranchId || undefined,
+      branchId: targetBranchId as string | undefined,
       createdBy: user?.uid || 'guest',
-      createdAt: new Date()
-    };
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as any;
     
     try {
       await localDb.transactions.add(newTx as Transaction);
+      console.log("Saved successfully (Revenue)");
       setIsAddRevenueOpen(false);
       // Reset form states
       setSaleAmount('');
@@ -1781,11 +2020,16 @@ export default function App() {
       setSaleProfitPercentage('');
       toast.success('تم إضافة الوارد بنجاح');
     } catch (err) {
+      console.error("Failed to save record (Revenue):", err);
       toast.error('حدث خطأ أثناء إضافة الوارد');
     }
   };
 
   const handleAddExpense = async (data: any) => {
+    console.log("Saving record... (Expense)");
+
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+
     // Generate a detailed description based on category and additional fields
     let detailedDescription = data.description;
     if (data.category === 'rent') {
@@ -1803,22 +2047,26 @@ export default function App() {
       date: data.date,
       description: detailedDescription,
       notes: data.notes as string,
-      branchId: currentBranchId || undefined,
+      branchId: targetBranchId as string | undefined,
       createdBy: user?.uid || 'guest',
-      createdAt: new Date()
-    };
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as any;
     
     try {
       await localDb.transactions.add(newTx as Transaction);
+      console.log("Saved successfully (Expense)");
       setIsAddExpenseOpen(false);
       toast.success('تم إضافة المصروف بنجاح');
     } catch (err) {
+      console.error("Failed to save record (Expense):", err);
       toast.error('حدث خطأ أثناء إضافة المصروف');
     }
   };
 
   const handleEditTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("Updating record... (Transaction)");
     if (!selectedTransaction?.id) return;
     
     const form = e.target as HTMLFormElement;
@@ -1826,17 +2074,21 @@ export default function App() {
     
     const updatedTx: Partial<Transaction> = {
       category: formData.get('category') as string,
+      incomeClassification: formData.get('incomeClassification') as string,
       amount: Number(formData.get('amount')),
       date: new Date(formData.get('date') as string),
       description: formData.get('description') as string,
       notes: formData.get('notes') as string,
-    };
+      updatedAt: new Date()
+    } as any;
     
     try {
       await localDb.transactions.update(selectedTransaction.id, updatedTx);
+      console.log("Updated successfully (Transaction)");
       setIsEditTransactionOpen(false);
       toast.success('تم تحديث الحركة بنجاح');
     } catch (err) {
+      console.error("Failed to update transaction:", err);
       toast.error('حدث خطأ أثناء تحديث الحركة');
     }
   };
@@ -1893,6 +2145,7 @@ export default function App() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (appUser && appUser.password === authPassword) {
+      localStorage.setItem('pharma-is-authenticated', 'true');
       setAuthStep('authenticated');
       setIsAppAuthenticated(true);
       toast.success('مرحباً بك مجدداً');
@@ -1905,12 +2158,17 @@ export default function App() {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center gap-4 bg-background" dir="rtl">
         <motion.div 
-          animate={{ rotate: 360 }} 
-          transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+          animate={{ rotate: 360, scale: [1, 1.1, 1] }} 
+          transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+          className="relative"
         >
-          <RefreshCcw className="h-10 w-10 text-primary" />
+          <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full" />
+          <Package className="h-12 w-12 text-primary relative z-10" />
         </motion.div>
-        <p className="text-muted-foreground font-medium">جاري التجهيز...</p>
+        <div className="flex flex-col items-center">
+          <p className="text-foreground font-black text-lg">صيدليتي</p>
+          <p className="text-muted-foreground font-bold text-sm">جاري تحميل بياناتك بأمان...</p>
+        </div>
       </div>
     );
   }
@@ -2133,14 +2391,12 @@ export default function App() {
             <div className="hidden lg:flex flex-col items-start gap-1">
               <span className="text-[10px] text-muted-foreground font-bold tracking-widest uppercase">مكان العمل الحالي</span>
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2 group outline-none">
-                    <Building2 className="h-4 w-4 text-primary" />
-                    <span className="text-sm font-black text-foreground group-hover:text-primary transition-colors">
-                      {branches.find(b => b.id === currentBranchId)?.name || 'العرض الموحد'}
-                    </span>
-                    <ChevronDown className="h-3 w-3 text-muted-foreground group-hover:text-primary transition-all" />
-                  </button>
+                <DropdownMenuTrigger className="flex items-center gap-2 group outline-none">
+                  <Building2 className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-black text-foreground group-hover:text-primary transition-colors">
+                    {branches.find(b => b.id === currentBranchId)?.name || 'جميع الفروع'}
+                  </span>
+                  <ChevronDown className="h-3 w-3 text-muted-foreground group-hover:text-primary transition-all" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="bg-card border-border text-foreground w-64 p-2 rounded-xl shadow-2xl z-50">
                    <DropdownMenuItem 
@@ -2149,12 +2405,13 @@ export default function App() {
                    >
                      <LayoutDashboard className="h-4 w-4" />
                      <div className="flex flex-col text-right">
-                        <span className="font-black text-sm">العرض الموحد</span>
-                        <span className="text-[10px] font-bold text-muted-foreground">إحصائيات كل الفروع مجمعة</span>
+                        <span className="font-black text-sm">جميع الفروع</span>
+                        <span className="text-[10px] font-bold text-muted-foreground">إحصائيات المؤسسة بالكامل</span>
                      </div>
                    </DropdownMenuItem>
                    <DropdownMenuSeparator className="bg-border" />
-                   {branches.filter(b => b.status === 'active').map(branch => (
+                   <DropdownMenuLabel className="text-[10px] font-black text-muted-foreground px-3 py-2 uppercase">هذا الفرع (تبديل النطاق)</DropdownMenuLabel>
+                    {branches.filter(b => b.status === 'active').map(branch => (
                      <DropdownMenuItem 
                         key={branch.id}
                         className={`p-3 cursor-pointer rounded-lg gap-3 ${currentBranchId === branch.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}
@@ -2182,11 +2439,9 @@ export default function App() {
 
             <div className="flex items-center gap-2">
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className={`${effectiveAppMode === 'mobile' ? 'w-10 h-10 p-0' : 'h-11 px-6'} gap-2 border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 font-bold rounded-xl`}>
-                     <Plus className="h-4 w-4" />
-                     {effectiveAppMode !== 'mobile' && "إجراء سريع"}
-                  </Button>
+                <DropdownMenuTrigger className={`${effectiveAppMode === 'mobile' ? 'size-10' : 'h-11 px-6'} flex items-center justify-center gap-2 border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 font-bold rounded-xl outline-none transition-all`}>
+                   <Plus className="h-4 w-4" />
+                   {effectiveAppMode !== 'mobile' && "إجراء سريع"}
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-56 p-2 rounded-xl">
                   <DropdownMenuItem className="p-3 cursor-pointer hover:bg-muted rounded-lg gap-3" onClick={() => setIsAddInvoiceOpen(true)}>
@@ -2252,6 +2507,24 @@ export default function App() {
             {/* TabsList removed as navigation is now in the sidebar */}
 
           <TabsContent value="finance" className="space-y-8">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-card border border-border p-6 rounded-2xl shadow-sm">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-primary/10 rounded-xl">
+                    <History className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-foreground">عرض البيانات التاريخية</h3>
+                    <p className="text-xs text-muted-foreground font-bold">تضمين أرصدة الترحيل والأرصدة الافتتاحية في الإحصائيات العامة</p>
+                  </div>
+                </div>
+                <Button 
+                  variant={includeHistorical ? "default" : "outline"}
+                  onClick={() => setIncludeHistorical(!includeHistorical)}
+                  className={`rounded-xl px-6 h-11 font-black transition-all ${includeHistorical ? 'bg-primary shadow-lg shadow-primary/20' : 'border-border hover:bg-muted'}`}
+                >
+                  {includeHistorical ? 'تعطيل البيانات التاريخية' : 'تفعيل البيانات التاريخية'}
+                </Button>
+            </div>
             {/* Conditional Stats: Branch specific vs Unified */}
             <div className={`grid gap-4 md:gap-6 ${effectiveAppMode === 'laptop' ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1'}`}>
               {currentBranchId ? (
@@ -2270,8 +2543,7 @@ export default function App() {
                     </CardHeader>
                     <CardContent className="relative z-10 pb-4 md:pb-6">
                       <div className="text-2xl md:text-3xl font-black text-foreground font-mono tracking-tighter">
-                        {stat.isCount ? stat.value : stat.value.toLocaleString()}
-                        {!stat.isCount && <span className="text-[10px] text-muted-foreground mr-1 md:mr-2 font-sans font-bold whitespace-nowrap">د.ع</span>}
+                        {stat.isCount ? stat.value : formatIQD(stat.value)}
                       </div>
                       <div className="mt-1 md:mt-2 flex items-center gap-1.5">
                          <div className="h-1 w-1 md:h-1.5 md:w-1.5 rounded-full bg-primary animate-pulse" />
@@ -2296,8 +2568,7 @@ export default function App() {
                     </CardHeader>
                     <CardContent className="relative z-10 pb-4 md:pb-6">
                       <div className="text-2xl md:text-3xl font-black text-foreground font-mono tracking-tighter">
-                        {stat.value.toLocaleString()}
-                        <span className="text-[10px] text-muted-foreground mr-1 md:mr-2 font-sans font-bold whitespace-nowrap">د.ع</span>
+                        {formatIQD(stat.value)}
                       </div>
                       <div className="mt-1 md:mt-2 flex items-center gap-1.5">
                          <div className="h-1 w-1 md:h-1.5 md:w-1.5 rounded-full bg-primary animate-pulse" />
@@ -2398,7 +2669,7 @@ export default function App() {
                         <div key={branch.id} className="space-y-2 group">
                           <div className="flex justify-between items-end">
                              <span className="text-xs font-black text-foreground group-hover:text-primary transition-colors">{branch.name}</span>
-                             <span className="text-[10px] font-mono font-bold text-muted-foreground">{branch.revenue.toLocaleString()} د.ع</span>
+                             <span className="text-[10px] font-mono font-bold text-muted-foreground">{formatIQD(branch.revenue)}</span>
                           </div>
                           <div className="h-2 w-full bg-muted/50 rounded-full overflow-hidden border border-border/50">
                              <motion.div 
@@ -2408,8 +2679,8 @@ export default function App() {
                              />
                           </div>
                           <div className="flex justify-between items-center px-1">
-                             <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">صافي الربح: {branch.profit.toLocaleString()}</span>
-                             <span className="text-[9px] font-black text-rose-500 bg-rose-500/10 px-1.5 py-0.5 rounded">الديون: {branch.dues.toLocaleString()}</span>
+                             <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">صافي الربح: {formatIQD(branch.profit)}</span>
+                             <span className="text-[9px] font-black text-rose-500 bg-rose-500/10 px-1.5 py-0.5 rounded">الديون: {formatIQD(branch.dues)}</span>
                           </div>
                         </div>
                       ))}
@@ -2447,7 +2718,7 @@ export default function App() {
                   <div className="mt-6 flex items-center justify-between pt-6 border-t border-border">
                     <span className="text-xs text-muted-foreground font-bold">إجمالي أرباح الأسبوع</span>
                     <span className="text-xl font-black text-primary font-mono tracking-tighter">
-                      {chartData.reduce((acc, d) => acc + d.profit, 0).toLocaleString()}
+                      {formatNumberWithCommas(chartData.reduce((acc, d) => acc + d.profit, 0))}
                     </span>
                   </div>
                 </Card>
@@ -2466,7 +2737,7 @@ export default function App() {
                         </div>
                         <div className="flex-1 overflow-hidden">
                           <div className="text-xs font-black text-foreground truncate">{d.accountName}</div>
-                          <div className="text-[10px] text-muted-foreground font-bold">متبقي: {d.requiredPayment.toLocaleString()} د.ع</div>
+                          <div className="text-[10px] text-muted-foreground font-bold">متبقي: {formatIQD(d.requiredPayment)}</div>
                         </div>
                       </div>
                     ))}
@@ -2514,7 +2785,7 @@ export default function App() {
                               {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold mt-1">{tx.entityName}</div>}
                             </td>
                             <td className={`px-8 py-5 text-left font-black font-mono text-base ${tx.type === 'income' ? 'text-primary' : 'text-rose-500'}`}>
-                              {tx.type === 'income' ? '+' : '-'}{tx.amount.toLocaleString()}
+                              {tx.type === 'income' ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
                             </td>
                           </tr>
                         ))}
@@ -2538,7 +2809,7 @@ export default function App() {
                             {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold">{tx.entityName}</div>}
                           </div>
                           <div className={`font-black font-mono ${tx.type === 'income' ? 'text-primary' : 'text-rose-500'}`}>
-                            {tx.type === 'income' ? '+' : '-'}{tx.amount.toLocaleString()}
+                            {tx.type === 'income' ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
                           </div>
                         </div>
                         <div className="flex justify-between items-center text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
@@ -2563,7 +2834,7 @@ export default function App() {
                     <Receipt className="h-6 w-6 text-emerald-600 mb-4" />
                     <div className="text-[10px] font-black text-muted-foreground mb-1 tracking-widest uppercase text-center">إجمالي التسديدات</div>
                     <div className="text-3xl font-black text-emerald-600 font-mono tracking-tighter">
-                      {allLedgerEntries.filter(e => e.operationType === 'payment').reduce((acc, e) => acc + e.amount, 0).toLocaleString()}
+                      {formatNumberWithCommas(allLedgerEntries.filter(e => e.operationType === 'payment').reduce((acc, e) => acc + e.amount, 0))}
                       <span className="text-[10px] text-muted-foreground mr-2 font-sans font-bold italic tracking-normal">د.ع</span>
                     </div>
                  </div>
@@ -2574,7 +2845,7 @@ export default function App() {
                     <Calendar className="h-6 w-6 text-primary mb-4" />
                     <div className="text-[10px] font-black text-muted-foreground mb-1 tracking-widest uppercase text-center">تسديدات الشهر</div>
                     <div className="text-3xl font-black text-foreground font-mono tracking-tighter">
-                      {allLedgerEntries.filter(e => e.operationType === 'payment' && new Date(e.date) >= startOfMonth(new Date())).reduce((acc, e) => acc + e.amount, 0).toLocaleString()}
+                      {formatNumberWithCommas(allLedgerEntries.filter(e => e.operationType === 'payment' && new Date(e.date) >= startOfMonth(new Date())).reduce((acc, e) => acc + e.amount, 0))}
                       <span className="text-[10px] text-muted-foreground mr-2 font-sans font-bold italic tracking-normal">د.ع</span>
                     </div>
                  </div>
@@ -2634,7 +2905,7 @@ export default function App() {
                              </td>
                              <td className="px-8 py-6 font-mono text-muted-foreground font-bold">{entry.invoiceNumber || '---'}</td>
                              <td className="px-8 py-6 text-left font-black text-emerald-600 font-mono text-lg tracking-tighter">
-                               {entry.amount.toLocaleString()}
+                               {formatNumberWithCommas(entry.amount)}
                              </td>
                            </tr>
                          ))}
@@ -2663,7 +2934,7 @@ export default function App() {
                                 <div className="text-[10px] text-muted-foreground font-bold mt-0.5">رقم الوصل: {entry.invoiceNumber || '---'}</div>
                               </div>
                               <div className="text-lg font-black text-emerald-600 font-mono tracking-tighter">
-                                {entry.amount.toLocaleString()}
+                                {formatNumberWithCommas(entry.amount)}
                               </div>
                             </div>
                             <div className="flex justify-between items-center text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
@@ -2681,6 +2952,33 @@ export default function App() {
             </Card>
           </TabsContent>
 
+          <TabsContent value="daily-entry" className="space-y-6 animate-in fade-in duration-700">
+            <div className="max-w-4xl mx-auto">
+              <Card className="bg-card border-border rounded-3xl shadow-2xl overflow-hidden border-t-8 border-t-emerald-600">
+                <CardHeader className="px-8 py-10 bg-muted/20 border-b border-border">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-emerald-600 rounded-2xl text-white shadow-lg shadow-emerald-600/20">
+                      <PlusCircle className="h-8 w-8" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-2xl font-black text-foreground">الإدخال اليومي للإيرادات</CardTitle>
+                      <CardDescription className="text-muted-foreground font-bold">سجل مبيعاتك وخدماتك اليومية لضمان دقة التقارير المالية</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-8">
+                  <RevenueForm 
+                    onSubmit={(data) => {
+                      handleAddRevenue(data);
+                      setActiveTab('revenues');
+                    }} 
+                    onClose={() => setActiveTab('finance')} 
+                  />
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
           <TabsContent value="revenues" className="space-y-6 animate-in fade-in duration-700">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
@@ -2694,8 +2992,7 @@ export default function App() {
                     <stat.icon className={`h-6 w-6 ${stat.color} mb-4`} />
                     <span className="text-[10px] font-black text-muted-foreground mb-1 tracking-widest uppercase text-center">{stat.label}</span>
                     <span className="text-3xl font-black text-foreground font-mono tracking-tighter">
-                      {stat.value.toLocaleString()}
-                      {!stat.isCount && <span className="text-[10px] text-muted-foreground mr-2 font-sans font-bold italic tracking-normal">د.ع</span>}
+                      {stat.isCount ? stat.value : formatIQD(stat.value)}
                     </span>
                   </div>
                 </Card>
@@ -2709,14 +3006,20 @@ export default function App() {
                       <h2 className="text-2xl font-black text-foreground mb-1">سجل الإيرادات والديون</h2>
                       <p className="text-muted-foreground font-bold">متابعة تحصيلات الصيدلية الخارجية</p>
                     </div>
-                    <div className="relative w-full md:w-96 group">
-                      <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                      <Input 
-                        placeholder="ابحث باسم الزبون..." 
-                        className="bg-background border-border pr-12 h-12 rounded-xl text-foreground focus:ring-primary/20 placeholder:font-bold"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                      />
+                    <div className="flex items-center gap-4 w-full md:w-auto">
+                      <Button onClick={() => setActiveTab('daily-entry')} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black h-12 px-6 rounded-xl shadow-lg shadow-emerald-600/10 whitespace-nowrap">
+                        <Plus className="h-4 w-4" />
+                        إضافة إيراد يومي
+                      </Button>
+                      <div className="relative flex-1 md:w-80 group">
+                        <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                        <Input 
+                          placeholder="ابحث باسم الزبون..." 
+                          className="bg-background border-border pr-12 h-12 rounded-xl text-foreground focus:ring-primary/20 placeholder:font-bold"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                      </div>
                     </div>
                   </div>
                </CardHeader>
@@ -2750,9 +3053,9 @@ export default function App() {
                                   </span>
                                 </div>
                               </td>
-                              <td className="px-8 py-6 font-mono font-bold text-muted-foreground">{debt.totalAmount.toLocaleString()}</td>
-                              <td className="px-8 py-6 font-mono font-bold text-emerald-600">{debt.paidAmount.toLocaleString()}</td>
-                              <td className="px-8 py-6 text-left font-black text-rose-600 font-mono text-lg tracking-tighter">{debt.remainingAmount.toLocaleString()}</td>
+                              <td className="px-8 py-6 font-mono font-bold text-muted-foreground">{formatNumberWithCommas(debt.totalAmount)}</td>
+                              <td className="px-8 py-6 font-mono font-bold text-emerald-600">{formatNumberWithCommas(debt.paidAmount)}</td>
+                              <td className="px-8 py-6 text-left font-black text-rose-600 font-mono text-lg tracking-tighter">{formatNumberWithCommas(debt.remainingAmount)}</td>
                             </tr>
                           ))}
                         {customerDebts.length === 0 && (
@@ -2780,12 +3083,12 @@ export default function App() {
                               </span>
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-[10px] font-bold text-muted-foreground">
-                               <div className="bg-muted p-2 rounded-lg">إجمالي: {debt.totalAmount.toLocaleString()}</div>
-                               <div className="bg-emerald-500/5 text-emerald-600 p-2 rounded-lg">مسدد: {debt.paidAmount.toLocaleString()}</div>
+                               <div className="bg-muted p-2 rounded-lg">إجمالي: {formatNumberWithCommas(debt.totalAmount)}</div>
+                               <div className="bg-emerald-500/5 text-emerald-600 p-2 rounded-lg">مسدد: {formatNumberWithCommas(debt.paidAmount)}</div>
                             </div>
                             <div className="pt-2 border-t border-border/50 flex justify-between items-center">
                               <span className="text-[10px] font-black uppercase text-muted-foreground">المتبقي</span>
-                              <span className="font-black text-rose-600 font-mono text-lg">{debt.remainingAmount.toLocaleString()} د.ع</span>
+                              <span className="font-black text-rose-600 font-mono text-lg">{formatIQD(debt.remainingAmount)}</span>
                             </div>
                           </div>
                         ))}
@@ -2825,6 +3128,7 @@ export default function App() {
                   setIsAddPaymentOpen(true); 
                 }}
                 appMode={effectiveAppMode}
+                onShowImage={setLightboxImage}
               />
             ) : (
               <>
@@ -2853,7 +3157,7 @@ export default function App() {
                               </div>
                            </div>
                            <div className={`text-sm font-black px-4 py-2 rounded-xl font-mono tracking-tighter shadow-sm border-2 ${entity.balance > 0 ? 'bg-rose-500/5 text-rose-600 border-rose-500/10' : 'bg-emerald-500/5 text-emerald-600 border-emerald-500/10'}`}>
-                             {entity.balance.toLocaleString()}
+                             {formatNumberWithCommas(entity.balance)}
                            </div>
                         </div>
                       </CardHeader>
@@ -2941,7 +3245,7 @@ export default function App() {
                               </td>
                               <td className="px-8 py-6 text-xs text-muted-foreground font-mono font-bold">{format(entry.date, 'yyyy/MM/dd')}</td>
                               <td className="px-8 py-6 text-left">
-                                <div className="text-lg font-black text-emerald-600 font-mono tracking-tighter">{entry.netAmount.toLocaleString()}</div>
+                                <div className="text-lg font-black text-emerald-600 font-mono tracking-tighter">{formatNumberWithCommas(entry.netAmount)}</div>
                               </td>
                             </tr>
                           ))}
@@ -2970,7 +3274,7 @@ export default function App() {
                                 <div className="text-[10px] text-muted-foreground font-bold">{entry.accountName}</div>
                               </div>
                               <div className="text-lg font-black text-emerald-600 font-mono tracking-tighter">
-                                {entry.netAmount.toLocaleString()}
+                                {formatNumberWithCommas(entry.netAmount)}
                               </div>
                             </div>
                             <div className="flex justify-between items-center text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
@@ -3008,7 +3312,7 @@ export default function App() {
                   </CardHeader>
                   <CardContent className="p-6 relative z-10">
                     <div className="text-2xl font-black text-amber-600 font-mono tracking-tighter">
-                      {deadline.requiredPayment.toLocaleString()}
+                      {formatNumberWithCommas(deadline.requiredPayment)}
                       <span className="text-[10px] text-muted-foreground mr-2 font-sans font-bold italic tracking-normal">د.ع</span>
                     </div>
                     <div className="mt-4 pt-4 border-t border-border/50 flex items-center justify-between">
@@ -3080,7 +3384,7 @@ export default function App() {
                                 {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold mt-1 px-2.5 py-0.5 bg-muted rounded-full inline-block">{tx.entityName}</div>}
                               </td>
                               <td className={`px-8 py-6 font-black font-mono text-lg tracking-tighter ${tx.type === 'income' ? 'text-primary' : 'text-rose-600'}`}>
-                                {tx.type === 'income' ? '+' : '-'}{tx.amount.toLocaleString()}
+                                {tx.type === 'income' ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
                               </td>
                               <td className="px-8 py-6 text-center">
                                 <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all" onClick={() => {
@@ -3119,7 +3423,7 @@ export default function App() {
                               {tx.entityName && <div className="text-[9px] text-muted-foreground mt-1">{tx.entityName}</div>}
                             </div>
                             <div className={`text-xl font-black font-mono tracking-tighter ${tx.type === 'income' ? 'text-primary' : 'text-rose-600'}`}>
-                              {tx.type === 'income' ? '+' : '-'}{tx.amount.toLocaleString()}
+                              {tx.type === 'income' ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
                               <span className="text-[10px] mr-1 font-sans">د.ع</span>
                             </div>
                           </div>
@@ -3241,15 +3545,28 @@ export default function App() {
                    <h2 className="text-xl md:text-2xl font-black text-foreground">التقارير التحليلية</h2>
                    <p className="text-muted-foreground text-xs md:text-sm">نظرة شاملة على الأداء المالي والنشاط العام</p>
                  </div>
-                 <div className="flex gap-2">
-                   <Button variant="outline" className="border-border bg-card hover:bg-muted text-foreground gap-2 h-10 px-4 rounded-xl whitespace-nowrap text-xs">
-                     <Download className="h-4 w-4" />
-                     Excel
-                   </Button>
-                   <Button variant="outline" className="border-border bg-card hover:bg-muted text-foreground gap-2 h-10 px-4 rounded-xl whitespace-nowrap text-xs">
-                     <Printer className="h-4 w-4" />
-                     طباعة
-                   </Button>
+                 <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+                    <div className="flex items-center gap-3 bg-muted/50 px-4 py-2 rounded-xl border border-border">
+                       <Label className="text-xs font-black text-muted-foreground whitespace-nowrap cursor-pointer" onClick={() => setIncludeHistorical(!includeHistorical)}>تضمين البيانات التاريخية</Label>
+                       <Button 
+                        variant={includeHistorical ? "default" : "outline"} 
+                        size="sm"
+                        onClick={() => setIncludeHistorical(!includeHistorical)}
+                        className={`h-7 px-3 rounded-lg text-[10px] font-black ${includeHistorical ? 'bg-primary' : ''}`}
+                       >
+                         {includeHistorical ? 'مفعّل' : 'معطّل'}
+                       </Button>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="border-border bg-card hover:bg-muted text-foreground gap-2 h-10 px-4 rounded-xl whitespace-nowrap text-xs">
+                        <Download className="h-4 w-4" />
+                        Excel
+                      </Button>
+                      <Button variant="outline" className="border-border bg-card hover:bg-muted text-foreground gap-2 h-10 px-4 rounded-xl whitespace-nowrap text-xs">
+                        <Printer className="h-4 w-4" />
+                        طباعة
+                      </Button>
+                    </div>
                  </div>
                </div>
 
@@ -3264,7 +3581,7 @@ export default function App() {
                         <card.icon className="h-4 w-4" />
                         {card.label}
                      </div>
-                     <div className="text-2xl md:text-3xl font-black text-foreground font-mono tracking-tighter mb-4">{card.value.toLocaleString()}</div>
+                     <div className="text-2xl md:text-3xl font-black text-foreground font-mono tracking-tighter mb-4">{formatIQD(card.value)}</div>
                   {card.trend ? (
                         <div className="flex items-center gap-2 text-xs text-emerald-500 bg-emerald-500/5 px-3 py-1.5 rounded-full font-bold">
                            <TrendingUp className="h-3 w-3" />
@@ -3303,9 +3620,9 @@ export default function App() {
                               {branchComparison.map(branch => (
                                 <tr key={branch.id} className="hover:bg-primary/5 transition-colors group">
                                    <td className="px-6 py-5 font-black text-foreground group-hover:text-primary transition-colors">{branch.name}</td>
-                                   <td className="px-6 py-5 font-mono font-bold text-emerald-600">{branch.revenue.toLocaleString()}</td>
-                                   <td className="px-6 py-5 font-mono font-bold text-rose-600">{branch.expense.toLocaleString()}</td>
-                                   <td className="px-6 py-5 text-left font-mono font-black text-lg">{branch.profit.toLocaleString()}</td>
+                                   <td className="px-6 py-5 font-mono font-bold text-emerald-600">{formatIQD(branch.revenue)}</td>
+                                   <td className="px-6 py-5 font-mono font-bold text-rose-600">{formatIQD(branch.expense)}</td>
+                                   <td className="px-6 py-5 text-left font-mono font-black text-lg">{formatIQD(branch.profit)}</td>
                                 </tr>
                               ))}
                            </tbody>
@@ -3316,7 +3633,7 @@ export default function App() {
                                <div key={branch.id} className="p-4 bg-background/50 rounded-2xl border border-border/50 space-y-3 text-right">
                                  <div className="flex justify-between items-center">
                                    <div className="font-black text-foreground text-sm">{branch.name}</div>
-                                   <div className="text-base font-black font-mono">{branch.profit.toLocaleString()}</div>
+                                   <div className="text-base font-black font-mono">{formatIQD(branch.profit)}</div>
                                  </div>
                                </div>
                              ))}
@@ -3381,6 +3698,14 @@ export default function App() {
                </Card>
             </TabsContent>
 
+            <TabsContent value="historical" className="animate-in fade-in zoom-in-95 duration-300 pb-20 md:pb-0">
+               <HistoricalMigrationPage branchId={currentBranchId} ownerId={user?.uid || ''} />
+            </TabsContent>
+
+            <TabsContent value="medicine-requests" className="animate-in fade-in zoom-in-95 duration-300 pb-20 md:pb-0">
+               <MedicineRequestsPage branchId={currentBranchId} ownerId={user?.uid || ''} />
+            </TabsContent>
+
             <TabsContent value="settings" className="space-y-8 animate-in fade-in duration-500 pb-20 md:pb-0">
                <div>
                  <h2 className="text-2xl font-black text-foreground">إعدادات النظام</h2>
@@ -3404,10 +3729,66 @@ export default function App() {
                            <div className="text-sm font-bold text-foreground">حالة الربط</div>
                            <div className="text-[10px] text-muted-foreground truncate">{user?.email || 'غير متصل'}</div>
                          </div>
-                         <Button variant={isDriveLinked ? "outline" : "default"} className={isDriveLinked ? "border-border text-foreground size-sm" : "bg-emerald-600 hover:bg-emerald-700 size-sm"}>
+                         <Button 
+                            variant={isDriveLinked ? "outline" : "default"} 
+                            className={isDriveLinked ? "border-border text-foreground h-10 px-4" : "bg-emerald-600 hover:bg-emerald-700 h-10 px-6"}
+                            onClick={isDriveLinked ? unlinkDrive : linkDrive}
+                         >
                            {isDriveLinked ? 'إلغاء الربط' : 'ربط الحساب'}
                          </Button>
                        </div>
+                    </div>
+                  </Card>
+
+                  <Card className="bg-card border-border p-6 md:p-8 space-y-6 rounded-2xl shadow-sm">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-amber-500/10 text-amber-500 rounded-2xl">
+                        <History className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-black text-foreground">النسخ الاحتياطي JSON</h3>
+                        <p className="text-xs text-muted-foreground">تصدير واستيراد البيانات يدوياً</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 pt-4 border-t border-border">
+                       <Button 
+                         variant="outline" 
+                         className="h-11 border-border hover:bg-muted text-foreground/80 rounded-xl px-4 gap-2 font-bold"
+                         onClick={() => DataPersistenceService.exportToJSON()}
+                       >
+                         <Download className="h-4 w-4 text-emerald-500" />
+                         <span>تصدير</span>
+                       </Button>
+                       
+                       <div className="relative">
+                         <input 
+                           type="file" 
+                           id="import-backup-json" 
+                           className="hidden" 
+                           accept=".json" 
+                           onChange={(e) => {
+                             const file = e.target.files?.[0];
+                             if (file) DataPersistenceService.importFromJSON(file);
+                           }}
+                         />
+                         <Button 
+                           variant="outline" 
+                           className="w-full h-11 border-border hover:bg-muted text-foreground/80 rounded-xl px-4 gap-2 font-bold"
+                           onClick={() => document.getElementById('import-backup-json')?.click()}
+                         >
+                           <Upload className="h-4 w-4 text-blue-500" />
+                           <span>استيراد</span>
+                         </Button>
+                       </div>
+
+                       <Button 
+                         variant="ghost" 
+                         className="col-span-2 h-11 text-rose-500 hover:bg-rose-500/10 rounded-xl font-bold border border-rose-500/10"
+                         onClick={() => DataPersistenceService.factoryReset()}
+                       >
+                         <Trash2 className="h-4 w-4" />
+                         مسح كافة البيانات
+                       </Button>
                     </div>
                   </Card>
 
@@ -3426,10 +3807,48 @@ export default function App() {
                          <span className="text-sm font-bold">تغيير كلمة المرور</span>
                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
                        </Button>
-                       <Button variant="outline" className="w-full justify-between h-12 border-border hover:bg-muted text-rose-500 rounded-xl px-4 font-black" onClick={() => setIsAppAuthenticated(false)}>
+                       <Button variant="outline" className="w-full justify-between h-12 border-border hover:bg-muted text-rose-500 rounded-xl px-4 font-black" onClick={() => {
+                          localStorage.removeItem('pharma-is-authenticated');
+                          setIsAppAuthenticated(false);
+                       }}>
                          <span>تسجيل الخروج</span>
                          <LogOut className="h-4 w-4" />
                        </Button>
+                    </div>
+                  </Card>
+
+                  {/* Debug Panel as requested */}
+                  <Card className="bg-card border-border p-6 md:p-8 space-y-4 rounded-2xl border-dashed border-primary/30">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-rose-500/10 text-rose-500 rounded-2xl">
+                        <Bug className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-black text-foreground">لوحة المطور (Debug)</h3>
+                        <p className="text-xs text-muted-foreground">تشخيص حالة النظام والربط</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border text-[10px] font-mono">
+                       <div className="space-y-1">
+                         <div className="text-muted-foreground uppercase">Number of Branches</div>
+                         <div className="font-bold text-foreground">{branches.length}</div>
+                       </div>
+                       <div className="space-y-1">
+                         <div className="text-muted-foreground uppercase">Selected Branch ID</div>
+                         <div className="font-bold text-primary truncate max-w-[100px]">{currentBranchId || 'NULL (Unified)'}</div>
+                       </div>
+                       <div className="space-y-1">
+                         <div className="text-muted-foreground uppercase">Selected Name</div>
+                         <div className="font-bold text-foreground">{branches.find(b => b.id === currentBranchId)?.name || 'N/A'}</div>
+                       </div>
+                       <div className="space-y-1">
+                         <div className="text-muted-foreground uppercase">Active Branches</div>
+                         <div className="font-bold text-emerald-500">{branches.filter(b => b.status === 'active').length}</div>
+                       </div>
+                       <div className="col-span-2 space-y-1 overflow-hidden">
+                         <div className="text-muted-foreground uppercase">LocalStorage Key</div>
+                         <div className="font-bold text-foreground break-all">{localStorage.getItem('pharma-current-branch-id') || 'EMPTY'}</div>
+                       </div>
                     </div>
                   </Card>
                </div>
@@ -3456,6 +3875,7 @@ export default function App() {
                 onRefund={(invoice) => { setViewingInvoice(invoice); setIsRefundInvoiceOpen(true); }}
                 onDelete={(invoice) => { setViewingInvoice(invoice); setIsDeleteInvoiceConfirmOpen(true); }}
                 onPrint={() => window.print()}
+                onUpdateImage={handleUpdateInvoiceImage}
               />
             )}
           </TabsContent>
@@ -3470,6 +3890,34 @@ export default function App() {
       </div>
 
       {/* Reconstructed Dialogs */}
+      <Dialog open={!!lightboxImage} onOpenChange={(open) => !open && setLightboxImage(null)}>
+        <DialogContent className="max-w-4xl bg-slate-950 border-white/5 p-2" dir="rtl">
+          <DialogHeader className="sr-only">
+             <DialogTitle>معاينة المرفق</DialogTitle>
+          </DialogHeader>
+          <div className="relative aspect-auto max-h-[85vh] overflow-hidden rounded-lg">
+            {lightboxImage ? (
+              <img 
+                src={lightboxImage} 
+                alt="Enlarged view" 
+                className="w-full h-full object-contain mx-auto"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-20 text-muted-foreground gap-4">
+                <AlertTriangle className="h-12 w-12 text-amber-500" />
+                <span className="font-bold text-lg">الصورة غير متوفرة أو تم حذفها</span>
+              </div>
+            )}
+            <button 
+              onClick={() => setLightboxImage(null)}
+              className="absolute top-4 left-4 h-10 w-10 bg-black/60 text-white rounded-full flex items-center justify-center hover:bg-black transition-colors"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Entity Dialog */}
       <Dialog open={isAddEntityOpen} onOpenChange={setIsAddEntityOpen}>
@@ -3526,11 +3974,11 @@ export default function App() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="amount" className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">مبلغ الفاتورة الكلي</Label>
-                <Input id="amount" name="amount" type="number" required className="bg-muted border-border text-foreground h-12 rounded-xl font-mono" />
+                <CurrencyInput id="amount" name="amount" required className="bg-muted border-border text-foreground h-12 rounded-xl font-mono" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="requiredPayment" className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">المبلغ المطلوب سداده</Label>
-                <Input id="requiredPayment" name="requiredPayment" type="number" required className="bg-muted border-border text-foreground h-12 rounded-xl font-mono text-emerald-500 font-black" />
+                <CurrencyInput id="requiredPayment" name="requiredPayment" required className="bg-muted border-border text-foreground h-12 rounded-xl font-mono text-emerald-500 font-black" />
               </div>
             </div>
 
@@ -3593,22 +4041,21 @@ export default function App() {
                 <div className="space-y-2">
                   <Label htmlFor="pay_amount" className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">المبلغ المسدد نقداً</Label>
                   <div className="relative group">
-                    <Input 
+                    <CurrencyInput 
                       id="pay_amount" 
                       name="amount" 
-                      type="number" 
                       required 
                       value={payAmount}
                       readOnly={paymentMode === 'full'}
-                      onChange={(e) => setPayAmount(e.target.value)}
+                      onChange={(val) => setPayAmount(val)}
                       className={`bg-muted border-border text-foreground h-14 rounded-xl font-mono text-2xl font-black pr-12 ${paymentMode === 'full' ? 'opacity-50' : 'focus:ring-emerald-500/20 focus:border-emerald-500'}`}
                     />
                     <DollarSign className="absolute right-4 top-1/2 -translate-y-1/2 h-6 w-6 text-emerald-500" />
                   </div>
                   {paymentMode !== 'normal' && viewingInvoice && (
                     <div className="flex justify-between items-center px-1">
-                      <span className="text-[10px] text-muted-foreground font-bold italic">إجمالي القائمة: {viewingInvoice.netAmount.toLocaleString()}</span>
-                      <span className="text-[10px] text-amber-500 font-black">المتبقي: {viewingInvoice.remainingAmount?.toLocaleString()} د.ع</span>
+                      <span className="text-[10px] text-muted-foreground font-bold italic">إجمالي القائمة: {formatIQD(viewingInvoice.netAmount)}</span>
+                      <span className="text-[10px] text-amber-500 font-black">المتبقي: {formatIQD(viewingInvoice.remainingAmount || 0)}</span>
                     </div>
                   )}
                 </div>
@@ -3703,19 +4150,18 @@ export default function App() {
             <div className="grid gap-4">
               <div className="space-y-2 p-4 bg-rose-500/5 rounded-2xl border border-rose-500/10">
                 <div className="text-xs text-rose-500 font-bold mb-1">صافي الفاتورة الأصلية</div>
-                <div className="text-2xl font-black text-foreground font-mono">{viewingInvoice?.netAmount.toLocaleString()} د.ع</div>
-                <div className="text-[10px] text-muted-foreground mt-1">المتبقي حالياً: {viewingInvoice?.remainingAmount?.toLocaleString()} د.ع</div>
+                <div className="text-2xl font-black text-foreground font-mono">{formatIQD(viewingInvoice?.netAmount)}</div>
+                <div className="text-[10px] text-muted-foreground mt-1">المتبقي حالياً: {formatIQD(viewingInvoice?.remainingAmount || 0)}</div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="refund_amount" className="text-muted-foreground font-bold">قيمة المرتجع</Label>
-                  <Input 
+                  <CurrencyInput 
                     id="refund_amount" 
                     name="refundAmount" 
-                    type="number" 
                     required 
-                    placeholder="0.000"
+                    placeholder="0,000"
                     className="bg-muted border-border text-foreground h-11 rounded-xl font-mono text-lg" 
                   />
                 </div>
@@ -3751,7 +4197,7 @@ export default function App() {
             <div className="bg-muted p-4 rounded-lg flex justify-between items-center mb-4 border border-border">
               <div className="text-sm font-medium text-muted-foreground">الرصيد الكلي:</div>
               <div className={`text-xl font-bold font-mono ${selectedEntity?.balance! > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
-                {selectedEntity?.balance.toLocaleString()} د.ع
+                {formatIQD(selectedEntity?.balance)}
               </div>
             </div>
 
@@ -3778,9 +4224,9 @@ export default function App() {
                     </td>
                     <td className="px-4 py-2 text-muted-foreground font-mono">{entry.invoiceNumber || '-'}</td>
                     <td className={`px-4 py-2 font-bold font-mono ${entry.operationType === 'invoice' ? 'text-blue-500' : 'text-emerald-500'}`}>
-                      {entry.operationType === 'invoice' ? '+' : '-'}{entry.netAmount.toLocaleString()}
+                      {entry.operationType === 'invoice' ? '+' : '-'}{formatNumberWithCommas(entry.netAmount)}
                     </td>
-                    <td className="px-4 py-2 font-bold text-foreground font-mono">{entry.balanceAfterOperation.toLocaleString()}</td>
+                    <td className="px-4 py-2 font-bold text-foreground font-mono">{formatNumberWithCommas(entry.balanceAfterOperation)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -3842,7 +4288,7 @@ export default function App() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="text-muted-foreground font-bold">المبلغ</Label>
-                  <Input name="amount" type="number" defaultValue={selectedTransaction?.amount} required className="bg-muted border-border text-foreground" />
+                  <CurrencyInput name="amount" defaultValue={selectedTransaction?.amount} required className="bg-muted border-border text-foreground" />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-muted-foreground font-bold">التاريخ</Label>
@@ -3862,6 +4308,7 @@ export default function App() {
                     <SelectValue placeholder="اختر الفئة" />
                   </SelectTrigger>
                   <SelectContent className="bg-card border-border text-foreground">
+                    <SelectItem value="revenue">إيراد</SelectItem>
                     <SelectItem value="sales">مبيعات</SelectItem>
                     <SelectItem value="purchases">مشتريات</SelectItem>
                     <SelectItem value="rent">إيجار</SelectItem>
@@ -3871,6 +4318,21 @@ export default function App() {
                   </SelectContent>
                 </Select>
               </div>
+              {selectedTransaction?.type === 'income' && (
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground font-bold">نوع الإيراد (التصنيف)</Label>
+                  <Select name="incomeClassification" defaultValue={selectedTransaction?.incomeClassification || 'مبيعات'}>
+                    <SelectTrigger className="bg-muted border-border text-foreground">
+                      <SelectValue placeholder="اختر نوع الإيراد" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border text-foreground">
+                      <SelectItem value="مبيعات">مبيعات</SelectItem>
+                      <SelectItem value="خدمات">خدمات</SelectItem>
+                      <SelectItem value="أخرى">أخرى</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label className="text-muted-foreground font-bold">البيان</Label>
                 <Input name="description" defaultValue={selectedTransaction?.description} required className="bg-muted border-border text-foreground" />

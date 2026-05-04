@@ -4,6 +4,7 @@ export interface Transaction {
   id?: string;
   type: 'income' | 'expense';
   incomeType?: 'cash' | 'credit';
+  incomeClassification?: string;
   category: string;
   expenseClassification?: string;
   employeeName?: string;
@@ -241,11 +242,61 @@ export interface EmployeeAttendance {
 
 export interface PharmacyBranch {
   id?: string;
-  name: string;
-  address?: string;
-  phone?: string;
+  code: string; // BR-0001
+  name: string; // Branch Name
+  pharmacyName: string; 
+  managerName: string;
+  phone: string;
+  city: string;
+  email?: string;
   notes?: string;
-  status: 'active' | 'archived';
+  status: 'active' | 'pending' | 'inactive' | 'archived';
+  activationCode?: string;
+  ownerId: string;
+  createdAt: Date;
+}
+
+export interface HistoricalRecord {
+  id?: string;
+  type: 'opening_balance' | 'batch_period';
+  
+  // For opening balances
+  cashHand?: number;
+  inventoryValue?: number;
+  customerDebts?: number;
+  officeDebts?: number;
+  warehouseDebts?: number;
+  accumulatedExpenses?: number;
+  retainedEarnings?: number;
+
+  // For batch periods
+  startDate?: Date;
+  endDate?: Date;
+  totalSales?: number;
+  totalPurchases?: number;
+  totalExpenses?: number;
+  totalProfits?: number;
+  totalDebtOwed?: number;
+  totalPaidDebt?: number;
+  estimatedInventory?: number;
+
+  notes?: string;
+  isHistorical: boolean;
+  branchId?: string;
+  ownerId: string;
+  createdAt: Date;
+}
+
+export interface MedicineRequest {
+  id?: string;
+  patientName: string;
+  phone: string;
+  medicineName: string;
+  quantity: string;
+  status: 'waiting' | 'provided' | 'notified';
+  notes?: string;
+  imageUrl?: string;
+  branchId?: string;
   ownerId: string;
   createdAt: Date;
 }
@@ -268,10 +319,12 @@ export class PharmacyDatabase extends Dexie {
   employees!: Table<Employee>;
   employeeAttendance!: Table<EmployeeAttendance>;
   branches!: Table<PharmacyBranch>;
+  historicalRecords!: Table<HistoricalRecord>;
+  medicineRequests!: Table<MedicineRequest>;
 
   constructor() {
     super('PharmacyDatabase');
-    this.version(13).stores({
+    this.version(16).stores({
       transactions: '++id, type, incomeType, category, date, entityId, branchId, createdBy',
       entities: '++id, name, type, branchId, ownerId',
       ledgerEntries: '++id, accountId, date, operationType, purchaseType, branchId, ownerId',
@@ -288,7 +341,9 @@ export class PharmacyDatabase extends Dexie {
       bonuses: '++id, entityId, status, dueDate, branchId, ownerId',
       employees: '++id, name, phone, branchId, ownerId',
       employeeAttendance: '++id, employeeId, date, branchId, ownerId',
-      branches: '++id, name, status, ownerId'
+      branches: '++id, name, status, ownerId',
+      historicalRecords: '++id, type, startDate, endDate, branchId, ownerId',
+      medicineRequests: '++id, patientName, phone, medicineName, status, branchId, ownerId'
     });
   }
 }

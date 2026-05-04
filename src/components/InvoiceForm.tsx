@@ -23,6 +23,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import { Entity } from '../db';
+import { CurrencyInput } from '@/components/ui/CurrencyInput';
+import { parseFormattedNumber } from '@/src/lib/formatters';
 
 interface InvoiceFormProps {
   entities: Entity[];
@@ -36,8 +38,8 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
   const [purchaseType, setPurchaseType] = useState<'cash' | 'credit'>('credit');
   const [bonusLater, setBonusLater] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState<string>(initialEntity?.id || '');
-  const [amount, setAmount] = useState<string>('');
-  const [discount, setDiscount] = useState<string>('0');
+  const [amount, setAmount] = useState<number>(0);
+  const [discount, setDiscount] = useState<number>(0);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const currentEntity = entities.find(e => e.id === selectedEntityId) || initialEntity;
@@ -52,8 +54,9 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
       accountId: selectedEntityId,
       purchaseType,
       bonusLater,
-      amount: Number(amount),
-      discount: Number(discount),
+      amount: amount,
+      discount: discount,
+      bonus: parseFormattedNumber(data.bonus as string),
       date: new Date(data.date as string),
       dueDate: purchaseType === 'credit' && data.dueDate ? new Date(data.dueDate as string) : undefined,
       bonusArrivalDate: bonusLater && data.bonusArrivalDate ? new Date(data.bonusArrivalDate as string) : undefined,
@@ -147,23 +150,21 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label className="text-muted-foreground font-bold text-xs uppercase">المبلغ الكلي</Label>
-            <Input 
+            <CurrencyInput 
               name="amount" 
-              type="number" 
               required 
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.000" 
+              onChange={(val) => setAmount(val)}
+              placeholder="0,000" 
               className="bg-muted border-border text-foreground h-11 rounded-xl font-mono" 
             />
           </div>
           <div className="space-y-2">
             <Label className="text-rose-500 font-bold text-xs uppercase">الخصم</Label>
-            <Input 
+            <CurrencyInput 
               name="discount" 
-              type="number" 
               value={discount}
-              onChange={(e) => setDiscount(e.target.value)}
+              onChange={(val) => setDiscount(val)}
               className="bg-muted border-rose-500/10 text-rose-500 h-11 rounded-xl font-mono" 
             />
           </div>
@@ -207,7 +208,7 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">قيمة البونص (د.ع)</Label>
-              <Input name="bonus" type="number" defaultValue="0" className="bg-background border-blue-500/20 text-blue-500 font-bold font-mono h-10 rounded-lg" />
+              <CurrencyInput name="bonus" defaultValue={0} className="bg-background border-blue-500/20 text-blue-500 font-bold font-mono h-10 rounded-lg" />
             </div>
             {bonusLater ? (
               <div className="space-y-1 animate-in slide-in-from-right-2">

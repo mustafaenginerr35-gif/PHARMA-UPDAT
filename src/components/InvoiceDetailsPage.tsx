@@ -18,13 +18,18 @@ import {
   ShieldCheck,
   TrendingDown,
   Gift,
-  Receipt
+  Receipt,
+  X,
+  Maximize2,
+  Upload,
+  AlertTriangle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { LedgerEntry, Entity } from '../db';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface InvoiceDetailsPageProps {
   invoice: LedgerEntry;
@@ -37,6 +42,7 @@ interface InvoiceDetailsPageProps {
   onRefund: (invoice: LedgerEntry) => void;
   onDelete: (invoice: LedgerEntry) => void;
   onPrint: (invoice: LedgerEntry) => void;
+  onUpdateImage?: (invoice: LedgerEntry, imageUrl: string | null) => void;
 }
 
 export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
@@ -50,7 +56,10 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
   onRefund,
   onDelete,
   onPrint,
+  onUpdateImage,
 }) => {
+  const [isLightboxOpen, setIsLightboxOpen] = React.useState(false);
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'paid':
@@ -64,6 +73,24 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
     }
   };
 
+  const handleImageDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onUpdateImage && window.confirm('هل أنت متأكد من حذف هذه الصورة؟')) {
+      onUpdateImage(invoice, null);
+    }
+  };
+
+  const handleImageReplace = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onUpdateImage) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        onUpdateImage(invoice, event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
@@ -71,6 +98,36 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
       className="space-y-8 pb-10"
       dir="rtl"
     >
+      {/* Lightbox Dialog */}
+      <Dialog open={isLightboxOpen} onOpenChange={setIsLightboxOpen}>
+        <DialogContent className="max-w-4xl bg-slate-950 border-white/5 p-2" dir="rtl">
+          <DialogHeader className="sr-only">
+             <DialogTitle>عرض الصورة كاملة</DialogTitle>
+          </DialogHeader>
+          <div className="relative aspect-auto max-h-[85vh] overflow-hidden rounded-lg">
+            {invoice.imageUrl ? (
+              <img 
+                src={invoice.imageUrl} 
+                alt="Full Invoice" 
+                className="w-full h-full object-contain mx-auto"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-20 text-muted-foreground gap-4">
+                <AlertTriangle className="h-12 w-12 text-amber-500" />
+                <span className="font-bold text-lg">الصورة غير متوفرة أو تم حذفها</span>
+              </div>
+            )}
+            <button 
+              onClick={() => setIsLightboxOpen(false)}
+              className="absolute top-4 left-4 h-10 w-10 bg-black/60 text-white rounded-full flex items-center justify-center hover:bg-black transition-colors"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Top Navigation & Actions Bar */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-card border border-border p-6 rounded-2xl shadow-sm">
         <div className="flex items-center gap-4">
@@ -326,20 +383,87 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
             </CardHeader>
             <CardContent className="p-6">
                {invoice.imageUrl ? (
-                 <div className="group relative rounded-xl overflow-hidden border border-border bg-muted cursor-pointer aspect-[4/3]" onClick={() => window.open(invoice.imageUrl, '_blank')}>
-                   <img src={invoice.imageUrl} alt="Invoice" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
-                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                     <span className="text-white text-xs font-bold bg-black/50 px-3 py-1.5 rounded-full flex items-center gap-2 backdrop-blur-sm">
-                       <ImageIcon className="h-3.5 w-3.5" />
-                       عرض الصورة كاملة
-                     </span>
-                   </div>
+                 <div className="space-y-4">
+                    <div 
+                      className="group relative rounded-xl overflow-hidden border border-border bg-muted cursor-pointer aspect-[4/3]" 
+                      onClick={() => setIsLightboxOpen(true)}
+                    >
+                      <img 
+                        src={invoice.imageUrl} 
+                        alt="Invoice" 
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                        referrerPolicy="no-referrer" 
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          const parent = target.parentElement;
+                          if (parent) {
+                            const errorDiv = document.createElement('div');
+                            errorDiv.className = "flex flex-col items-center justify-center h-full w-full bg-muted text-muted-foreground p-4 text-center gap-2";
+                            errorDiv.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-8 w-8 text-rose-500"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><span class="font-bold text-[10px]">الصورة غير متوفرة أو تم حذفها</span>`;
+                            parent.appendChild(errorDiv);
+                          }
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <span className="text-white text-[10px] font-bold bg-black/50 px-3 py-1.5 rounded-full flex items-center gap-2 backdrop-blur-sm">
+                          <Maximize2 className="h-3 w-3" />
+                          عرض الصورة كاملة
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                       <Button 
+                         variant="outline" 
+                         size="sm" 
+                         className="text-[10px] font-black h-9 rounded-lg border-rose-500/20 text-rose-500 hover:bg-rose-500/10 gap-2"
+                         onClick={handleImageDelete}
+                       >
+                         <Trash2 className="h-3 w-3" />
+                         حذف الصورة
+                       </Button>
+                       <div className="relative">
+                         <input 
+                           type="file" 
+                           id="replace-image-input" 
+                           className="hidden" 
+                           accept="image/*" 
+                           onChange={handleImageReplace}
+                         />
+                         <Button 
+                           variant="outline" 
+                           size="sm" 
+                           className="w-full text-[10px] font-black h-9 rounded-lg border-blue-500/20 text-blue-500 hover:bg-blue-500/10 gap-2"
+                           onClick={() => document.getElementById('replace-image-input')?.click()}
+                         >
+                           <Upload className="h-3 w-3" />
+                           استبدال الصورة
+                         </Button>
+                       </div>
+                    </div>
                  </div>
                ) : (
                  <div className="py-8 text-center bg-muted/30 border-2 border-dashed border-border rounded-2xl flex flex-col items-center gap-3">
-                   <ImageIcon className="h-8 w-8 text-muted-foreground opacity-20" />
-                   <div className="text-[10px] text-muted-foreground font-black uppercase">لا توجد صور مرفقة</div>
-                   <Button variant="ghost" size="sm" className="text-[10px] font-black p-0 h-auto text-primary hover:bg-transparent">+ أضف صورة الآن</Button>
+                   <AlertTriangle className="h-8 w-8 text-muted-foreground opacity-20" />
+                   <div className="text-[10px] text-muted-foreground font-black uppercase">الصورة غير متوفرة أو تم حذفها</div>
+                   <div className="relative">
+                      <input 
+                        type="file" 
+                        id="add-image-input" 
+                        className="hidden" 
+                        accept="image/*" 
+                        onChange={handleImageReplace}
+                      />
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-[10px] font-black p-0 h-auto text-primary hover:bg-transparent"
+                        onClick={() => document.getElementById('add-image-input')?.click()}
+                      >
+                        + أضف صورة الآن
+                      </Button>
+                   </div>
                  </div>
                )}
             </CardContent>

@@ -352,10 +352,8 @@ export const EmployeesPage = ({
                             </div>
                          </div>
                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
+                            <DropdownMenuTrigger className="h-8 w-8 rounded-xl flex items-center justify-center hover:bg-muted/50 outline-none transition-colors">
+                              <MoreVertical className="h-4 w-4" />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="bg-card border-border">
                               <DropdownMenuItem className="gap-2 font-bold text-blue-500" onClick={() => {

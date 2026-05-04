@@ -21,6 +21,8 @@ import {
 import { format } from 'date-fns';
 import { Entity } from '../db';
 import { motion } from 'framer-motion';
+import { CurrencyInput } from '@/components/ui/CurrencyInput';
+import { parseFormattedNumber } from '@/src/lib/formatters';
 
 interface BonusFormProps {
   entities: Entity[];
@@ -42,7 +44,7 @@ export const BonusForm = ({ entities, selectedEntity: initialEntity, onSubmit, o
       ...data,
       entityId: selectedEntityId,
       status,
-      amount: Number(data.amount || 0),
+      amount: parseFormattedNumber(data.amount as string),
       quantity: Number(data.quantity || 0),
       dueDate: new Date(data.dueDate as string),
     });
@@ -123,7 +125,7 @@ export const BonusForm = ({ entities, selectedEntity: initialEntity, onSubmit, o
               <div className="space-y-2">
                 <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">قيمة البونص التقريبية</Label>
                 <div className="relative">
-                  <Input name="amount" type="number" placeholder="0" className="bg-muted border-border text-foreground h-14 rounded-xl font-mono text-xl font-black pr-10 shadow-sm" />
+                  <CurrencyInput name="amount" placeholder="0" className="bg-muted border-border text-foreground h-14 rounded-xl font-mono text-xl font-black pr-10 shadow-sm" />
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-muted-foreground">د.ع</span>
                 </div>
               </div>

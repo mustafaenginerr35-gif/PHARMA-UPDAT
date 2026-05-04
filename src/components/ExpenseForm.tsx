@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
+import { CurrencyInput } from '@/components/ui/CurrencyInput';
 
 interface ExpenseFormProps {
   onSubmit: (data: any) => void;
@@ -34,22 +35,11 @@ interface ExpenseFormProps {
 export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
   const [category, setCategory] = useState<string>('rent_pharmacy');
   const [expenseType, setExpenseType] = useState<'fixed' | 'variable'>('fixed');
-  const [amount, setAmount] = useState<string>('');
+  const [amount, setAmount] = useState<number>(0);
 
   const handleTypeChange = (type: 'fixed' | 'variable') => {
     setExpenseType(type);
     setCategory(type === 'fixed' ? 'rent_pharmacy' : 'salaries');
-  };
-
-  const formatAmount = (val: string) => {
-    if (!val) return '';
-    return Number(val).toLocaleString();
-  };
-
-  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Keep only digits
-    const rawValue = e.target.value.replace(/\D/g, '');
-    setAmount(rawValue);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -60,7 +50,7 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
       ...data,
       category,
       expenseType,
-      amount: Number(amount),
+      amount: amount,
       date: new Date(data.date as string),
     });
   };
@@ -108,9 +98,10 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                 <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">قيمة المصروف</Label>
                 <div className="relative group">
                   <div className="absolute inset-0 bg-rose-500/5 blur-xl group-hover:blur-2xl transition-all rounded-full opacity-0 group-hover:opacity-100" />
-                  <Input 
-                    value={formatAmount(amount)}
-                    onChange={handleAmountChange}
+                  <CurrencyInput 
+                    name="amount"
+                    value={amount}
+                    onChange={(val) => setAmount(val)}
                     required 
                     placeholder="0" 
                     className="bg-muted border-border text-foreground h-14 rounded-xl font-black text-xl pr-12 pl-14 text-right relative z-10 shadow-sm" 

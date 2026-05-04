@@ -6,6 +6,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Employee, EmployeeAttendance } from '../db';
 import { format } from 'date-fns';
+import { CurrencyInput } from '@/components/ui/CurrencyInput';
+import { formatIQD } from '@/src/lib/formatters';
 
 interface AttendanceFormProps {
   onSubmit: (data: Partial<EmployeeAttendance>) => void;
@@ -31,8 +33,8 @@ export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: At
       employeeName: employee.name,
       date: new Date(formData.get('date') as string),
       hoursWork: Number(formData.get('hoursWork')),
-      hourlyRate: Number(formData.get('hourlyRate')),
-      dailyWage: Number(formData.get('hoursWork')) * Number(formData.get('hourlyRate')),
+      hourlyRate: rate,
+      dailyWage: Number(formData.get('hoursWork')) * rate,
       notes: formData.get('notes') as string,
     };
     onSubmit(data);
@@ -100,12 +102,11 @@ export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: At
             <Label htmlFor="hourlyRate" className="text-xs font-black text-muted-foreground mr-1">أجر الساعة (د.ع)</Label>
             <div className="relative group">
               <DollarSign className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-emerald-500 transition-colors" />
-              <Input
+              <CurrencyInput
                 id="hourlyRate"
                 name="hourlyRate"
-                type="number"
                 value={rate}
-                onChange={(e) => setRate(Number(e.target.value))}
+                onChange={(val) => setRate(val)}
                 required
                 className="pr-10 bg-muted/50 border-border rounded-xl h-12 focus:ring-emerald-500 focus:border-emerald-500 text-right font-mono"
                 placeholder="0"
@@ -116,7 +117,7 @@ export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: At
           <div className="space-y-2 text-right">
             <Label className="text-xs font-black text-muted-foreground mr-1">أجر اليوم الإجمالي</Label>
             <div className="h-12 bg-muted/30 border border-border rounded-xl flex items-center justify-center font-black text-primary text-lg">
-              {(hours * rate).toLocaleString()} <span className="text-[10px] mr-1 font-sans">د.ع</span>
+              {formatIQD(hours * rate)}
             </div>
           </div>
         </div>
