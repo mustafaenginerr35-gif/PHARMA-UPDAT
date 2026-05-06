@@ -8,9 +8,10 @@ interface ImageCaptureProps {
   onImageCaptured: (file: File) => void;
   label: string;
   id: string;
+  renderTrigger?: (open: () => void) => React.ReactNode;
 }
 
-export const ImageCapture: React.FC<ImageCaptureProps> = ({ onImageCaptured, label, id }) => {
+export const ImageCapture: React.FC<ImageCaptureProps> = ({ onImageCaptured, label, id, renderTrigger }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<'selection' | 'camera' | 'preview'>('selection');
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -96,29 +97,33 @@ export const ImageCapture: React.FC<ImageCaptureProps> = ({ onImageCaptured, lab
         {label}
       </label>
       <div className="flex items-center gap-2">
-        <Button 
-          type="button" 
-          variant="outline" 
-          className="w-full flex items-center justify-between gap-2 border-dashed border-2 h-16 px-4 bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-          onClick={() => setIsOpen(true)}
-        >
-          <div className="flex items-center gap-2">
-            {capturedImage ? (
-              <div className="h-10 w-10 rounded border border-slate-700 overflow-hidden bg-slate-800">
-                <img src={capturedImage} alt="Thumbnail" className="h-full w-full object-cover" />
+        {renderTrigger ? (
+          renderTrigger(() => setIsOpen(true))
+        ) : (
+          <Button 
+            type="button" 
+            variant="outline" 
+            className="w-full flex items-center justify-between gap-2 border-dashed border-2 h-16 px-4 bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+            onClick={() => setIsOpen(true)}
+          >
+            <div className="flex items-center gap-2">
+              {capturedImage ? (
+                <div className="h-10 w-10 rounded border border-slate-700 overflow-hidden bg-slate-800">
+                  <img src={capturedImage} alt="Thumbnail" className="h-full w-full object-cover" />
+                </div>
+              ) : (
+                <div className="h-10 w-10 rounded border border-dashed border-slate-700 flex items-center justify-center bg-slate-800/50">
+                  <Upload className="h-5 w-5 text-slate-500" />
+                </div>
+              )}
+              <div className="flex flex-col items-start text-right">
+                <span className="text-sm font-bold text-white">{capturedImage ? 'تم اختيار صورة' : 'إضافة صورة'}</span>
+                <span className="text-[10px] text-slate-500">{capturedImage ? 'انقر لتغيير الصورة' : 'كاميرا أو معرض الصور'}</span>
               </div>
-            ) : (
-              <div className="h-10 w-10 rounded border border-dashed border-slate-700 flex items-center justify-center bg-slate-800/50">
-                <Upload className="h-5 w-5 text-slate-500" />
-              </div>
-            )}
-            <div className="flex flex-col items-start text-right">
-              <span className="text-sm font-bold text-white">{capturedImage ? 'تم اختيار صورة' : 'إضافة صورة'}</span>
-              <span className="text-[10px] text-slate-500">{capturedImage ? 'انقر لتغيير الصورة' : 'كاميرا أو معرض الصور'}</span>
             </div>
-          </div>
-          {capturedImage && <Check className="h-5 w-5 text-emerald-500" />}
-        </Button>
+            {capturedImage && <Check className="h-5 w-5 text-emerald-500" />}
+          </Button>
+        )}
       </div>
 
       <Dialog open={isOpen} onOpenChange={(open) => !open && closeDialog()}>

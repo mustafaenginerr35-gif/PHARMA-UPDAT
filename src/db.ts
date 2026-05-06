@@ -35,6 +35,7 @@ export interface Transaction {
   createdBy: string;
   username?: string;
   createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export interface Entity {
@@ -56,6 +57,7 @@ export interface Entity {
   ownerId: string;
   username?: string;
   createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export interface LedgerEntry {
@@ -88,10 +90,12 @@ export interface LedgerEntry {
   remainingAmount?: number;
   refundAmount?: number;
   linkedInvoiceId?: string;
+  isHistorical?: boolean;
   branchId?: string;
   ownerId: string;
   username?: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface Notification {
@@ -107,6 +111,7 @@ export interface Notification {
   read: boolean;
   branchId?: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface AppUser {
@@ -119,6 +124,7 @@ export interface AppUser {
   securityAnswer?: string;
   role?: string;
   createdAt: Date;
+  updatedAt?: Date;
   isActive: boolean;
   isSetupComplete: boolean;
 }
@@ -129,6 +135,7 @@ export interface SystemLog {
   message: string;
   ownerId: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface CustomerDebt {
@@ -145,6 +152,7 @@ export interface CustomerDebt {
   branchId?: string;
   ownerId: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface Deadline {
@@ -162,6 +170,7 @@ export interface Deadline {
   status: 'pending' | 'paid' | 'cancelled';
   branchId?: string;
   createdAt: Date;
+  updatedAt?: Date;
   ownerId: string;
 }
 
@@ -173,6 +182,7 @@ export interface Announcement {
   isActive: number; // 0 or 1
   displayType: 'once' | 'permanent';
   createdAt: Date;
+  updatedAt?: Date;
   createdBy: string;
 }
 
@@ -181,6 +191,7 @@ export interface AnnouncementRead {
   announcementId: string;
   userId: string;
   readAt: Date;
+  updatedAt?: Date;
 }
 
 export interface ActivationCode {
@@ -189,6 +200,7 @@ export interface ActivationCode {
   assignedEmail?: string;
   isUsed: boolean;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface ActivationRequest {
@@ -197,6 +209,7 @@ export interface ActivationRequest {
   username: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface RecoveryRequest {
@@ -204,6 +217,7 @@ export interface RecoveryRequest {
   email: string;
   status: 'pending' | 'resolved';
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface Bonus {
@@ -219,6 +233,7 @@ export interface Bonus {
   imageUrl?: string;
   branchId?: string;
   createdAt: Date;
+  updatedAt?: Date;
   ownerId: string;
 }
 
@@ -231,6 +246,7 @@ export interface Employee {
   branchId?: string;
   ownerId: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface EmployeeAttendance {
@@ -245,6 +261,7 @@ export interface EmployeeAttendance {
   branchId?: string;
   ownerId: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface PharmacyBranch {
@@ -261,11 +278,12 @@ export interface PharmacyBranch {
   activationCode?: string;
   ownerId: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface HistoricalRecord {
   id?: string;
-  type: 'opening_balance' | 'batch_period';
+  type: 'opening_balance' | 'batch_period' | 'single_entry' | 'monthly_summary' | 'yearly_summary';
   
   // For opening balances
   cashHand?: number;
@@ -275,23 +293,44 @@ export interface HistoricalRecord {
   warehouseDebts?: number;
   accumulatedExpenses?: number;
   retainedEarnings?: number;
-
-  // For batch periods
+  
+  // For summaries (Monthly/Yearly/Batch)
+  year?: number;
+  month?: number;
   startDate?: Date;
   endDate?: Date;
   totalSales?: number;
+  totalRevenueCash?: number;
+  totalRevenueCredit?: number;
   totalPurchases?: number;
   totalExpenses?: number;
   totalProfits?: number;
   totalDebtOwed?: number;
   totalPaidDebt?: number;
   estimatedInventory?: number;
+  officeDebtPeriod?: number;
+  warehouseDebtPeriod?: number;
+
+  // For single entries
+  entryType?: 'revenue' | 'expense' | 'invoice' | 'payment' | 'customer_debt' | 'supplier_debt';
+  amount?: number;
+  date?: Date;
+  entityId?: string;
+  entityName?: string;
+  invoiceNumber?: string;
+  discount?: number;
+  bonus?: number;
+  paidAmount?: number;
+  remainingAmount?: number;
+  paymentStatus?: string;
+  category?: string;
 
   notes?: string;
   isHistorical: boolean;
-  branchId?: string;
+  branchId?: string | null;
   ownerId: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface MedicineRequest {
@@ -306,6 +345,7 @@ export interface MedicineRequest {
   branchId?: string;
   ownerId: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface ExpiredDamagedLoss {

@@ -19,12 +19,13 @@ import { CurrencyInput } from '@/components/ui/CurrencyInput';
 interface RevenueFormProps {
   onSubmit: (data: any) => void;
   onClose: () => void;
+  initialData?: any;
 }
 
-export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
-  const [incomeType, setIncomeType] = useState<'cash' | 'credit'>('cash');
-  const [saleAmount, setSaleAmount] = useState<string>('');
-  const [profitPercent, setProfitPercent] = useState<string>('15');
+export const RevenueForm = ({ onSubmit, onClose, initialData }: RevenueFormProps) => {
+  const [incomeType, setIncomeType] = useState<'cash' | 'credit'>(initialData?.incomeType || 'cash');
+  const [saleAmount, setSaleAmount] = useState<string>(initialData?.saleAmount ? formatNumberWithCommas(initialData.saleAmount) : '');
+  const [profitPercent, setProfitPercent] = useState<string>(initialData?.profitPercent?.toString() || '15');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,7 +55,7 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
       netProfit: profAmount,
       date: new Date(data.date as string),
       dueDate: data.dueDate ? new Date(data.dueDate as string) : null,
-      createdAt: new Date()
+      updatedAt: new Date()
     });
   };
 
@@ -144,7 +145,7 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
                 <Input 
                   name="date" 
                   type="date" 
-                  defaultValue={format(new Date(), 'yyyy-MM-dd')} 
+                  defaultValue={initialData?.date ? format(new Date(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
                   required 
                   className="bg-muted border-border text-foreground h-14 rounded-xl pr-10 font-black" 
                 />
@@ -156,6 +157,7 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
               <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">ملاحظات (اختياري)</Label>
               <textarea 
                 name="notes" 
+                defaultValue={initialData?.notes || ''}
                 placeholder="اكتب ملاحظات حول العملية..." 
                 className="w-full bg-muted border border-border text-foreground rounded-2xl p-4 h-[7.5rem] focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-bold resize-none" 
               />
@@ -178,14 +180,24 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
                       <User className="h-3 w-3" />
                       اسم الزبون
                     </Label>
-                    <Input name="customerName" placeholder="الاسم الكامل" className="bg-background border-amber-500/20 text-foreground h-12 rounded-xl font-bold" />
+                    <Input 
+                      name="customerName" 
+                      defaultValue={initialData?.customerName || ''}
+                      placeholder="الاسم الكامل" 
+                      className="bg-background border-amber-500/20 text-foreground h-12 rounded-xl font-bold" 
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label className="text-amber-700 font-black text-[10px] flex items-center gap-2 uppercase tracking-wide">
                       <CalendarDays className="h-3 w-3" />
                       موعد الاستحقاق
                     </Label>
-                    <Input name="dueDate" type="date" className="bg-background border-amber-500/20 text-foreground h-12 rounded-xl font-bold" />
+                    <Input 
+                      name="dueDate" 
+                      type="date" 
+                      defaultValue={initialData?.dueDate ? format(new Date(initialData.dueDate), 'yyyy-MM-dd') : ''}
+                      className="bg-background border-amber-500/20 text-foreground h-12 rounded-xl font-bold" 
+                    />
                   </div>
                 </div>
               </div>
@@ -199,7 +211,7 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
           type="submit" 
           className="flex-3 font-black text-xl h-16 rounded-3xl shadow-2xl transition-all scale-100 hover:scale-[1.02] active:scale-[0.98] bg-emerald-600 hover:bg-emerald-700"
         >
-          حفظ عملية الوارد
+          {initialData ? 'تعديل عملية الوارد' : 'حفظ عملية الوارد'}
         </Button>
         <Button 
           type="button" 

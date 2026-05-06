@@ -1,4 +1,5 @@
 import React from 'react';
+import * as XLSX from 'xlsx';
 import { 
   FileText, 
   Edit, 
@@ -25,11 +26,13 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  Download
+  Download,
+  FileSpreadsheet,
+  FileDown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { safeFormatDate } from '../lib/formatters';
+import { safeFormatDate, formatIQD } from '../lib/formatters';
 
 import { LedgerEntry, Entity } from '../db';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -65,12 +68,32 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
 
   const images = React.useMemo(() => {
-    const list = invoice.imageUrls || [];
-    if (list.length === 0 && invoice.imageUrl) {
+    const list = Array.isArray(invoice.imageUrls) ? invoice.imageUrls : [];
+    if (list.length === 0 && invoice.imageUrl && typeof invoice.imageUrl === 'string') {
       return [invoice.imageUrl];
     }
     return list;
   }, [invoice.imageUrls, invoice.imageUrl]);
+
+  const receiptImages = React.useMemo(() => {
+    const allReceipts: string[] = [];
+    if (Array.isArray(paymentHistory)) {
+      paymentHistory.forEach(p => {
+        if (Array.isArray(p.imageUrls) && p.imageUrls.length > 0) {
+          allReceipts.push(...p.imageUrls);
+        } else if (p.imageUrl && typeof p.imageUrl === 'string') {
+          allReceipts.push(p.imageUrl);
+        }
+      });
+    }
+    return allReceipts;
+  }, [paymentHistory]);
+
+  const allImagesForLightbox = React.useMemo(() => {
+    const safeImages = Array.isArray(images) ? images : [];
+    const safeReceipts = Array.isArray(receiptImages) ? receiptImages : [];
+    return [...safeImages, ...safeReceipts];
+  }, [images, receiptImages]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -130,15 +153,64 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
     document.body.removeChild(link);
   };
 
+  const handleExportExcel = () => {
+    const data = [
+      ['تفاصيل الفاتورة', '', ''],
+      ['رقم الفاتورة:', invoice.invoiceNumber, ''],
+      ['التاريخ:', safeFormatDate(invoice.date, 'yyyy-MM-dd'), ''],
+      ['المورد:', invoice.accountName, ''],
+      [''],
+      ['البند', 'القيمة', 'التفاصيل'],
+      ['المبلغ الإجمالي', invoice.amount, formatIQD(invoice.amount)],
+      ['الخصم', invoice.discount, invoice.discountType === 'percentage' ? `${invoice.discountValue}%` : 'مبلغ ثابت'],
+      ['المبلغ الصافي', invoice.netAmount, formatIQD(invoice.netAmount)],
+      ['المسدد', invoice.paidAmount || 0, formatIQD(invoice.paidAmount)],
+      ['المتبقي', invoice.remainingAmount || 0, formatIQD(invoice.remainingAmount)],
+      [''],
+      ['تاريخ الاستحقاق', invoice.dueDate ? safeFormatDate(invoice.dueDate, 'yyyy-MM-dd') : 'لا يوجد', ''],
+      ['الحالة', invoice.paymentStatus === 'paid' ? 'مسددة' : invoice.paymentStatus === 'overdue' ? 'متجاوزة للوقت' : 'قيد الانتظار', ''],
+      [''],
+      ['ملاحظات:', invoice.notes || 'لا يوجد', '']
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "تفاصيل الفاتورة");
+    XLSX.writeFile(wb, `Invoice_${invoice.invoiceNumber}.xlsx`);
+  };
+
+  const [isExportingPDF, setIsExportingPDF] = React.useState(false);
+  const handleExportPDF = async () => {
+    setIsExportingPDF(true);
+    try {
+      const html2pdf = (await import('html2pdf.js')).default;
+      const element = document.getElementById('invoice-printable-content');
+      if (element) {
+        const opt = {
+          margin: 0.5,
+          filename: `Invoice_${invoice.invoiceNumber}.pdf`,
+          image: { type: 'jpeg' as const, quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true },
+          jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' as const }
+        };
+        html2pdf().from(element).set(opt).save();
+      }
+    } catch (err) {
+      console.error('PDF export failed:', err);
+    } finally {
+      setIsExportingPDF(false);
+    }
+  };
+
   const nextImage = () => {
     if (lightboxIndex !== null) {
-      setLightboxIndex((lightboxIndex + 1) % images.length);
+      setLightboxIndex((lightboxIndex + 1) % allImagesForLightbox.length);
     }
   };
 
   const prevImage = () => {
     if (lightboxIndex !== null) {
-      setLightboxIndex((lightboxIndex - 1 + images.length) % images.length);
+      setLightboxIndex((lightboxIndex - 1 + allImagesForLightbox.length) % allImagesForLightbox.length);
     }
   };
 
@@ -157,16 +229,16 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
           </DialogHeader>
           
           <div className="relative w-full aspect-auto max-h-[80vh] flex items-center justify-center overflow-hidden rounded-lg group">
-            {lightboxIndex !== null && images[lightboxIndex] ? (
+            {lightboxIndex !== null && allImagesForLightbox[lightboxIndex] ? (
               <>
                 <img 
-                  src={images[lightboxIndex]} 
-                  alt={`Invoice Image ${lightboxIndex + 1}`} 
+                  src={allImagesForLightbox[lightboxIndex]} 
+                  alt={`Image ${lightboxIndex + 1}`} 
                   className="max-w-full max-h-full object-contain mx-auto"
                   referrerPolicy="no-referrer"
                 />
                 
-                {images.length > 1 && (
+                {allImagesForLightbox.length > 1 && (
                   <>
                     <button 
                       onClick={(e) => { e.stopPropagation(); prevImage(); }}
@@ -192,14 +264,14 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
           </div>
 
           <div className="mt-4 flex items-center justify-between w-full px-6 text-white bg-black/40 p-4 rounded-xl">
-             <div className="font-black text-sm">
-                صورة {lightboxIndex !== null ? lightboxIndex + 1 : 0} من {images.length}
+             <div className="font-black text-sm text-white/80">
+                صورة {lightboxIndex !== null ? lightboxIndex + 1 : 0} من {allImagesForLightbox.length}
              </div>
              <div className="flex gap-4">
                 <Button 
                   variant="ghost" 
                   className="text-white hover:bg-white/10 gap-2 font-bold"
-                  onClick={() => lightboxIndex !== null && downloadImage(images[lightboxIndex], lightboxIndex)}
+                  onClick={() => lightboxIndex !== null && downloadImage(allImagesForLightbox[lightboxIndex], lightboxIndex)}
                 >
                   <Download className="h-4 w-4" />
                   تحميل
@@ -255,6 +327,14 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
             <Printer className="h-4 w-4" />
             طباعة
           </Button>
+          <Button variant="outline" className={`gap-2 h-11 px-5 rounded-xl font-bold border-emerald-500/20 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 ${appMode === 'mobile' ? 'flex-1' : ''}`} onClick={handleExportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            Excel
+          </Button>
+          <Button variant="outline" className={`gap-2 h-11 px-5 rounded-xl font-bold border-blue-500/20 bg-blue-500/5 text-blue-600 hover:bg-blue-500/10 ${appMode === 'mobile' ? 'flex-1' : ''}`} onClick={handleExportPDF} disabled={isExportingPDF}>
+            <FileDown className="h-4 w-4" />
+            {isExportingPDF ? 'جاري التصدير...' : 'PDF'}
+          </Button>
           <Button variant="ghost" className={`gap-2 h-11 px-5 rounded-xl font-bold text-rose-500 hover:bg-rose-500/10 hover:text-rose-600 ${appMode === 'mobile' ? 'col-span-2' : ''}`} onClick={() => onDelete(invoice)}>
             <Trash2 className="h-4 w-4" />
             حذف
@@ -262,13 +342,20 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <div id="invoice-printable-content" className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         <div className="lg:col-span-3 space-y-8">
           {/* Section 1: Financial Summary Cards */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[
               { label: 'المبلغ الكلي', value: invoice.amount, color: 'text-foreground', bg: 'bg-muted/50' },
-              { label: 'الخصم', value: invoice.discount || 0, color: 'text-rose-500', bg: 'bg-rose-500/5', prefix: '-' },
+              { 
+                label: 'الخصم', 
+                value: invoice.discount || 0, 
+                color: 'text-rose-500', 
+                bg: 'bg-rose-500/5', 
+                prefix: '-',
+                subValue: invoice.discountValue && invoice.discountType === 'percentage' ? `${invoice.discountValue}%` : null
+              },
               { label: 'البونص', value: invoice.bonus || 0, color: 'text-emerald-500', bg: 'bg-emerald-500/5', icon: Gift },
               { label: 'الصافي المطلوب', value: invoice.netAmount, color: 'text-primary', bg: 'bg-primary/5', emphasize: true },
               { label: 'المدفوع', value: invoice.paidAmount || 0, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
@@ -278,13 +365,20 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
               return (
                 <Card key={idx} className={`border-border ${stat.bg} ${stat.emphasize ? 'ring-2 ring-primary/20 shadow-lg shadow-primary/5' : ''} rounded-2xl overflow-hidden group`}>
                   <CardContent className="p-4 flex flex-col items-center justify-center min-h-[100px] text-center">
-                    <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                    <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5 line-clamp-1">
                       {Icon && <Icon className="h-3 w-3" />}
                       {stat.label}
                     </span>
-                    <div className={`text-lg font-black font-mono tracking-tighter ${stat.color}`}>
-                    {stat.prefix}{stat.value.toLocaleString()}
-                    <span className="text-[9px] mr-1 font-sans">د.ع</span>
+                    <div className={`text-lg font-black font-mono tracking-tighter ${stat.color} flex flex-col items-center`}>
+                      <div className="flex items-center">
+                        {stat.prefix}{stat.value.toLocaleString()}
+                        <span className="text-[9px] mr-1 font-sans">د.ع</span>
+                      </div>
+                      {stat.subValue && (
+                        <span className="text-[10px] bg-rose-500 text-white px-1.5 rounded-full mt-1 font-bold">
+                          {stat.subValue}
+                        </span>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -466,77 +560,133 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
             <CardHeader className="p-6 pb-2">
                <CardTitle className="text-xs font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
                  <ImageIcon className="h-4 w-4" />
-                 المرفقات والصور ({images.length})
+                 المرفقات والصور ({allImagesForLightbox.length})
                </CardTitle>
             </CardHeader>
             <CardContent className="p-6">
-               <div className="space-y-6">
-                  {images.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-4">
-                      {images.map((url, index) => (
-                        <div key={index} className="space-y-2 border-b border-border/50 pb-4 last:border-0 last:pb-0">
-                          <div 
-                            className="group relative rounded-xl overflow-hidden border border-border bg-muted cursor-pointer aspect-video" 
-                            onClick={() => setLightboxIndex(index)}
-                          >
-                            <img 
-                              src={url} 
-                              alt={`Invoice ${index + 1}`} 
-                              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" 
-                              referrerPolicy="no-referrer" 
-                            />
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                              <span className="text-white text-[10px] font-bold bg-black/50 px-3 py-1.5 rounded-full flex items-center gap-2 backdrop-blur-sm">
-                                <Maximize2 className="h-3 w-3" />
-                                عرض بالحجم الكامل
-                              </span>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex gap-2">
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="text-[10px] font-black h-8 rounded-lg border-rose-500/20 text-rose-500 hover:bg-rose-500/10 gap-2"
-                                onClick={() => handleImageDelete(index)}
+               <div className="space-y-8">
+                  {/* Invoice Images */}
+                  <div className="space-y-4">
+                     {images.length > 0 && (
+                        <div className="text-[10px] font-black text-muted-foreground uppercase tracking-wider bg-muted/50 px-2 py-1 rounded inline-block">
+                           صور الفاتورة / القائمة
+                        </div>
+                     )}
+                     
+                     {images.length > 0 ? (
+                       <div className="grid grid-cols-1 gap-4">
+                         {images.map((url, index) => (
+                           <div key={index} className="space-y-2 border-b border-border/50 pb-4 last:border-0 last:pb-0">
+                             <div 
+                               className="group relative rounded-xl overflow-hidden border border-border bg-muted cursor-pointer aspect-video" 
+                               onClick={() => setLightboxIndex(index)}
+                             >
+                               <img 
+                                 src={url} 
+                                 alt={`Invoice ${index + 1}`} 
+                                 className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                                 referrerPolicy="no-referrer" 
+                               />
+                               <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                 <span className="text-white text-[10px] font-bold bg-black/50 px-3 py-1.5 rounded-full flex items-center gap-2 backdrop-blur-sm">
+                                   <Maximize2 className="h-3 w-3" />
+                                   عرض بالحجم الكامل
+                                 </span>
+                               </div>
+                             </div>
+                             
+                             <div className="flex items-center justify-between gap-2">
+                               <div className="flex gap-2">
+                                 <Button 
+                                   variant="outline" 
+                                   size="sm" 
+                                   className="text-[10px] font-black h-8 rounded-lg border-rose-500/20 text-rose-500 hover:bg-rose-500/10 gap-2"
+                                   onClick={() => handleImageDelete(index)}
+                                 >
+                                   <Trash2 className="h-3 w-3" />
+                                   حذف
+                                 </Button>
+                                 <div className="relative">
+                                   <input 
+                                     type="file" 
+                                     id={`replace-image-${index}`} 
+                                     className="hidden" 
+                                     accept="image/*" 
+                                     onChange={(e) => handleImageReplace(index, e)}
+                                   />
+                                   <Button 
+                                     variant="outline" 
+                                     size="sm" 
+                                     className="text-[10px] font-black h-8 rounded-lg border-blue-500/20 text-blue-500 hover:bg-blue-500/10 gap-2"
+                                     onClick={() => document.getElementById(`replace-image-${index}`)?.click()}
+                                   >
+                                     <Upload className="h-3 w-3" />
+                                     استبدال
+                                   </Button>
+                                 </div>
+                               </div>
+                               <Button 
+                                 variant="ghost" 
+                                 size="sm" 
+                                 className="text-[10px] font-black h-8 rounded-lg hover:bg-muted gap-2"
+                                 onClick={() => downloadImage(url, index)}
+                               >
+                                 <Download className="h-3 w-3" />
+                                 تحميل
+                               </Button>
+                             </div>
+                           </div>
+                         ))}
+                       </div>
+                     ) : null}
+                  </div>
+
+                  {/* Receipt Images */}
+                  {receiptImages.length > 0 && (
+                     <div className="space-y-4 pt-4 border-t-2 border-dashed border-border/40">
+                        <div className="text-[10px] font-black text-blue-600 uppercase tracking-wider bg-blue-50/50 px-2 py-1 rounded inline-block">
+                           صور وصولات التسديد
+                        </div>
+                        
+                        <div className="grid grid-cols-1 gap-4">
+                          {receiptImages.map((url, index) => (
+                            <div key={index} className="space-y-2 border-b border-border/50 pb-4 last:border-0 last:pb-0">
+                              <div 
+                                className="group relative rounded-xl overflow-hidden border border-border bg-muted cursor-pointer aspect-video" 
+                                onClick={() => setLightboxIndex(images.length + index)}
                               >
-                                <Trash2 className="h-3 w-3" />
-                                حذف
-                              </Button>
-                              <div className="relative">
-                                <input 
-                                  type="file" 
-                                  id={`replace-image-${index}`} 
-                                  className="hidden" 
-                                  accept="image/*" 
-                                  onChange={(e) => handleImageReplace(index, e)}
+                                <img 
+                                  src={url} 
+                                  alt={`Receipt ${index + 1}`} 
+                                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                                  referrerPolicy="no-referrer" 
                                 />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <span className="text-white text-[10px] font-bold bg-black/50 px-3 py-1.5 rounded-full flex items-center gap-2 backdrop-blur-sm">
+                                    <Maximize2 className="h-3 w-3" />
+                                    عرض بالحجم الكامل
+                                  </span>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center justify-end">
                                 <Button 
-                                  variant="outline" 
+                                  variant="ghost" 
                                   size="sm" 
-                                  className="text-[10px] font-black h-8 rounded-lg border-blue-500/20 text-blue-500 hover:bg-blue-500/10 gap-2"
-                                  onClick={() => document.getElementById(`replace-image-${index}`)?.click()}
+                                  className="text-[10px] font-black h-8 rounded-lg hover:bg-muted gap-2"
+                                  onClick={() => downloadImage(url, images.length + index)}
                                 >
-                                  <Upload className="h-3 w-3" />
-                                  استبدال
+                                  <Download className="h-3 w-3" />
+                                  تحميل
                                 </Button>
                               </div>
                             </div>
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              className="text-[10px] font-black h-8 rounded-lg hover:bg-muted gap-2"
-                              onClick={() => downloadImage(url, index)}
-                            >
-                              <Download className="h-3 w-3" />
-                              تحميل
-                            </Button>
-                          </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
+                     </div>
+                  )}
+
+                  {allImagesForLightbox.length === 0 && (
                     <div className="py-12 text-center bg-muted/30 border-2 border-dashed border-border rounded-2xl flex flex-col items-center gap-3">
                       <ImageIcon className="h-10 w-10 text-muted-foreground opacity-20" />
                       <div className="text-[10px] text-muted-foreground font-black uppercase">لا توجد صور مرفقة لهذه الفاتورة</div>

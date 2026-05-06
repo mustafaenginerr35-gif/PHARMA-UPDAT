@@ -19,7 +19,8 @@ import {
   Camera,
   X,
   Image as ImageIcon,
-  Maximize2
+  Maximize2,
+  Pencil
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,7 @@ interface MedicineRequestsPageProps {
 
 export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ branchId, ownerId }) => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [editingRequest, setEditingRequest] = useState<MedicineRequest | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -70,6 +72,28 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
     notes: '',
     imageUrl: ''
   });
+
+  React.useEffect(() => {
+    if (editingRequest) {
+      setFormData({
+        patientName: editingRequest.patientName,
+        phone: editingRequest.phone,
+        medicineName: editingRequest.medicineName,
+        quantity: editingRequest.quantity,
+        notes: editingRequest.notes || '',
+        imageUrl: editingRequest.imageUrl || ''
+      });
+    } else {
+      setFormData({
+        patientName: '',
+        phone: '',
+        medicineName: '',
+        quantity: '',
+        notes: '',
+        imageUrl: ''
+      });
+    }
+  }, [editingRequest]);
 
   const constraints = useMemo(() => [
     where('ownerId', '==', ownerId)
@@ -121,22 +145,38 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
     }
 
     try {
-      const newRequest: Omit<MedicineRequest, 'id'> = {
-        patientName: formData.patientName,
-        phone: formData.phone,
-        medicineName: formData.medicineName,
-        quantity: formData.quantity || '1',
-        status: 'waiting',
-        notes: formData.notes,
-        imageUrl: formData.imageUrl || null,
-        branchId: branchId || null,
-        ownerId,
-        createdAt: new Date()
-      };
+      if (editingRequest) {
+        await firebaseService.updateDocument('medicineRequests', editingRequest.id!, {
+          patientName: formData.patientName,
+          phone: formData.phone,
+          medicineName: formData.medicineName,
+          quantity: formData.quantity || '1',
+          notes: formData.notes,
+          imageUrl: formData.imageUrl || null,
+          updatedAt: new Date()
+        });
+        toast.success('تم تحديث الطلب بنجاح');
+        setEditingRequest(null);
+      } else {
+        const newRequest: Omit<MedicineRequest, 'id'> = {
+          patientName: formData.patientName,
+          phone: formData.phone,
+          medicineName: formData.medicineName,
+          quantity: formData.quantity || '1',
+          status: 'waiting',
+          notes: formData.notes,
+          imageUrl: formData.imageUrl || null,
+          branchId: branchId || null,
+          ownerId,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
 
-      await firebaseService.addDocument('medicineRequests', newRequest as MedicineRequest);
-      toast.success('تم تسجيل الطلب بنجاح');
-      setIsAddDialogOpen(false);
+        await firebaseService.addDocument('medicineRequests', newRequest as MedicineRequest);
+        toast.success('تم تسجيل الطلب بنجاح');
+        setIsAddDialogOpen(false);
+      }
+      
       setFormData({
         patientName: '',
         phone: '',
@@ -250,19 +290,18 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
           <p className="text-muted-foreground font-bold text-sm">تسجيل ومتابعة طلبات المراجعين للأدوية غير المتوفرة</p>
         </div>
 
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger
-            render={
-              <Button className="rounded-xl px-6 h-11 font-black gap-2 shadow-lg shadow-primary/20">
-                <Plus className="h-5 w-5" />
-                تسجيل طلب جديد
-              </Button>
-            }
-          />
-          <DialogContent className="max-w-xl rounded-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
-            <DialogHeader>
-              <DialogTitle className="text-xl font-black text-right">إضافة طلب علاج جديد</DialogTitle>
-            </DialogHeader>
+      <Dialog open={isAddDialogOpen || !!editingRequest} onOpenChange={(open) => {
+        if (!open) {
+          setIsAddDialogOpen(false);
+          setEditingRequest(null);
+        }
+      }}>
+        <DialogContent className="max-w-xl rounded-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black text-right">
+              {editingRequest ? 'تعديل طلب العلاج' : 'إضافة طلب علاج جديد'}
+            </DialogTitle>
+          </DialogHeader>
             <div className="grid gap-6 py-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -359,11 +398,28 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
               </div>
             </div>
             <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className="rounded-xl h-11 font-black">إلغاء</Button>
-              <Button onClick={handleAddRequest} className="rounded-xl h-11 font-black px-8">حفظ الطلب</Button>
+              <Button variant="outline" onClick={() => {
+                setIsAddDialogOpen(false);
+                setEditingRequest(null);
+              }} className="rounded-xl h-11 font-black">إلغاء</Button>
+              <Button onClick={handleAddRequest} className="rounded-xl h-11 font-black px-8">
+                {editingRequest ? 'حفظ التغييرات' : 'حفظ الطلب'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      </div>
+
+      <div className="flex justify-end mb-4">
+        {!isAddDialogOpen && !editingRequest && (
+          <Button 
+            className="rounded-xl px-6 h-11 font-black gap-2 shadow-lg shadow-primary/20"
+            onClick={() => setIsAddDialogOpen(true)}
+          >
+            <Plus className="h-5 w-5" />
+            تسجيل طلب جديد
+          </Button>
+        )}
       </div>
 
       {/* Filters & Search */}
@@ -503,6 +559,16 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
                             إرسال واتساب
                           </Button>
                         )}
+
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="text-[10px] font-black h-9 border-primary/20 text-primary hover:bg-primary/10 gap-1.5"
+                          onClick={() => setEditingRequest(req)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          تعديل
+                        </Button>
 
                         <Button 
                           variant="outline" 

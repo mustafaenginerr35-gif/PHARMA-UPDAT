@@ -30,16 +30,19 @@ import { CurrencyInput } from '@/components/ui/CurrencyInput';
 interface ExpenseFormProps {
   onSubmit: (data: any) => void;
   onClose: () => void;
+  initialData?: any;
 }
 
-export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
-  const [category, setCategory] = useState<string>('rent_pharmacy');
-  const [expenseType, setExpenseType] = useState<'fixed' | 'variable'>('fixed');
-  const [amount, setAmount] = useState<number>(0);
+export const ExpenseForm = ({ onSubmit, onClose, initialData }: ExpenseFormProps) => {
+  const [category, setCategory] = useState<string>(initialData?.category || 'rent_pharmacy');
+  const [expenseType, setExpenseType] = useState<'fixed' | 'variable'>(initialData?.expenseType || 'fixed');
+  const [amount, setAmount] = useState<number>(initialData?.amount || 0);
 
   const handleTypeChange = (type: 'fixed' | 'variable') => {
     setExpenseType(type);
-    setCategory(type === 'fixed' ? 'rent_pharmacy' : 'salaries');
+    if (!initialData) {
+      setCategory(type === 'fixed' ? 'rent_pharmacy' : 'salaries');
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -52,6 +55,7 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
       expenseType,
       amount: amount,
       date: new Date(data.date as string),
+      updatedAt: new Date()
     });
   };
 
@@ -117,7 +121,7 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                   <Input 
                     name="date" 
                     type="date" 
-                    defaultValue={format(new Date(), 'yyyy-MM-dd')} 
+                    defaultValue={initialData?.date ? format(new Date(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
                     required 
                     className="bg-muted border-border text-foreground h-14 rounded-xl pr-10 font-bold shadow-sm" 
                   />
@@ -237,11 +241,11 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black text-muted-foreground uppercase">الشركة المزودة</Label>
-                      <Input name="provider" placeholder="إيرث لنك / غيرها" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                      <Input name="provider" defaultValue={initialData?.provider || ''} placeholder="إيرث لنك / غيرها" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black text-muted-foreground uppercase">نوع الاشتراك</Label>
-                      <Input name="subscriptionType" placeholder="منزلي / تجاري" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                      <Input name="subscriptionType" defaultValue={initialData?.subscriptionType || ''} placeholder="منزلي / تجاري" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                     </div>
                   </div>
                 )}
@@ -249,7 +253,7 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                 {category === 'service_worker' && (
                   <div className="space-y-2">
                     <Label className="text-[10px] font-black text-muted-foreground uppercase">اسم العامل المستلم</Label>
-                    <Input name="workerName" placeholder="الاسم الكامل" className="bg-background border-border text-foreground h-12 rounded-xl font-bold" />
+                    <Input name="workerName" defaultValue={initialData?.workerName || ''} placeholder="الاسم الكامل" className="bg-background border-border text-foreground h-12 rounded-xl font-bold" />
                   </div>
                 )}
 
@@ -258,17 +262,17 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                     <div className="grid grid-cols-1 gap-4">
                       <div className="space-y-2">
                         <Label className="text-[10px] font-black text-muted-foreground uppercase">اسم الموظف</Label>
-                        <Input name="employeeName" placeholder="الاسم الكامل" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                        <Input name="employeeName" defaultValue={initialData?.employeeName || ''} placeholder="الاسم الكامل" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label className="text-[10px] font-black text-muted-foreground uppercase">المسمى الوظيفي</Label>
-                        <Input name="jobTitle" placeholder="مثلاً: صيدلي" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                        <Input name="jobTitle" defaultValue={initialData?.jobTitle || ''} placeholder="مثلاً: صيدلي" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                       </div>
                       <div className="space-y-2">
                         <Label className="text-[10px] font-black text-muted-foreground uppercase">نوع الدفع</Label>
-                        <Select name="salaryPaymentType" defaultValue="full">
+                        <Select name="salaryPaymentType" defaultValue={initialData?.salaryPaymentType || 'full'}>
                           <SelectTrigger className="bg-background border-border text-foreground h-11 rounded-xl font-bold">
                             <SelectValue />
                           </SelectTrigger>
@@ -287,7 +291,7 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                   <div className="grid grid-cols-1 gap-4">
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black text-muted-foreground uppercase">نوع الخدمة</Label>
-                      <Select name="serviceType" defaultValue="generator">
+                      <Select name="serviceType" defaultValue={initialData?.serviceType || 'generator'}>
                         <SelectTrigger className="bg-background border-border text-foreground h-11 rounded-xl font-bold">
                           <SelectValue />
                         </SelectTrigger>
@@ -304,11 +308,11 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black text-muted-foreground uppercase">جهة النقل / السائق</Label>
-                      <Input name="handler" placeholder="اسم الشركة" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                      <Input name="handler" defaultValue={initialData?.handler || ''} placeholder="اسم الشركة" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black text-muted-foreground uppercase">نوع الإرسالية</Label>
-                      <Input name="transportType" placeholder="توصيل أدوية" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                      <Input name="transportType" defaultValue={initialData?.transportType || ''} placeholder="توصيل أدوية" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                     </div>
                   </div>
                 )}
@@ -317,11 +321,11 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black text-muted-foreground uppercase">المنصة / القناة</Label>
-                      <Input name="channel" placeholder="فيسبوك / انستغرام" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                      <Input name="channel" defaultValue={initialData?.channel || ''} placeholder="فيسبوك / انستغرام" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black text-muted-foreground uppercase">الحملة الإعلانية</Label>
-                      <Input name="campaign" placeholder="عروض العيد" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                      <Input name="campaign" defaultValue={initialData?.campaign || ''} placeholder="عروض العيد" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                     </div>
                   </div>
                 )}
@@ -330,11 +334,11 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black text-muted-foreground uppercase">طبيعة العطل / الصيانة</Label>
-                      <Input name="repairType" placeholder="تصليح تكييف" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                      <Input name="repairType" defaultValue={initialData?.repairType || ''} placeholder="تصليح تكييف" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black text-muted-foreground uppercase">الجهاز أو القسم</Label>
-                      <Input name="target" placeholder="جهاز التبريد" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
+                      <Input name="target" defaultValue={initialData?.target || ''} placeholder="جهاز التبريد" className="bg-background border-border text-foreground h-11 rounded-xl font-bold" />
                     </div>
                   </div>
                 )}
@@ -342,7 +346,7 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
                 {category === 'other' && (
                   <div className="space-y-2">
                     <Label className="text-[10px] font-black text-muted-foreground uppercase">عنوان المصروف</Label>
-                    <Input name="expenseName" placeholder="وصف موجز للمصروف" className="bg-background border-border text-foreground h-12 rounded-xl font-bold" />
+                    <Input name="expenseName" defaultValue={initialData?.expenseName || ''} placeholder="وصف موجز للمصروف" className="bg-background border-border text-foreground h-12 rounded-xl font-bold" />
                   </div>
                 )}
               </motion.div>
@@ -355,6 +359,7 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
             <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">{category === 'other' ? 'التفاصيل الكاملة' : 'بيان المصروف (اختياري)'}</Label>
             <Input 
               name="description" 
+              defaultValue={initialData?.description || ''}
               placeholder="مثلاً: سداد فاتورة الكهرباء..." 
               className="bg-muted border-border text-foreground h-12 rounded-xl font-bold" 
             />
@@ -363,6 +368,7 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
             <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">أي ملاحظات أخرى</Label>
             <Input 
               name="notes" 
+              defaultValue={initialData?.notes || ''}
               placeholder="ملاحظات اختيارية..." 
               className="bg-muted border-border text-foreground h-12 rounded-xl font-bold" 
             />
@@ -375,7 +381,7 @@ export const ExpenseForm = ({ onSubmit, onClose }: ExpenseFormProps) => {
           type="submit" 
           className="flex-3 font-black text-2xl h-16 rounded-3xl shadow-2xl transition-all scale-100 hover:scale-[1.02] active:scale-[0.98] bg-rose-600 hover:bg-rose-700 shadow-rose-500/30"
         >
-          تأكيد عملية الصرف والخصم
+          {initialData ? 'حفظ التعديلات' : 'تأكيد عملية الصرف والخصم'}
         </Button>
         <Button 
           type="button" 

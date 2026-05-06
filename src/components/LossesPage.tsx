@@ -10,7 +10,9 @@ import {
   FileText,
   Search,
   ChevronLeft,
-  Filter
+  Filter,
+  MoreVertical,
+  Pencil
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,10 +23,12 @@ import { type ExpiredDamagedLoss } from '../db';
 interface LossesPageProps {
   losses: ExpiredDamagedLoss[];
   onAdd: () => void;
+  onEdit: (loss: ExpiredDamagedLoss) => void;
+  onDelete: (loss: ExpiredDamagedLoss) => void;
   onViewInvoice: (invoiceId: string) => void;
 }
 
-export const LossesPage = ({ losses, onAdd, onViewInvoice }: LossesPageProps) => {
+export const LossesPage = ({ losses, onAdd, onEdit, onDelete, onViewInvoice }: LossesPageProps) => {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [filterType, setFilterType] = React.useState<'all' | 'expired' | 'damaged'>('all');
 
@@ -133,7 +137,7 @@ export const LossesPage = ({ losses, onAdd, onViewInvoice }: LossesPageProps) =>
                 <th className="px-6 py-5">سعر الشراء</th>
                 <th className="px-6 py-5">إجمالي الخسارة</th>
                 <th className="px-6 py-5">الارتباط</th>
-                <th className="px-6 py-5"></th>
+                <th className="px-6 py-5 text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/30">
@@ -174,6 +178,26 @@ export const LossesPage = ({ losses, onAdd, onViewInvoice }: LossesPageProps) =>
                       ) : (
                         <span className="text-[10px] text-muted-foreground font-bold italic">غير مرتبطة</span>
                       )}
+                    </td>
+                    <td className="px-6 py-5">
+                      <div className="flex items-center justify-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+                          onClick={() => onEdit(loss)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-lg text-rose-500 hover:bg-rose-500/10"
+                          onClick={() => onDelete(loss)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))

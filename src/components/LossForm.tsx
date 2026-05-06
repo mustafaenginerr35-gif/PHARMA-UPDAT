@@ -23,28 +23,27 @@ interface LossFormProps {
   onSubmit: (data: any) => void;
   onClose: () => void;
   invoices: LedgerEntry[];
+  initialData?: any;
 }
 
-export const LossForm = ({ onSubmit, onClose, invoices }: LossFormProps) => {
-  const [lossType, setLossType] = useState<'expired' | 'damaged'>('expired');
-  const [itemName, setItemName] = useState('');
-  const [quantity, setQuantity] = useState<string>('');
-  const [purchasePrice, setPurchasePrice] = useState<string>('');
-  const [totalLoss, setTotalLoss] = useState<string>('0');
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+export const LossForm = ({ onSubmit, onClose, invoices, initialData }: LossFormProps) => {
+  const [lossType, setLossType] = useState<'expired' | 'damaged'>(initialData?.lossType || 'expired');
+  const [itemName, setItemName] = useState(initialData?.itemName || '');
+  const [quantity, setQuantity] = useState<string>(initialData?.quantity?.toString() || '');
+  const [purchasePrice, setPurchasePrice] = useState<string>(initialData?.purchasePrice ? formatNumberWithCommas(initialData.purchasePrice) : '');
+  const [totalLoss, setTotalLoss] = useState<string>(initialData?.totalLoss ? formatNumberWithCommas(initialData.totalLoss) : '0');
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>(initialData?.invoiceId || '');
+  const [date, setDate] = useState(initialData?.date ? new Date(initialData.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
 
   // Handle invoice change - auto fill purchase price if possible
   useEffect(() => {
-    if (selectedInvoiceId) {
+    if (selectedInvoiceId && !initialData) {
       const inv = invoices.find(i => i.id === selectedInvoiceId);
       if (inv) {
-        // In a real app we might have invoice items, 
-        // but here we just have the total amount.
-        // If we want to be smart, we might not have the item unit price on the ledger entry directly.
+        // ...
       }
     }
-  }, [selectedInvoiceId, invoices]);
+  }, [selectedInvoiceId, invoices, initialData]);
 
   // Recalculate total loss
   useEffect(() => {
@@ -59,15 +58,15 @@ export const LossForm = ({ onSubmit, onClose, invoices }: LossFormProps) => {
     const p = parseFormattedNumber(purchasePrice);
     
     onSubmit({
+      ...initialData,
       date: new Date(date),
       lossType,
       itemName,
       quantity: q,
       purchasePrice: p,
       totalLoss: q * p,
-      invoiceId: selectedInvoiceId || null,
+      invoiceId: selectedInvoiceId === 'none' ? null : selectedInvoiceId || null,
       notes: (e.currentTarget as any).notes.value,
-      createdAt: new Date(),
       updatedAt: new Date()
     });
   };
@@ -198,6 +197,7 @@ export const LossForm = ({ onSubmit, onClose, invoices }: LossFormProps) => {
         <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">ملاحظات إضافية</Label>
         <Textarea 
           name="notes" 
+          defaultValue={initialData?.notes || ''}
           placeholder="اكتب تفاصيل إضافية هنا..." 
           className="bg-muted border-border text-foreground h-24 rounded-xl font-bold text-right" 
         />
@@ -208,7 +208,7 @@ export const LossForm = ({ onSubmit, onClose, invoices }: LossFormProps) => {
           type="submit" 
           className="flex-3 font-black text-xl h-16 rounded-2xl bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-500/20"
         >
-          حفظ وتسجيل الخسارة
+          {initialData ? 'حفظ التعديلات' : 'حفظ وتسجيل الخسارة'}
         </Button>
         <Button 
           type="button" 

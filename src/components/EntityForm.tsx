@@ -26,6 +26,28 @@ interface EntityFormProps {
   entity?: any;
 }
 
+export interface Entity {
+  id?: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  type: 'office' | 'scientific_office' | 'personal' | 'warehouse';
+  balance: number;
+  initialBalance: number;
+  totalInvoices: number;
+  totalPayments: number;
+  limit: number;
+  dueDate?: Date;
+  nextDueDate?: Date;
+  lastPaymentDate?: Date;
+  notes?: string;
+  branchId?: string;
+  ownerId: string;
+  username?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
 export const EntityForm = ({ onSubmit, onClose, entity }: EntityFormProps) => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,8 +55,9 @@ export const EntityForm = ({ onSubmit, onClose, entity }: EntityFormProps) => {
     const data = Object.fromEntries(formData.entries());
     onSubmit({
       ...data,
-      initialBalance: parseFormattedNumber(data.initialBalance as string),
-      limit: parseFormattedNumber(data.limit as string),
+      initialBalance: parseFormattedNumber(data.initialBalance as string || entity?.initialBalance?.toString() || '0'),
+      limit: parseFormattedNumber(data.limit as string || entity?.limit?.toString() || '0'),
+      updatedAt: new Date()
     });
   };
 
@@ -85,29 +108,40 @@ export const EntityForm = ({ onSubmit, onClose, entity }: EntityFormProps) => {
           </div>
         </div>
 
-        {!entity && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-card border border-border rounded-2xl shadow-inner group">
-            <div className="space-y-2">
-              <Label className="text-emerald-600 font-black text-[10px] uppercase tracking-widest flex items-center gap-2">
-                <DollarSign className="h-3 w-3" />
-                رصيد الافتتاح (المبلغ المطلوب حالياً)
-              </Label>
-              <CurrencyInput 
-                name="initialBalance" 
-                defaultValue={0} 
-                className="bg-muted border-emerald-500/20 text-emerald-600 h-14 rounded-xl font-mono text-xl font-black shadow-sm" 
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-rose-500 font-black text-[10px] uppercase tracking-widest">تحذير سقف الدين (الحد الائتماني)</Label>
-              <CurrencyInput 
-                name="limit" 
-                defaultValue={entity?.limit || 0} 
-                className="bg-muted border-rose-500/20 text-rose-500 h-14 rounded-xl font-mono text-xl font-black shadow-sm" 
-              />
-            </div>
+        <div className="space-y-2">
+          <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest text-right block">حالة الحساب</Label>
+          <Select name="status" defaultValue={entity?.status || "نشط"}>
+            <SelectTrigger className="bg-muted border-border text-foreground h-14 rounded-xl font-black text-lg shadow-sm w-full text-right px-4">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-card border-border text-foreground" align="end">
+              <SelectItem value="نشط" className="py-4 font-bold text-right cursor-pointer hover:bg-emerald-500/10 transition-colors">نشط (فعال)</SelectItem>
+              <SelectItem value="مؤرشف" className="py-4 font-bold text-right cursor-pointer hover:bg-slate-500/10 transition-colors">مؤرشف</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-card border border-border rounded-2xl shadow-inner group">
+          <div className="space-y-2">
+            <Label className="text-emerald-600 font-black text-[10px] uppercase tracking-widest flex items-center gap-2">
+              <DollarSign className="h-3 w-3" />
+              {entity ? 'تعديل الرصيد الافتتاحي' : 'رصيد الافتتاح (المبلغ المطلوب حالياً)'}
+            </Label>
+            <CurrencyInput 
+              name="initialBalance" 
+              defaultValue={entity?.initialBalance || 0} 
+              className="bg-muted border-emerald-500/20 text-emerald-600 h-14 rounded-xl font-mono text-xl font-black shadow-sm" 
+            />
           </div>
-        )}
+          <div className="space-y-2">
+            <Label className="text-rose-500 font-black text-[10px] uppercase tracking-widest">تحذير سقف الدين (الحد الائتماني)</Label>
+            <CurrencyInput 
+              name="limit" 
+              defaultValue={entity?.limit || 0} 
+              className="bg-muted border-rose-500/20 text-rose-500 h-14 rounded-xl font-mono text-xl font-black shadow-sm" 
+            />
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="space-y-2">

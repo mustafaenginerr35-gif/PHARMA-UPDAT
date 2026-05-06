@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Building2, 
   Calendar, 
@@ -32,15 +32,53 @@ interface InvoiceFormProps {
   onSubmit: (data: any) => void;
   onClose: () => void;
   onImagesChange: (files: File[]) => void;
+  initialData?: any;
 }
 
-export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit, onClose, onImagesChange }: InvoiceFormProps) => {
-  const [purchaseType, setPurchaseType] = useState<'cash' | 'credit'>('credit');
-  const [bonusLater, setBonusLater] = useState(false);
-  const [selectedEntityId, setSelectedEntityId] = useState<string>(initialEntity?.id || '');
-  const [amount, setAmount] = useState<number>(0);
-  const [discount, setDiscount] = useState<number>(0);
-  const [images, setImages] = useState<{file: File, preview: string}[]>([]);
+export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit, onClose, onImagesChange, initialData }: InvoiceFormProps) => {
+  const [purchaseType, setPurchaseType] = useState<'cash' | 'credit'>(initialData?.purchaseType || 'credit');
+  const [bonusLater, setBonusLater] = useState(initialData?.bonusLater || false);
+  const [selectedEntityId, setSelectedEntityId] = useState<string>(initialData?.accountId || initialEntity?.id || '');
+  const [amount, setAmount] = useState<number>(initialData?.amount || 0);
+  const [discountType, setDiscountType] = useState<'fixed' | 'percentage'>(initialData?.discountType || 'fixed');
+  const [discount, setDiscount] = useState<number>(initialData?.discount || 0);
+  const [discountPercentage, setDiscountPercentage] = useState<number>(
+    initialData?.discountPercentage || (initialData?.amount && initialData?.discount ? (initialData.discount / initialData.amount) * 100 : 0)
+  );
+
+  const netAmount = useMemo(() => {
+    return Math.max(0, amount - discount);
+  }, [amount, discount]);
+
+  const handleAmountChange = (val: number) => {
+    setAmount(val);
+    if (discountType === 'percentage') {
+      const newDiscount = (val * discountPercentage) / 100;
+      setDiscount(newDiscount);
+    } else {
+      if (val > 0) {
+        setDiscountPercentage((discount / val) * 100);
+      }
+    }
+  };
+
+  const handleDiscountChange = (val: number) => {
+    setDiscount(val);
+    if (amount > 0) {
+      setDiscountPercentage((val / amount) * 100);
+    }
+  };
+
+  const handlePercentageChange = (val: number) => {
+    setDiscountPercentage(val);
+    const newDiscount = (amount * val) / 100;
+    setDiscount(newDiscount);
+  };
+  const [images, setImages] = useState<{file?: File, preview: string}[]>(
+    Array.isArray(initialData?.imageUrls) 
+      ? initialData.imageUrls.map((url: string) => ({ preview: url })) 
+      : (initialData?.imageUrl ? [{ preview: initialData.imageUrl }] : [])
+  );
 
   const currentEntity = entities.find(e => e.id === selectedEntityId) || initialEntity;
 
@@ -50,16 +88,21 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
     const data = Object.fromEntries(formData.entries());
     
     onSubmit({
+      ...initialData,
       ...data,
       accountId: selectedEntityId,
       purchaseType,
       bonusLater,
-      amount: amount,
-      discount: discount,
-      bonus: parseFormattedNumber(data.bonus as string),
+      amount,
+      discount,
+      discountType,
+      discountPercentage,
+      netAmount,
+      bonus: parseFormattedNumber(data.bonus as string || '0'),
       date: new Date(data.date as string),
       dueDate: purchaseType === 'credit' && data.dueDate ? new Date(data.dueDate as string) : null,
       bonusArrivalDate: bonusLater && data.bonusArrivalDate ? new Date(data.bonusArrivalDate as string) : null,
+      updatedAt: new Date()
     });
   };
 
@@ -74,13 +117,13 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
     
     const updatedImages = [...images, ...newImages];
     setImages(updatedImages);
-    onImagesChange(updatedImages.map(img => img.file));
+    onImagesChange(updatedImages.filter(img => img.file).map(img => img.file!));
   };
 
   const removeImage = (index: number) => {
     const updatedImages = images.filter((_, i) => i !== index);
     setImages(updatedImages);
-    onImagesChange(updatedImages.map(img => img.file));
+    onImagesChange(updatedImages.filter(img => img.file).map(img => img.file!));
   };
 
   return (
@@ -89,14 +132,14 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
         {/* Supplier Selection */}
         <div className="space-y-2">
           <Label className="text-muted-foreground font-bold">المورد / المذخر</Label>
-          {initialEntity ? (
+          {initialEntity && !initialData ? (
             <div className="bg-muted p-4 rounded-xl border border-border flex items-center gap-3">
               <Building2 className="h-5 w-5 text-primary" />
               <span className="font-black text-foreground">{initialEntity.name}</span>
               <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">محدد مسبقاً</span>
             </div>
           ) : (
-            <Select value={selectedEntityId} onValueChange={setSelectedEntityId} required name="entityId">
+            <Select value={selectedEntityId} onValueChange={setSelectedEntityId} required name="entityId" disabled={!!initialData}>
               <SelectTrigger className="bg-muted border-border text-foreground h-12 rounded-xl font-bold">
                 <SelectValue placeholder="اختر المورد" />
               </SelectTrigger>
@@ -144,40 +187,100 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
           <div className="space-y-2">
             <Label className="text-muted-foreground font-bold text-xs uppercase">رقم القائمة</Label>
             <div className="relative">
-              <Input name="invoiceNumber" required placeholder="0000" className="bg-muted border-border text-foreground h-11 rounded-xl pr-10" />
+              <Input 
+                name="invoiceNumber" 
+                defaultValue={initialData?.invoiceNumber}
+                required 
+                placeholder="0000" 
+                className="bg-muted border-border text-foreground h-11 rounded-xl pr-10" 
+              />
               <FileText className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             </div>
           </div>
           <div className="space-y-2">
             <Label className="text-muted-foreground font-bold text-xs uppercase">تاريخ القائمة</Label>
             <div className="relative">
-              <Input name="date" type="date" defaultValue={format(new Date(), 'yyyy-MM-dd')} required className="bg-muted border-border text-foreground h-11 rounded-xl pr-10" />
+              <Input 
+                name="date" 
+                type="date" 
+                defaultValue={initialData?.date ? format(new Date(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
+                required 
+                className="bg-muted border-border text-foreground h-11 rounded-xl pr-10" 
+              />
               <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label className="text-muted-foreground font-bold text-xs uppercase">المبلغ الكلي</Label>
-            <CurrencyInput 
-              name="amount" 
-              required 
-              value={amount}
-              onChange={(val) => setAmount(val)}
-              placeholder="0,000" 
-              className="bg-muted border-border text-foreground h-11 rounded-xl font-mono" 
-            />
+        <div className="bg-muted/30 p-5 rounded-2xl border border-border/50 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-muted-foreground font-bold text-xs uppercase">المبلغ الكلي (قبل الخصم)</Label>
+              <CurrencyInput 
+                name="amount" 
+                required 
+                value={amount}
+                onChange={handleAmountChange}
+                placeholder="0,000" 
+                className="bg-card border-border text-foreground h-12 rounded-xl font-mono text-lg font-black" 
+              />
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center mb-1">
+                <Label className="text-rose-600 font-bold text-xs uppercase">الخصم</Label>
+                <div className="flex bg-muted/80 p-0.5 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setDiscountType('fixed')}
+                    className={`px-3 py-1 text-[10px] font-black rounded-md transition-all ${discountType === 'fixed' ? 'bg-card shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                  >د.ع</button>
+                  <button
+                    type="button"
+                    onClick={() => setDiscountType('percentage')}
+                    className={`px-3 py-1 text-[10px] font-black rounded-md transition-all ${discountType === 'percentage' ? 'bg-card shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                  >%</button>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                {discountType === 'percentage' ? (
+                  <div className="relative flex-1">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={discountPercentage}
+                      onChange={(e) => handlePercentageChange(parseFloat(e.target.value) || 0)}
+                      className="bg-card border-rose-500/20 text-rose-600 h-12 rounded-xl font-mono text-lg font-black pl-8 text-left"
+                    />
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-rose-500 font-bold">%</span>
+                  </div>
+                ) : (
+                  <CurrencyInput 
+                    name="discount" 
+                    value={discount}
+                    onChange={handleDiscountChange}
+                    className="flex-1 bg-card border-rose-500/20 text-rose-600 h-12 rounded-xl font-mono text-lg font-black" 
+                  />
+                )}
+              </div>
+            </div>
           </div>
-          <div className="space-y-2">
-            <Label className="text-rose-500 font-bold text-xs uppercase">الخصم</Label>
-            <CurrencyInput 
-              name="discount" 
-              value={discount}
-              onChange={(val) => setDiscount(val)}
-              className="bg-muted border-rose-500/10 text-rose-500 h-11 rounded-xl font-mono" 
-            />
+
+          <div className="pt-4 border-t border-border/50 flex items-center justify-between">
+             <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+               <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+               المبلغ الصافي (السداد الفعلي):
+             </div>
+             <div className="text-3xl font-black text-emerald-600 font-mono tracking-tighter">
+               {netAmount.toLocaleString()} <span className="text-xs text-muted-foreground mr-1 font-sans">د.ع</span>
+             </div>
           </div>
+          
+          {discount > 0 && (
+            <div className="text-[10px] font-bold text-rose-500/80 bg-rose-500/5 px-3 py-2 rounded-lg border border-rose-500/10 flex justify-between items-center">
+              <span>قيمة التوفير من الخصم:</span>
+              <span className="font-black font-mono">{discount.toLocaleString()} د.ع ({discountPercentage.toFixed(2)}%)</span>
+            </div>
+          )}
         </div>
 
         <AnimatePresence>
@@ -193,7 +296,12 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
                   <AlertCircle className="h-3 w-3" />
                   موعد استحقاق الدين (سداد المورد)
                 </Label>
-                <Input name="dueDate" type="date" className="bg-background border-amber-500/20 text-foreground h-10 rounded-lg" />
+                <Input 
+                  name="dueDate" 
+                  type="date" 
+                  defaultValue={initialData?.dueDate ? format(new Date(initialData.dueDate), 'yyyy-MM-dd') : ''}
+                  className="bg-background border-amber-500/20 text-foreground h-10 rounded-lg" 
+                />
               </div>
             </motion.div>
           )}
@@ -218,12 +326,21 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">قيمة البونص (د.ع)</Label>
-              <CurrencyInput name="bonus" defaultValue={0} className="bg-background border-blue-500/20 text-blue-500 font-bold font-mono h-10 rounded-lg" />
+              <CurrencyInput 
+                name="bonus" 
+                defaultValue={initialData?.bonus || 0} 
+                className="bg-background border-blue-500/20 text-blue-500 font-bold font-mono h-10 rounded-lg" 
+              />
             </div>
             {bonusLater ? (
               <div className="space-y-1 animate-in slide-in-from-right-2">
                 <Label className="text-[10px] text-muted-foreground">موعد الوصول المتوقع</Label>
-                <Input name="bonusArrivalDate" type="date" className="bg-background border-blue-500/20 text-foreground h-10 rounded-lg" />
+                <Input 
+                  name="bonusArrivalDate" 
+                  type="date" 
+                  defaultValue={initialData?.bonusArrivalDate ? format(new Date(initialData.bonusArrivalDate), 'yyyy-MM-dd') : ''}
+                  className="bg-background border-blue-500/20 text-foreground h-10 rounded-lg" 
+                />
               </div>
             ) : (
               <div className="space-y-1 flex flex-col justify-end">
@@ -280,7 +397,12 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
 
         <div className="space-y-2">
           <Label className="text-muted-foreground font-bold text-xs uppercase">ملاحظات إضافية</Label>
-          <Input name="notes" placeholder="ملاحظات على هذه القائمة..." className="bg-muted border-border text-foreground rounded-xl h-11" />
+          <Input 
+            name="notes" 
+            defaultValue={initialData?.notes}
+            placeholder="ملاحظات على هذه القائمة..." 
+            className="bg-muted border-border text-foreground rounded-xl h-11" 
+          />
         </div>
       </div>
 
@@ -289,7 +411,7 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
           type="submit" 
           className="flex-1 font-black text-xl h-14 rounded-2xl shadow-xl transition-all bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20"
         >
-          حفظ الفاتورة
+          {initialData ? 'حفظ التعديلات' : 'حفظ الفاتورة'}
         </Button>
         <Button 
           type="button" 

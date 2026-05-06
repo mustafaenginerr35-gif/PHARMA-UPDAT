@@ -14,7 +14,8 @@ import {
   type DocumentData,
   type QueryConstraint
 } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db, auth, storage } from '../lib/firebase';
 
 enum OperationType {
   CREATE = 'create',
@@ -205,5 +206,32 @@ export const firebaseService = {
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, collectionName);
     });
+  },
+
+  async uploadImage(path: string, base64String: string) {
+    const { uid, authenticated } = getEffectiveUserInfo();
+    if (!authenticated) throw new Error('يرجى تسجيل الدخول أولاً');
+    
+    try {
+      const storageRef = ref(storage, `${path}/${uid}_${Date.now()}_${Math.random().toString(36).substring(7)}`);
+      // Clean base64 string (remove data:image/png;base64, if present)
+      const cleanBase64 = base64String.includes(',') ? base64String.split(',')[1] : base64String;
+      
+      const snapshot = await uploadString(storageRef, cleanBase64, 'base64');
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      return downloadURL;
+    } catch (error) {
+      console.error('[Firebase] Error uploading image:', error);
+      throw error;
+    }
+  },
+
+  async deleteImage(url: string) {
+    try {
+      const imageRef = ref(storage, url);
+      await deleteObject(imageRef);
+    } catch (error) {
+      console.error('[Firebase] Error deleting image:', error);
+    }
   }
 };
