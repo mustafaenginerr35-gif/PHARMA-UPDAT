@@ -1,0 +1,140 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return (isSignedIn() && request.auth.uid == userId) || userId == 'demo-user';
+    }
+
+    function isDataOwner() {
+      return (isSignedIn() && request.auth.uid == resource.data.ownerId) || resource.data.ownerId == 'demo-user';
+    }
+    
+    function isNewDataOwner() {
+      return (isSignedIn() && request.auth.uid == request.resource.data.ownerId) || request.resource.data.ownerId == 'demo-user';
+    }
+
+    function canRead(ownerId) {
+      return (isSignedIn() && request.auth.uid == ownerId) || ownerId == 'demo-user';
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /settings/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // General collections shared by ownerId
+    match /transactions/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /entities/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /ledgerEntries/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /branches/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+    
+    match /notifications/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /customerDebts/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /deadlines/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /employees/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /employeeAttendance/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+    
+    match /historicalRecords/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /medicineRequests/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /bonuses/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /expiredDamagedLosses/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /activationCodes/{id} {
+      allow read: if isSignedIn() || true; // Demo access
+      allow write: if false; 
+    }
+
+    match /activationRequests/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /announcements/{id} {
+      allow read: if isSignedIn() || true; // Demo access
+      allow write: if false; 
+    }
+
+    match /announcementReads/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+  }
+}

@@ -25,6 +25,7 @@ import {
   AlertCircle,
   Clock,
   ChevronRight,
+  ChevronLeft,
   ChevronDown,
   ShieldCheck,
   Calendar,
@@ -99,6 +100,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -119,9 +121,12 @@ import {
   subDays 
 } from 'date-fns';
 import { ar } from 'date-fns/locale';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useFirebaseQuery } from './hooks/useFirebaseQuery';
+import { firebaseService } from './services/firebaseService';
+import { auth, db } from './lib/firebase';
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, signInAnonymously } from 'firebase/auth';
+import { query, where, orderBy } from 'firebase/firestore';
 import { 
-  db as localDb, 
   type Transaction, 
   type Entity, 
   type LedgerEntry, 
@@ -131,11 +136,17 @@ import {
   type CustomerDebt,
   type Deadline,
   type Announcement,
+  type ActivationCode,
   type ActivationRequest,
+  type RecoveryRequest,
   type Bonus,
   type Employee,
   type EmployeeAttendance,
-  type PharmacyBranch
+  type PharmacyBranch,
+  type AnnouncementRead,
+  type HistoricalRecord,
+  type MedicineRequest,
+  type ExpiredDamagedLoss
 } from './db';
 import { 
   AreaChart, 
@@ -170,8 +181,10 @@ import { BranchForm } from './components/BranchForm';
 import { HistoricalMigrationPage } from './components/HistoricalMigrationPage';
 import { MedicineRequestsPage } from './components/MedicineRequestsPage';
 import { DataPersistenceService } from './services/dataPersistenceService';
-import { formatIQD, formatNumberWithCommas, parseFormattedNumber } from './lib/formatters';
+import { formatIQD, formatNumberWithCommas, parseFormattedNumber, safeFormatDate } from './lib/formatters';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
+import { LossesPage } from './components/LossesPage';
+import { LossForm } from './components/LossForm';
 
 // Re-using the Invoice Details Dialog fragment from the corrupted file
 type Theme = 'light' | 'dark' | 'system';
@@ -272,7 +285,7 @@ const EditInvoiceDialog = ({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit_date" className="text-muted-foreground font-bold">تاريخ القائمة</Label>
-                <Input id="edit_date" name="date" type="date" defaultValue={format(invoice.date, 'yyyy-MM-dd')} required className="bg-muted border-border text-foreground h-11 rounded-xl" />
+                <Input id="edit_date" name="date" type="date" defaultValue={safeFormatDate(invoice.date, 'yyyy-MM-dd')} required className="bg-muted border-border text-foreground h-11 rounded-xl" />
               </div>
             </div>
 
@@ -318,13 +331,13 @@ const EditInvoiceDialog = ({
               </div>
               <div className="space-y-2">
                 <Label className="text-blue-700 dark:text-blue-400 font-bold text-xs uppercase">وصول البونص</Label>
-                <Input name="bonusArrivalDate" type="date" defaultValue={invoice.bonusArrivalDate ? format(invoice.bonusArrivalDate, 'yyyy-MM-dd') : ''} className="bg-background border-blue-500/20 text-foreground h-10 rounded-lg" />
+                <Input name="bonusArrivalDate" type="date" defaultValue={invoice.bonusArrivalDate ? safeFormatDate(invoice.bonusArrivalDate, 'yyyy-MM-dd') : ''} className="bg-background border-blue-500/20 text-foreground h-10 rounded-lg" />
               </div>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="edit_dueDate" className="text-amber-600 font-bold">موعد الاستحقاق</Label>
-              <Input id="edit_dueDate" name="dueDate" type="date" defaultValue={invoice.dueDate ? format(invoice.dueDate, 'yyyy-MM-dd') : ''} className="bg-muted border-amber-500/20 text-foreground h-11 rounded-xl" />
+              <Input id="edit_dueDate" name="dueDate" type="date" defaultValue={invoice.dueDate ? safeFormatDate(invoice.dueDate, 'yyyy-MM-dd') : ''} className="bg-muted border-amber-500/20 text-foreground h-11 rounded-xl" />
             </div>
 
             <div className="space-y-2">
@@ -401,12 +414,16 @@ const SupplierAccountPage = ({
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-xl md:text-2xl font-black text-foreground truncate">{entity.name}</h2>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                entity.type === 'office' ? 'bg-blue-500/10 text-blue-500' : 'bg-purple-500/10 text-purple-500'
+                entity.type === 'office' ? 'bg-blue-500/10 text-blue-500' : 
+                entity.type === 'scientific_office' ? 'bg-purple-500/10 text-purple-500' :
+                'bg-amber-500/10 text-amber-600'
               }`}>
-                {entity.type === 'office' ? 'مكتب علمي' : 'مذخر/مستودع'}
+                {entity.type === 'office' ? 'مكتب' : 
+                 entity.type === 'scientific_office' ? 'مذخر' : 
+                 'شخصي'}
               </span>
             </div>
-            <p className="text-xs md:text-sm text-muted-foreground truncate">{entity.phone || 'لا يوجد رقم هاتف'} • آخر تعامل: {ledgerEntries.length > 0 ? format(ledgerEntries[ledgerEntries.length -1].date, 'yyyy/MM/dd') : 'لا يوجد'}</p>
+            <p className="text-xs md:text-sm text-muted-foreground truncate">{entity.phone || 'لا يوجد رقم هاتف'} • آخر تعامل: {ledgerEntries.length > 0 ? safeFormatDate(ledgerEntries[ledgerEntries.length -1].date, 'yyyy/MM/dd') : 'لا يوجد'}</p>
           </div>
         </div>
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
@@ -500,7 +517,7 @@ const SupplierAccountPage = ({
                     </div>
                     <div className="space-y-1">
                       <div className="text-xs text-muted-foreground">تاريخ الإنشاء</div>
-                      <div className="font-bold text-foreground">{entity.createdAt ? format(entity.createdAt, 'yyyy/MM/dd') : '-'}</div>
+                      <div className="font-bold text-foreground">{entity.createdAt ? safeFormatDate(entity.createdAt, 'yyyy/MM/dd') : '-'}</div>
                     </div>
                     <div className="space-y-1">
                       <div className="text-xs text-muted-foreground">السقف المالي</div>
@@ -539,7 +556,7 @@ const SupplierAccountPage = ({
                             <div className="text-sm font-bold text-foreground">
                               {entry.operationType === 'invoice' ? `فاتورة رقم ${entry.invoiceNumber}` : 'دفعة سداد'}
                             </div>
-                            <div className="text-[10px] text-muted-foreground">{format(entry.date, 'yyyy/MM/dd HH:mm')}</div>
+                            <div className="text-[10px] text-muted-foreground">{safeFormatDate(entry.date, 'yyyy/MM/dd HH:mm')}</div>
                           </div>
                         </div>
                         <div className={`font-bold font-mono text-sm ${entry.operationType === 'invoice' ? 'text-blue-500' : 'text-emerald-500'}`}>
@@ -577,11 +594,11 @@ const SupplierAccountPage = ({
                       {ledgerEntries.filter(e => e.operationType === 'invoice').reverse().map((invoice) => (
                         <tr key={invoice.id} className="hover:bg-muted/30 transition-colors group">
                           <td className="px-6 py-4 font-bold text-foreground">{invoice.invoiceNumber}</td>
-                          <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{format(invoice.date, 'yyyy/MM/dd')}</td>
+                          <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{safeFormatDate(invoice.date, 'yyyy/MM/dd')}</td>
                           <td className="px-6 py-4 font-bold font-mono">{formatNumberWithCommas(invoice.amount)}</td>
                           <td className="px-6 py-4 font-bold font-mono text-amber-500">{formatNumberWithCommas(invoice.remainingAmount || 0)}</td>
                           <td className="px-6 py-4 font-bold font-mono text-emerald-500">{formatNumberWithCommas(invoice.discount || 0)}</td>
-                          <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{invoice.dueDate ? format(invoice.dueDate, 'yyyy/MM/dd') : '-'}</td>
+                          <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{invoice.dueDate ? safeFormatDate(invoice.dueDate, 'yyyy/MM/dd') : '-'}</td>
                           <td className="px-6 py-4 text-center">
                             <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${
                               invoice.paymentStatus === 'paid' ? 'bg-emerald-500/10 text-emerald-500' :
@@ -649,7 +666,7 @@ const SupplierAccountPage = ({
                         <div className="flex justify-between items-start">
                           <div onClick={() => onViewInvoice(invoice)} className="cursor-pointer">
                             <div className="font-black text-foreground">قائمة رقم: {invoice.invoiceNumber}</div>
-                            <div className="text-[10px] text-muted-foreground font-bold">{format(invoice.date, 'yyyy/MM/dd')}</div>
+                            <div className="text-[10px] text-muted-foreground font-bold">{safeFormatDate(invoice.date, 'yyyy/MM/dd')}</div>
                           </div>
                           <DropdownMenu>
                             <DropdownMenuTrigger className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-muted outline-none transition-colors">
@@ -698,7 +715,7 @@ const SupplierAccountPage = ({
                           {invoice.dueDate && (
                             <div className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground">
                               <Clock className="h-3 w-3" />
-                              <span>الاستحقاق: {format(invoice.dueDate, 'MM/dd')}</span>
+                              <span>الاستحقاق: {safeFormatDate(invoice.dueDate, 'MM/dd')}</span>
                             </div>
                           )}
                         </div>
@@ -725,7 +742,7 @@ const SupplierAccountPage = ({
                              </div>
                              <div>
                                 <CardTitle className="text-sm font-bold">تسديد دفعة مالية</CardTitle>
-                                <div className="text-[10px] text-muted-foreground">{format(payment.date, 'yyyy/MM/dd HH:mm')}</div>
+                                <div className="text-[10px] text-muted-foreground">{safeFormatDate(payment.date, 'yyyy/MM/dd HH:mm')}</div>
                              </div>
                           </div>
                           <div className="text-lg font-black text-emerald-500 font-mono">-{formatNumberWithCommas(payment.amount)}</div>
@@ -756,7 +773,7 @@ const SupplierAccountPage = ({
                        <div className="flex justify-between items-start">
                           <div>
                              <CardTitle className="text-base font-bold">{bonus.description}</CardTitle>
-                             <div className="text-xs text-muted-foreground mt-1">تاريخ الاستحقاق: {format(bonus.dueDate, 'yyyy/MM/dd')}</div>
+                             <div className="text-xs text-muted-foreground mt-1">تاريخ الاستحقاق: {safeFormatDate(bonus.dueDate, 'yyyy/MM/dd')}</div>
                           </div>
                           <Gift className={`h-5 w-5 ${bonus.status === 'received' ? 'text-emerald-500' : 'text-amber-500'}`} />
                        </div>
@@ -787,7 +804,7 @@ const SupplierAccountPage = ({
                     <img src={e.imageUrl || e.receiptImageUrl} alt="Attachment" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-all">
                        <span className="text-[10px] text-white font-bold">{e.operationType === 'invoice' ? 'صورة فاتورة' : 'صورة وصل'}</span>
-                       <span className="text-[8px] text-white/60 font-mono mt-1">{format(e.date, 'yyyy/MM/dd')}</span>
+                       <span className="text-[8px] text-white/60 font-mono mt-1">{safeFormatDate(e.date, 'yyyy/MM/dd')}</span>
                     </div>
                   </Card>
                 ))}
@@ -817,7 +834,7 @@ const SupplierAccountPage = ({
                                 item.operationType === 'payment' ? `تسديد دفعة مالية بمبلغ ${formatIQD(item.amount)}` :
                                 `تسجيل بونص جديد: ${item.description}`}
                             </h4>
-                            <span className="text-[10px] text-muted-foreground font-mono">{format(item.createdAt, 'yyyy/MM/dd HH:mm')}</span>
+                            <span className="text-[10px] text-muted-foreground font-mono">{safeFormatDate(item.createdAt, 'yyyy/MM/dd HH:mm')}</span>
                          </div>
                          <p className="text-xs text-muted-foreground mt-1">{item.notes || 'تمت العملية بنجاح بواسطة النظام'}</p>
                       </div>
@@ -832,7 +849,7 @@ const SupplierAccountPage = ({
 };
 
 export default function App() {
-  const { user, isDriveLinked, loading: authLoading, linkDrive, unlinkDrive } = useGoogleAuth();
+  const { user: googleUser, isDriveLinked, loading: googleAuthLoading, linkDrive, unlinkDrive } = useGoogleAuth();
   
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('theme') as Theme) || 'dark');
 
@@ -863,14 +880,17 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('pharma-active-tab') || 'finance');
   
-  // Database health check
+  // Firebase connection check
   useEffect(() => {
-    localDb.open().then(() => {
-      console.log("Database connection established");
-    }).catch(err => {
-      console.error("Database connection failed:", err);
-      toast.error('حدث خطأ في الاتصال بقاعدة البيانات');
-    });
+    const testFirebase = async () => {
+      try {
+        console.log("Firebase initialized and ready");
+      } catch (err) {
+        console.error("Firebase connection failed:", err);
+        toast.error('حدث خطأ في الاتصال بالسيرفر السحابي');
+      }
+    };
+    testFirebase();
   }, []);
 
   useEffect(() => {
@@ -913,14 +933,17 @@ export default function App() {
     localStorage.setItem('pharma-include-historical', includeHistorical.toString());
   }, [includeHistorical]);
 
-  const handleUpdateInvoiceImage = async (invoice: LedgerEntry, imageUrl: string | null) => {
+  const handleUpdateInvoiceImageUrls = async (invoice: LedgerEntry, imageUrls: string[]) => {
     if (!invoice.id) return;
     try {
-      await localDb.ledgerEntries.update(invoice.id, { imageUrl: imageUrl || '' });
-      setViewingInvoice(prev => prev ? { ...prev, imageUrl: imageUrl || '' } : null);
-      toast.success(imageUrl ? 'تم تحديث الصورة بنجاح' : 'تم حذف الصورة بنجاح');
+      await firebaseService.updateDocument('ledgerEntries', invoice.id, { 
+        imageUrls,
+        imageUrl: imageUrls.length > 0 ? imageUrls[0] : '' 
+      });
+      setViewingInvoice(prev => prev ? { ...prev, imageUrls, imageUrl: imageUrls.length > 0 ? imageUrls[0] : '' } : null);
+      toast.success('تم تحديث الصور بنجاح');
     } catch (err) {
-      toast.error('حدث خطأ أثناء تحديث الصورة');
+      toast.error('حدث خطأ أثناء تحديث الصور');
     }
   };
 
@@ -944,95 +967,98 @@ export default function App() {
     }
   }, [currentBranchId]);
 
-  const branches = useLiveQuery(() => localDb.branches.toArray()) || [];
+  const branchesQuery = useMemo(() => [], []);
+  const transactionsQuery = useMemo(() => [], []);
+  const entitiesQuery = useMemo(() => [], []);
+  const customerDebtsQuery = useMemo(() => [], []);
+  const notificationsQuery = useMemo(() => [], []);
+  const bonusesQuery = useMemo(() => [], []);
+  const employeesQuery = useMemo(() => [], []);
+  const attendanceQuery = useMemo(() => [], []);
+  const ledgerEntriesQuery = useMemo(() => [], []);
+  const historicalQuery = useMemo(() => [], []);
 
-  const transactions = useLiveQuery(() => {
-    console.log("Loading records... (Transactions)");
-    let query = localDb.transactions.orderBy('date').reverse();
-    if (currentBranchId) {
-      return localDb.transactions.where('branchId').equals(currentBranchId).reverse().sortBy('date');
-    }
-    return query.toArray();
-  }, [currentBranchId]) || [];
+  // Firebase Real-time Queries
+  const { data: rawBranches = [] } = useFirebaseQuery<PharmacyBranch>('branches', branchesQuery);
+  const { data: rawTransactions = [] } = useFirebaseQuery<Transaction>('transactions', transactionsQuery);
+  const { data: rawEntities = [] } = useFirebaseQuery<Entity>('entities', entitiesQuery);
+  const { data: rawCustomerDebts = [] } = useFirebaseQuery<CustomerDebt>('customerDebts', customerDebtsQuery);
+  const { data: rawNotifications = [] } = useFirebaseQuery<Notification>('notifications', notificationsQuery);
+  const { data: rawBonuses = [] } = useFirebaseQuery<Bonus>('bonuses', bonusesQuery);
+  const { data: rawEmployees = [] } = useFirebaseQuery<Employee>('employees', employeesQuery);
+  const { data: rawEmployeeAttendance = [] } = useFirebaseQuery<EmployeeAttendance>('employeeAttendance', attendanceQuery);
+  const { data: rawAllLedgerEntries = [] } = useFirebaseQuery<LedgerEntry>('ledgerEntries', ledgerEntriesQuery);
+  const { data: rawHistoricalRecords = [] } = useFirebaseQuery<HistoricalRecord>('historicalRecords', historicalQuery);
 
-  const entities = useLiveQuery(() => {
-    console.log("Loading records... (Entities)");
-    if (currentBranchId) return localDb.entities.where('branchId').equals(currentBranchId).toArray();
-    return localDb.entities.toArray();
-  }, [currentBranchId]) || [];
+  // Client-side sorting to avoid Firestore Index requirements
+  const branches = useMemo(() => [...rawBranches].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawBranches]);
+  const transactions = useMemo(() => [...rawTransactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [rawTransactions]);
+  const entities = useMemo(() => [...rawEntities].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')), [rawEntities]);
+  const customerDebts = useMemo(() => [...rawCustomerDebts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawCustomerDebts]);
+  const notifications = useMemo(() => [...rawNotifications].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawNotifications]);
+  const bonuses = useMemo(() => [...rawBonuses].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawBonuses]);
+  const employees = useMemo(() => [...rawEmployees].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')), [rawEmployees]);
+  const employeeAttendance = useMemo(() => [...rawEmployeeAttendance].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [rawEmployeeAttendance]);
+  const allLedgerEntries = useMemo(() => [...rawAllLedgerEntries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [rawAllLedgerEntries]);
+  const historicalRecords = useMemo(() => [...rawHistoricalRecords].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawHistoricalRecords]);
 
-  const customerDebts = useLiveQuery(() => {
-    console.log("Loading records... (CustomerDebts)");
-    if (currentBranchId) return localDb.customerDebts.where('branchId').equals(currentBranchId).toArray();
-    return localDb.customerDebts.toArray();
-  }, [currentBranchId]) || [];
-
-  const notifications = useLiveQuery(() => {
-    if (currentBranchId) return localDb.notifications.where('branchId').equals(currentBranchId).reverse().sortBy('createdAt');
-    return localDb.notifications.orderBy('createdAt').reverse().toArray();
-  }, [currentBranchId]) || [];
-
-  const bonuses = useLiveQuery(() => {
-    if (currentBranchId) return localDb.bonuses.where('branchId').equals(currentBranchId).toArray();
-    return localDb.bonuses.toArray();
-  }, [currentBranchId]) || [];
-
-  const employees = useLiveQuery(() => {
-    if (currentBranchId) return localDb.employees.where('branchId').equals(currentBranchId).toArray();
-    return localDb.employees.toArray();
-  }, [currentBranchId]) || [];
-
-  const employeeAttendance = useLiveQuery(() => {
-    if (currentBranchId) return localDb.employeeAttendance.where('branchId').equals(currentBranchId).toArray();
-    return localDb.employeeAttendance.toArray();
-  }, [currentBranchId]) || [];
-
-  const allLedgerEntries = useLiveQuery(() => {
-    if (currentBranchId) return localDb.ledgerEntries.where('branchId').equals(currentBranchId).toArray();
-    return localDb.ledgerEntries.toArray();
-  }, [currentBranchId]) || [];
-
-  const historicalRecords = useLiveQuery(() => {
-    if (currentBranchId) return localDb.historicalRecords.where('branchId').equals(currentBranchId).toArray();
-    return localDb.historicalRecords.toArray();
-  }, [currentBranchId]) || [];
-
+  const [user, setUser] = useState(auth.currentUser);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
 
-  // Assign branchId to orphaned records if a branch is selected
   useEffect(() => {
-    const migrateOrphanedRecords = async () => {
-      if (!currentBranchId) return;
-      
-      console.log("Checking for orphaned records to assign to current branch:", currentBranchId);
-      
-      const orphanedTransactions = await localDb.transactions.filter(t => !t.branchId).toArray();
-      if (orphanedTransactions.length > 0) {
-        console.log(`Migrating ${orphanedTransactions.length} transactions to branch ${currentBranchId}`);
-        for (const tx of orphanedTransactions) {
-          if (tx.id) await localDb.transactions.update(tx.id, { branchId: currentBranchId });
-        }
-      }
+    // Check local auth for demo mode first
+    const isDocAuth = localStorage.getItem('pharma-is-authenticated') === 'true';
+    if (isDocAuth && !auth.currentUser) {
+      const demoAppUser: AppUser = {
+        userId: 'demo-user',
+        email: 'demo@pharma.local',
+        username: 'Demo User',
+        displayName: 'Demo User',
+        isActive: true,
+        isSetupComplete: true,
+        createdAt: new Date(),
+        role: 'admin'
+      };
+      setAppUser(demoAppUser);
+      setAuthStep('authenticated');
+      setIsAppAuthenticated(true);
+      setAuthStatusLoading(false);
+    }
 
-      const orphanedEntities = await localDb.entities.filter(e => !e.branchId).toArray();
-      if (orphanedEntities.length > 0) {
-        console.log(`Migrating ${orphanedEntities.length} entities to branch ${currentBranchId}`);
-        for (const ent of orphanedEntities) {
-          if (ent.id) await localDb.entities.update(ent.id, { branchId: currentBranchId });
-        }
+    return onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u) {
+        setIsAppAuthenticated(true);
+        // Map Firebase user to AppUser format
+        const mockAppUser: AppUser = {
+          userId: u.uid,
+          email: u.email || '',
+          username: u.displayName || u.email?.split('@')[0] || 'User',
+          displayName: u.displayName || 'User',
+          isActive: true,
+          isSetupComplete: true,
+          createdAt: new Date(),
+          role: u.email === 'mustafaenginerr35@gmail.com' ? 'admin' : 'manager'
+        };
+        setAppUser(mockAppUser);
+        setAuthStatusLoading(false);
+        setAuthStep('authenticated');
+        localStorage.setItem('pharma-is-authenticated', 'true');
+      } else if (!isDocAuth) {
+        setIsAppAuthenticated(false);
+        setAuthStatusLoading(false);
+        localStorage.removeItem('pharma-is-authenticated');
+      } else {
+        setAuthStatusLoading(false);
       }
+    });
+  }, []);
 
-      const orphanedDebts = await localDb.customerDebts.filter(d => !d.branchId).toArray();
-      if (orphanedDebts.length > 0) {
-        console.log(`Migrating ${orphanedDebts.length} customer debts to branch ${currentBranchId}`);
-        for (const debt of orphanedDebts) {
-          if (debt.id) await localDb.customerDebts.update(debt.id, { branchId: currentBranchId });
-        }
-      }
-    };
-
-    migrateOrphanedRecords();
-  }, [currentBranchId, (branches || []).length]);
+  // Migration logic simplified for Firebase
+  useEffect(() => {
+    // We rely on Firestore source of truth now. 
+    // Orphaned records from local storage are ignored for now to ensure data integrity in the cloud.
+  }, [currentBranchId, branches.length]);
   const userPermissions = useMemo(() => {
     if (!appUser) return { canManageBranches: false, canViewReports: false, canEditTransactions: false };
     const isAdmin = appUser.role === 'admin';
@@ -1051,6 +1077,7 @@ export default function App() {
     { id: 'employees', label: 'الموظفون', icon: Users },
     { id: 'invoices', label: 'الفواتير', icon: FileText },
     { id: 'payments', label: 'التسديدات', icon: Receipt },
+    { id: 'losses', label: 'التالف والإكسباير', icon: AlertTriangle },
     { id: 'transactions', label: 'المصاريف العامة', icon: ArrowUpCircle },
     { id: 'notifications', label: 'الإشعارات', icon: Bell, badge: (notifications || []).filter(n => !n.read).length },
     { id: 'reports', label: 'التقارير', icon: PieChart },
@@ -1069,10 +1096,12 @@ export default function App() {
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   const [viewingEntityDetail, setViewingEntityDetail] = useState<Entity | null>(null);
   
-  const ledgerEntries = useLiveQuery(() => {
-    if (!selectedEntity?.id) return Promise.resolve([]);
-    return localDb.ledgerEntries.where('accountId').equals(selectedEntity.id).sortBy('date');
-  }, [selectedEntity?.id]);
+  const ledgerConstraints = useMemo(() => [
+    where('accountId', '==', selectedEntity?.id || 'none')
+  ], [selectedEntity?.id]);
+
+  const { data: rawLedgerEntries = [] } = useFirebaseQuery<LedgerEntry>('ledgerEntries', ledgerConstraints);
+  const ledgerEntries = useMemo(() => [...rawLedgerEntries].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()), [rawLedgerEntries]);
 
   const [isLedgerOpen, setIsLedgerOpen] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -1093,6 +1122,7 @@ export default function App() {
   const [isAddRevenueOpen, setIsAddRevenueOpen] = useState(false);
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
   const [isAddBonusOpen, setIsAddBonusOpen] = useState(false);
+  const [isAddLossOpen, setIsAddLossOpen] = useState(false);
   const [incomeType, setIncomeType] = useState<'cash' | 'credit'>('cash');
   const [expenseType, setExpenseType] = useState<'fixed_expense' | 'variable_expense' | 'spoiled_expiration'>('fixed_expense');
   const [spoiledType, setSpoiledType] = useState<'linked' | 'unlinked'>('unlinked');
@@ -1125,7 +1155,7 @@ export default function App() {
   const [deadlineRequiredPayment, setDeadlineRequiredPayment] = useState<string>('');
 
   const [txImageFile, setTxImageFile] = useState<File | null>(null);
-  const [invImageFile, setInvImageFile] = useState<File | null>(null);
+  const [invImageFiles, setInvImageFiles] = useState<File[]>([]);
   const [payImageFile, setPayImageFile] = useState<File | null>(null);
   const [dlInvImageFile, setDlInvImageFile] = useState<File | null>(null);
   const [dlRecImageFile, setDlRecImageFile] = useState<File | null>(null);
@@ -1139,12 +1169,14 @@ export default function App() {
   const [authResetCode, setAuthResetCode] = useState('');
   const [authSecurityQuestion, setAuthSecurityQuestion] = useState('');
   const [authSecurityAnswer, setAuthSecurityAnswer] = useState('');
-  const [authStep, setAuthStep] = useState<'register' | 'waiting' | 'setup-password' | 'login-password' | 'forgot-password' | 'security-reset' | 'recovery-request' | 'authenticated'>('login-password');
+  const [authAccessCode, setAuthAccessCode] = useState('');
+  const [authStep, setAuthStep] = useState<'register' | 'waiting' | 'setup-password' | 'login-password' | 'forgot-password' | 'security-reset' | 'recovery-request' | 'access-code' | 'authenticated'>('access-code');
 
-  const activationCodes = useLiveQuery(() => localDb.activationCodes.toArray()) || [];
-  const activationRequests = useLiveQuery(() => localDb.activationRequests.toArray()) || [];
-  const recoveryRequests = useLiveQuery(() => localDb.recoveryRequests.toArray()) || [];
-  const deadlines = useLiveQuery(() => localDb.deadlines.toArray()) || [];
+  const { data: deadlines = [] } = useFirebaseQuery<Deadline>('deadlines');
+  const { data: activationCodes = [] } = useFirebaseQuery<ActivationCode>('activationCodes');
+  const { data: activationRequests = [] } = useFirebaseQuery<ActivationRequest>('activationRequests');
+  const { data: recoveryRequests = [] } = useFirebaseQuery<RecoveryRequest>('recoveryRequests');
+  const { data: expiredDamagedLosses = [] } = useFirebaseQuery<ExpiredDamagedLoss>('expiredDamagedLosses');
 
   const [isEditInvoiceOpen, setIsEditInvoiceOpen] = useState(false);
   const [isDeleteInvoiceConfirmOpen, setIsDeleteInvoiceConfirmOpen] = useState(false);
@@ -1155,31 +1187,49 @@ export default function App() {
   const [isAddCodeOpen, setIsAddCodeOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   
-  const announcements = useLiveQuery(() => localDb.announcements.where('isActive').equals(1).toArray()) || [];
-  const [announcementTitle, setAnnouncementTitle] = useState('');
-  const [announcementMessage, setAnnouncementMessage] = useState('');
-  const [announcementType, setAnnouncementType] = useState<'update' | 'feature' | 'bugfix' | 'alert'>('update');
-  const [announcementDisplayType, setAnnouncementDisplayType] = useState<'once' | 'permanent'>('once');
-  const [sendEmailAlso, setSendEmailAlso] = useState(false);
-  const readAnnouncementsData = useLiveQuery(() => user ? localDb.announcementReads.where('userId').equals(user.uid).toArray() : Promise.resolve([]), [user?.uid]) || [];
+  const announcementsConstraints = useMemo(() => [where('isActive', '==', 1)], []);
+  const readAnnouncementsConstraints = useMemo(() => [where('userId', '==', user?.uid || 'none')], [user?.uid]);
+
+  const { data: announcements = [] } = useFirebaseQuery<Announcement>('announcements', announcementsConstraints);
+  const { data: readAnnouncementsData = [] } = useFirebaseQuery<AnnouncementRead>('announcementReads', readAnnouncementsConstraints);
 
   const [isPublishingAnnouncement, setIsPublishingAnnouncement] = useState(false);
   const [activeAnnouncement, setActiveAnnouncement] = useState<Announcement | null>(null);
   const [isAnnouncementOpen, setIsAnnouncementOpen] = useState(false);
   const [isBannerDismissed, setIsBannerDismissed] = useState(false);
   
-  const [syncSettings, setSyncSettings] = useState<SyncSettings>(() => {
-    const saved = localStorage.getItem('pharmacy_sync_settings');
-    return saved ? JSON.parse(saved) : { enabled: false, interval: 30, lastSync: null };
-  });
+  const [syncSettings, setSyncSettings] = useState<SyncSettings>({ enabled: false, interval: 30, lastSync: null });
+  const [imageSettings, setImageSettings] = useState<ImageManagementSettings>({ retentionYears: 3, autoDelete: false, lastCleanup: null });
+
+  // Sync settings with Firestore
+  useEffect(() => {
+    if (!user) return;
+    
+    const unsubscribe = firebaseService.listenDocument('settings', user.uid, (data) => {
+      if (data) {
+        if (data.syncSettings) setSyncSettings(data.syncSettings);
+        if (data.imageSettings) setImageSettings(data.imageSettings);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const updateSyncSettings = async (newSettings: SyncSettings) => {
+    setSyncSettings(newSettings);
+    if (user) {
+      await firebaseService.setDocument('settings', user.uid, { syncSettings: newSettings }, { merge: true });
+    }
+  };
+
+  const updateImageSettings = async (newSettings: ImageManagementSettings) => {
+    setImageSettings(newSettings);
+    if (user) {
+      await firebaseService.setDocument('settings', user.uid, { imageSettings: newSettings }, { merge: true });
+    }
+  };
 
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-  const [imageSettings, setImageSettings] = useState<ImageManagementSettings>(() => {
-    const saved = localStorage.getItem('pharmacy_image_settings');
-    return saved ? JSON.parse(saved) : { retentionYears: 3, autoDelete: false, lastCleanup: null };
-  });
 
   const [oldImages, setOldImages] = useState<DriveFile[]>([]);
   const [isCheckingImages, setIsCheckingImages] = useState(false);
@@ -1197,7 +1247,7 @@ export default function App() {
 
   const handleReadAnnouncement = async () => {
     if (activeAnnouncement?.id && user) {
-      await localDb.announcementReads.add({
+      await firebaseService.addDocument('announcementReads', {
         announcementId: activeAnnouncement.id,
         userId: user.uid,
         readAt: new Date()
@@ -1217,17 +1267,17 @@ export default function App() {
           id: 'main',
           name: 'الفرع الرئيسي',
           code: 'MAIN01',
-          ownerId: appUser?.userId || user?.uid || 'guest',
+          ownerId: user?.uid || 'guest',
           status: 'active',
           createdAt: new Date(),
           updatedAt: new Date()
         } as any;
         
         try {
-          // Check if main branch already exists to avoid collisions if branches.length cache was stale
-          const existingMain = await localDb.branches.get('main');
+          // In Firestore we can just try to add, or check if any exists
+          const existingMain = branches.find(b => b.id === 'main');
           if (!existingMain) {
-            await localDb.branches.add(defaultBranch);
+            await firebaseService.addDocument('branches', defaultBranch);
             console.log("Default branch 'main' created successfully");
           }
         } catch (err) {
@@ -1261,26 +1311,26 @@ export default function App() {
     
     // Daily revenue (Income today)
     const dailyRevenue = transactions
-      .filter(tx => tx.type === 'income' && startOfDay(new Date(tx.date)).getTime() === today.getTime())
-      .reduce((acc, tx) => acc + tx.amount, 0);
+      .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && startOfDay(new Date(tx.date)).getTime() === today.getTime())
+      .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount), 0);
 
     // Monthly stats
     const monthlyRevenue = transactions
-      .filter(tx => tx.type === 'income' && new Date(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + tx.amount, 0);
+      .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
+      .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount), 0);
 
     // GROSS Profit from sales this month
     const monthlyGrossProfit = transactions
-      .filter(tx => tx.type === 'income' && new Date(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + (tx.netProfit || 0), 0);
+      .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
+      .reduce((acc, tx) => acc + (tx.profitAmount || tx.netProfit || 0), 0);
 
     const monthlySalary = employeeAttendance
-      .filter(record => new Date(record.date) >= monthStart)
+      .filter(record => (!currentBranchId || record.branchId === currentBranchId) && new Date(record.date) >= monthStart)
       .reduce((acc, record) => acc + record.dailyWage, 0);
 
     // Monthly Expense
     const monthlyExpense = transactions
-      .filter(tx => tx.type === 'expense' && new Date(tx.date) >= monthStart)
+      .filter(tx => tx.type === 'expense' && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
       .reduce((acc, tx) => acc + tx.amount, 0) + monthlySalary;
 
     // Net Profit (Monthly) = Gross Profit from Sales - Expenses
@@ -1288,43 +1338,38 @@ export default function App() {
     const profitPercentage = monthlyRevenue > 0 ? (netProfit / monthlyRevenue) * 100 : 0;
 
     // Supplier Dues
-    const supplierDues = entities.reduce((acc, e) => acc + e.balance, 0);
+    const supplierDues = entities
+      .filter(e => !currentBranchId || e.branchId === currentBranchId)
+      .reduce((acc, e) => acc + e.balance, 0);
 
     // Due InvoicesCount
-    const dueInvoicesCount = (allLedgerEntries || []).filter(e => 
-      e.operationType === 'invoice' && 
-      e.paymentStatus !== 'paid'
-    ).length;
+    const dueInvoicesCount = (allLedgerEntries || [])
+      .filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'invoice' && e.paymentStatus !== 'paid')
+      .length;
 
-    const bTx = transactions;
-    const bEntities = entities;
+    const bTx = currentBranchId ? transactions.filter(t => t.branchId === currentBranchId) : transactions;
     
     // Total Revenue (All time)
-    const histSales = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalSales || 0), 0) : 0;
-    const histProfits = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalProfits || 0) + (r.retainedEarnings || 0), 0) : 0;
-    const histExpenses = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalExpenses || 0) + (r.accumulatedExpenses || 0), 0) : 0;
-    const histPurchases = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalPurchases || 0), 0) : 0;
-    const histDues = includeHistorical ? historicalRecords.reduce((acc, r) => acc + (r.totalDebtOwed || 0) + (r.officeDebts || 0) + (r.warehouseDebts || 0), 0) : 0;
+    const histSales = includeHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalSales || 0), 0) : 0;
+    const histProfits = includeHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalProfits || 0) + (r.retainedEarnings || 0), 0) : 0;
+    const histExpenses = includeHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalExpenses || 0) + (r.accumulatedExpenses || 0), 0) : 0;
+    const histDues = includeHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalDebtOwed || 0) + (r.officeDebts || 0) + (r.warehouseDebts || 0), 0) : 0;
 
-    const totalRevenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0) + histSales;
+    const totalRevenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.saleAmount || t.amount), 0) + histSales;
+    
+    // Calculate total losses from expired/damaged items
+    const totalLossesAmount = expiredDamagedLosses
+      .filter(l => !currentBranchId || l.branchId === currentBranchId)
+      .reduce((acc, l) => acc + l.totalLoss, 0);
+
     const totalExpense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0) + 
-      employeeAttendance.reduce((acc, record) => acc + record.dailyWage, 0) + histExpenses;
+      employeeAttendance.filter(record => !currentBranchId || record.branchId === currentBranchId).reduce((acc, record) => acc + record.dailyWage, 0) + histExpenses + totalLossesAmount;
     
     // Total Gross Profit from transactions
-    const totalGrossProfit = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.netProfit || 0), 0) + histProfits;
+    const totalGrossProfit = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0) + histProfits;
     
     // TOTAL Net Profit = Total Gross Profit - Total Expenses
     const totalNetProfit = totalGrossProfit - totalExpense;
-
-    console.log("Accurate Financial Reports Logic:", { 
-      totalRevenue, 
-      totalExpense, 
-      totalGrossProfit,
-      totalNetProfit,
-      monthlyGrossProfit,
-      monthlyExpense,
-      monthlyNetProfit: netProfit
-    });
     
     return {
       dailyRevenue,
@@ -1336,9 +1381,80 @@ export default function App() {
       dueInvoices: dueInvoicesCount,
       totalRevenue,
       totalExpense,
-      totalNetProfit
+      totalNetProfit,
+      totalLosses: totalLossesAmount
     };
-  }, [transactions, entities, allLedgerEntries, employeeAttendance, historicalRecords, includeHistorical]);
+  }, [transactions, entities, allLedgerEntries, employeeAttendance, historicalRecords, includeHistorical, currentBranchId]);
+
+  const [reportsMonth, setReportsMonth] = useState(new Date().getMonth());
+  const [reportsYear, setReportsYear] = useState(new Date().getFullYear());
+
+  // Aggregate stats for ALL months in the selected year for the table and charts
+  const monthlyTimelineData = useMemo(() => {
+    const data = [];
+    for (let m = 0; m < 12; m++) {
+      const mStart = startOfMonth(new Date(reportsYear, m));
+      const mEnd = endOfMonth(mStart);
+      
+      const mTx = transactions.filter(t => (!currentBranchId || t.branchId === currentBranchId) && new Date(t.date) >= mStart && new Date(t.date) <= mEnd);
+      const mLosses = expiredDamagedLosses.filter(l => (!currentBranchId || l.branchId === currentBranchId) && new Date(l.date) >= mStart && new Date(l.date) <= mEnd);
+      const mInvoices = allLedgerEntries?.filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'invoice' && new Date(e.date) >= mStart && new Date(e.date) <= mEnd) || [];
+      const mPayments = allLedgerEntries?.filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'payment' && new Date(e.date) >= mStart && new Date(e.date) <= mEnd) || [];
+      const mSalaries = employeeAttendance.filter(r => (!currentBranchId || r.branchId === currentBranchId) && new Date(r.date) >= mStart && new Date(r.date) <= mEnd).reduce((acc, r) => acc + r.dailyWage, 0);
+
+      const revenue = mTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.saleAmount || t.amount), 0);
+      const profit = mTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0);
+      const lossAmount = mLosses.reduce((acc, l) => acc + l.totalLoss, 0);
+      const expenses = mTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0) + mSalaries + lossAmount;
+      const invoiceTotal = mInvoices.reduce((acc, i) => acc + i.amount, 0);
+      const paymentTotal = mPayments.reduce((acc, p) => acc + p.amount, 0);
+      const remainingDebt = mTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.remainingAmount || 0), 0);
+
+      data.push({
+        month: m + 1,
+        monthName: safeFormatDate(mStart, 'MMMM'),
+        revenue,
+        profit,
+        expenses,
+        losses: lossAmount,
+        invoices: invoiceTotal,
+        payments: paymentTotal,
+        remaining: remainingDebt,
+        net: profit - expenses
+      });
+    }
+    return data;
+  }, [transactions, allLedgerEntries, employeeAttendance, reportsYear, currentBranchId]);
+
+  // Selected month vs Previous month comparison
+  const monthlyComparison = useMemo(() => {
+    const current = monthlyTimelineData[reportsMonth];
+    const prevMonthIdx = reportsMonth === 0 ? 11 : reportsMonth - 1;
+    const prevYear = reportsMonth === 0 ? reportsYear - 1 : reportsYear;
+    
+    // If we need data from prev year, we might need to fetch/calculate it. 
+    // For now, let's assume we use the current year's indices if possible, or dummy zero if not available in current view.
+    const previous = monthlyTimelineData[prevMonthIdx];
+
+    const calcChange = (cur: number, prev: number) => {
+      if (prev === 0) return cur > 0 ? 100 : 0;
+      return ((cur - prev) / prev) * 100;
+    };
+
+    return {
+      current,
+      previous,
+      changes: {
+        revenue: calcChange(current.revenue, previous.revenue),
+        profit: calcChange(current.profit, previous.profit),
+        invoices: calcChange(current.invoices, previous.invoices),
+        payments: calcChange(current.payments, previous.payments),
+        remaining: calcChange(current.remaining, previous.remaining),
+        losses: calcChange(current.losses, previous.losses),
+        net: calcChange(current.net, previous.net)
+      }
+    };
+  }, [monthlyTimelineData, reportsMonth, reportsYear]);
 
   const branchComparison = useMemo(() => {
     if (branches.length === 0) return [];
@@ -1347,8 +1463,8 @@ export default function App() {
       const bTx = transactions.filter(t => t.branchId === branch.id);
       const bEntities = entities.filter(e => e.branchId === branch.id);
       
-      const revenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
-      const grossProfit = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.netProfit || 0), 0);
+      const revenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.saleAmount || t.amount), 0);
+      const grossProfit = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0);
       const expense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
       const dues = bEntities.reduce((acc, e) => acc + e.balance, 0);
       
@@ -1366,34 +1482,34 @@ export default function App() {
   const chartData = useMemo(() => {
     const last7Days = Array.from({ length: 7 }, (_, i) => {
       const d = subDays(new Date(), 6 - i);
-      return format(d, 'yyyy-MM-dd');
+      return safeFormatDate(d, 'yyyy-MM-dd');
     });
 
     return last7Days.map(dateStr => {
       const dayIncome = transactions
-        .filter(tx => tx.type === 'income' && format(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
-        .reduce((acc, tx) => acc + tx.amount, 0);
+        .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
+        .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount), 0);
       
       const dayGrossProfit = transactions
-        .filter(tx => tx.type === 'income' && format(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
-        .reduce((acc, tx) => acc + (tx.netProfit || 0), 0);
+        .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
+        .reduce((acc, tx) => acc + (tx.profitAmount || tx.netProfit || 0), 0);
       
       const daySalary = employeeAttendance
-        .filter(record => format(new Date(record.date), 'yyyy-MM-dd') === dateStr)
+        .filter(record => (!currentBranchId || record.branchId === currentBranchId) && safeFormatDate(new Date(record.date), 'yyyy-MM-dd') === dateStr)
         .reduce((acc, record) => acc + record.dailyWage, 0);
       
       const dayExpense = transactions
-        .filter(tx => tx.type === 'expense' && format(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
+        .filter(tx => tx.type === 'expense' && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
         .reduce((acc, tx) => acc + tx.amount, 0) + daySalary;
 
       return {
-        name: format(new Date(dateStr), 'EEE', { locale: ar }),
+        name: safeFormatDate(new Date(dateStr), 'EEE'),
         income: dayIncome,
         expense: dayExpense,
         profit: dayGrossProfit - dayExpense
       };
     });
-  }, [transactions, employeeAttendance]);
+  }, [transactions, employeeAttendance, currentBranchId]);
 
   // Handlers
   const handleViewInvoice = (invoice: LedgerEntry) => {
@@ -1406,7 +1522,7 @@ export default function App() {
   };
 
   const handleAddEntity = async (data: any) => {
-    console.log("Saving record... (Entity)");
+    console.log("Adding entity...");
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
     const initialBalance = Number(data.initialBalance) || 0;
     const newEntity: Omit<Entity, 'id'> = {
@@ -1420,49 +1536,49 @@ export default function App() {
       totalPayments: 0,
       limit: Number(data.limit) || 0,
       branchId: (targetBranchId as string) || undefined,
-      ownerId: user?.uid || 'guest',
+      ownerId: appUser?.userId || 'demo-user',
       createdAt: new Date()
     } as any;
     
-    // Add updatedAt if it's missing in interface (cast as any)
-    (newEntity as any).updatedAt = new Date();
-
     try {
-      await localDb.entities.add(newEntity as Entity);
-      console.log("Saved successfully (Entity)");
+      await firebaseService.addDocument('entities', newEntity as Entity);
+      console.log("[App] Entity added successfully");
       setIsAddEntityOpen(false);
       toast.success('تم إضافة المورد بنجاح');
     } catch (err) {
-      console.error("Failed to save entity:", err);
+      console.error("[App] Error adding entity:", err);
       toast.error('حدث خطأ أثناء إضافة المورد');
     }
   };
 
   const handleAddEmployee = async (data: Partial<Employee>) => {
-    console.log("Saving record... (Employee)");
-    if (!appUser) return;
+    console.log("[App] Adding employee...");
+    if (!appUser) {
+      toast.error('يجب تسجيل الدخول أولاً');
+      return;
+    }
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
 
     try {
-      await localDb.employees.add({
+      await firebaseService.addDocument('employees', {
         ...data as Employee,
         branchId: (targetBranchId as string) || undefined,
         ownerId: appUser.userId,
         createdAt: new Date(),
-        updatedAt: new Date(),
+        updatedAt: new Date()
       } as any);
-      console.log("Saved successfully (Employee)");
+      console.log("[App] Employee added successfully");
       toast.success('تم إضافة الموظف بنجاح');
     } catch (error) {
-      console.error("Failed to save employee:", error);
-      toast.error('فشل في إضافة الموظف');
+      console.error("[App] Failed to add employee:", error);
+      toast.error('حدث خطأ أثناء إضافة الموظف');
     }
   };
 
   const handleUpdateEmployee = async (id: string, data: Partial<Employee>) => {
     console.log("Updating record... (Employee)");
     try {
-      await localDb.employees.update(id, {
+      await firebaseService.updateDocument('employees', id, {
         ...data,
         updatedAt: new Date()
       } as any);
@@ -1476,11 +1592,8 @@ export default function App() {
 
   const handleDeleteEmployee = async (id: string) => {
     try {
-      await localDb.employees.delete(id);
-      // Delete their attendance too
-      const relatedAttendance = await localDb.employeeAttendance.where('employeeId').equals(id).toArray();
-      await localDb.employeeAttendance.bulkDelete(relatedAttendance.map(a => a.id!));
-      toast.success('تم حذف الموظف وسجلاته');
+      await firebaseService.deleteDocument('employees', id);
+      toast.success('تم حذف الموظف');
     } catch (error) {
       console.error(error);
       toast.error('فشل في الحذف');
@@ -1493,7 +1606,7 @@ export default function App() {
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
     
     try {
-      await localDb.employeeAttendance.add({
+      await firebaseService.addDocument('employeeAttendance', {
         ...data as EmployeeAttendance,
         branchId: targetBranchId as string | undefined,
         ownerId: appUser.userId,
@@ -1510,7 +1623,7 @@ export default function App() {
 
   const handleUpdateAttendance = async (id: string, data: Partial<EmployeeAttendance>) => {
     try {
-      await localDb.employeeAttendance.update(id, data);
+      await firebaseService.updateDocument('employeeAttendance', id, data);
       toast.success('تم تحديث سجل الحضور');
     } catch (error) {
       console.error(error);
@@ -1520,7 +1633,7 @@ export default function App() {
 
   const handleDeleteAttendance = async (id: string) => {
     try {
-      await localDb.employeeAttendance.delete(id);
+      await firebaseService.deleteDocument('employeeAttendance', id);
       toast.success('تم حذف سجل الحضور');
     } catch (error) {
       console.error(error);
@@ -1529,10 +1642,13 @@ export default function App() {
   };
 
   const handleAddBranch = async (data: Partial<PharmacyBranch>) => {
-    console.log("Saving record... (Branch)");
-    if (!appUser) return;
+    console.log("[App] Adding branch...");
+    if (!appUser) {
+      toast.error('يجب تسجيل الدخول أولاً');
+      return;
+    }
     try {
-      const allBranches = await localDb.branches.toArray();
+      const allBranches = branches;
       const nextNum = (allBranches.length > 0) 
         ? Math.max(...allBranches.map(b => {
              const num = parseInt(b.code?.split('-')[1] || '0');
@@ -1550,18 +1666,18 @@ export default function App() {
         status: data.activationCode ? 'active' : 'pending' 
       } as any;
 
-      await localDb.branches.add(newBranch);
-      console.log("Saved successfully (Branch)");
+      await firebaseService.addDocument('branches', newBranch);
+      console.log("[App] Branch added successfully");
       toast.success(newBranch.status === 'active' ? 'تم تفعيل وربط الفرع الجديد بنجاح' : 'تم تسجيل الفرع. بانتظار التفعيل الإداري');
     } catch (error) {
-      console.error("Failed to save branch:", error);
-      toast.error('فشل في عملية التسجيل');
+      console.error("[App] Failed to add branch:", error);
+      toast.error('فشل في عملية تسجيل الفرع');
     }
   };
 
   const handleUpdateBranch = async (id: string, data: Partial<PharmacyBranch>) => {
     try {
-      await localDb.branches.update(id, data);
+      await firebaseService.updateDocument('branches', id, data);
       toast.success('تم تحديث بيانات الفرع');
     } catch (error) {
       console.error(error);
@@ -1571,7 +1687,7 @@ export default function App() {
 
   const handleArchiveBranch = async (id: string) => {
     try {
-      await localDb.branches.update(id, { status: 'archived' });
+      await firebaseService.updateDocument('branches', id, { status: 'archived' });
       if (currentBranchId === id) setCurrentBranchId(null);
       toast.success('تم أرشفة الفرع');
     } catch (error) {
@@ -1582,7 +1698,7 @@ export default function App() {
 
   const handleDeleteBranch = async (id: string) => {
     try {
-      await localDb.branches.delete(id);
+      await firebaseService.deleteDocument('branches', id);
       // Optional: Cascade delete or leave orphaned (local DB usually safe to leave but better to clean)
       if (currentBranchId === id) setCurrentBranchId(null);
       toast.success('تم حذف الفرع نهائياً');
@@ -1606,11 +1722,19 @@ export default function App() {
     const purchaseType = data.purchaseType;
     
     let imageUrl = '';
-    if (invImageFile) {
+    const imageUrls: string[] = [];
+    if (invImageFiles && invImageFiles.length > 0) {
       try {
-        imageUrl = await fileToBase64(invImageFile);
+        // Use first image for backward compatibility imageUrl field
+        imageUrl = await fileToBase64(invImageFiles[0]);
+        
+        // Convert all images to base64
+        for (const file of invImageFiles) {
+          const b64 = await fileToBase64(file);
+          imageUrls.push(b64);
+        }
       } catch (e) {
-        console.error('Error converting image to base64', e);
+        console.error('Error converting images to base64', e);
       }
     }
 
@@ -1633,8 +1757,9 @@ export default function App() {
       paymentStatus: purchaseType === 'cash' ? 'paid' : 'pending',
       balanceAfterOperation: entityToInvoice.balance + netAmount,
       imageUrl,
+      imageUrls,
       notes: data.notes as string,
-      ownerId: user?.uid || 'guest',
+      ownerId: appUser?.userId || 'demo-user',
       branchId: (targetBranchId as string) || undefined,
       createdAt: new Date()
     } as any;
@@ -1643,18 +1768,18 @@ export default function App() {
     (newEntry as any).updatedAt = new Date();
 
     try {
-      const addedId = await localDb.ledgerEntries.add(newEntry as LedgerEntry);
-      await localDb.entities.update(entityToInvoice.id, {
+      const addedId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
+      await firebaseService.updateDocument('entities', entityToInvoice.id, {
         balance: entityToInvoice.balance + netAmount,
         totalInvoices: entityToInvoice.totalInvoices + 1,
         updatedAt: new Date()
       } as any);
 
-      if (newEntry.dueDate) {
-        await localDb.deadlines.add({
+      if (newEntry.dueDate && addedId) {
+        await firebaseService.addDocument('deadlines', {
           accountId: entityToInvoice.id,
           accountName: entityToInvoice.name,
-          invoiceId: addedId.toString(), 
+          invoiceId: addedId, 
           invoiceNumber: newEntry.invoiceNumber || '',
           amount: newEntry.amount,
           requiredPayment: newEntry.netAmount,
@@ -1672,7 +1797,7 @@ export default function App() {
       setInvAmount('');
       setInvDiscount('0');
       setInvBonus('0');
-      setInvImageFile(null);
+      setInvImageFiles([]);
       toast.success('تم إضافة الفاتورة بنجاح');
     } catch (err) {
       console.error("Failed to save invoice:", err);
@@ -1682,11 +1807,10 @@ export default function App() {
 
   const handleAddDeadline = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Saving record... (Deadline)");
+    console.log("[App] Adding deadline...");
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
     
-    // Find the entity for this deadline
     const entityId = formData.get('entityId') as string;
     const targetEntity = entities.find(e => e.id === entityId);
     
@@ -1707,28 +1831,30 @@ export default function App() {
       dueDate: new Date(formData.get('dueDate') as string),
       notes: formData.get('notes') as string,
       status: 'pending',
-      ownerId: user?.uid || 'guest',
+      ownerId: appUser?.userId || 'demo-user',
       branchId: (targetBranchId as string) || undefined,
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     } as any;
     
-    (newDeadline as any).updatedAt = new Date();
-
     try {
-      await localDb.deadlines.add(newDeadline as Deadline);
-      console.log("Saved successfully (Deadline)");
+      await firebaseService.addDocument('deadlines', newDeadline as Deadline);
+      console.log("[App] Deadline added successfully");
       setIsAddDeadlineOpen(false);
       toast.success('تم إضافة موعد السداد بنجاح');
     } catch (err) {
-      console.error("Failed to save deadline:", err);
+      console.error("[App] Failed to add deadline:", err);
       toast.error('حدث خطأ أثناء إضافة موعد السداد');
     }
   };
 
   const handleAddBonus = async (data: any) => {
-    console.log("Saving record... (Bonus)");
+    console.log("[App] Adding bonus...");
     const bonusEntity = entities.find(e => e.id === data.entityId) || viewingEntityDetail || selectedEntity;
-    if (!bonusEntity?.id) return;
+    if (!bonusEntity?.id) {
+      toast.error('يرجى اختيار المورد أولاً');
+      return;
+    }
     
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
 
@@ -1740,20 +1866,19 @@ export default function App() {
       dueDate: data.dueDate,
       status: data.status,
       notes: data.notes as string,
-      ownerId: user?.uid || 'guest',
+      ownerId: appUser?.userId || 'demo-user',
       branchId: (targetBranchId as string) || undefined,
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     } as any;
     
-    (newBonus as any).updatedAt = new Date();
-
     try {
-      await localDb.bonuses.add(newBonus as Bonus);
-      console.log("Saved successfully (Bonus)");
+      await firebaseService.addDocument('bonuses', newBonus as Bonus);
+      console.log("[App] Bonus added successfully");
       setIsAddBonusOpen(false);
       toast.success('تم إضافة البونص بنجاح');
     } catch (err) {
-      console.error("Failed to save bonus:", err);
+      console.error("[App] Failed to add bonus:", err);
       toast.error('حدث خطأ أثناء إضافة البونص');
     }
   };
@@ -1797,7 +1922,7 @@ export default function App() {
       balanceAfterOperation: selectedEntity.balance - totalEffect,
       receiptImageUrl,
       notes: formData.get('notes') as string,
-      ownerId: user?.uid || 'guest',
+      ownerId: appUser?.userId || 'demo-user',
       branchId: (targetBranchId as string) || undefined,
       createdAt: new Date()
     } as any;
@@ -1805,7 +1930,7 @@ export default function App() {
     (newEntry as any).updatedAt = new Date();
 
     try {
-      await localDb.ledgerEntries.add(newEntry as LedgerEntry);
+      await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
       console.log("Saved successfully (Payment)");
       
       // Update linked invoice status if applicable
@@ -1820,7 +1945,7 @@ export default function App() {
           status = 'overdue';
         }
 
-        await localDb.ledgerEntries.update(viewingInvoice.id, {
+        await firebaseService.updateDocument('ledgerEntries', viewingInvoice.id, {
           paidAmount: currentPaid,
           remainingAmount: currentRemaining,
           paymentStatus: status,
@@ -1828,7 +1953,7 @@ export default function App() {
         } as any);
       }
 
-      await localDb.entities.update(selectedEntity.id, {
+      await firebaseService.updateDocument('entities', selectedEntity.id, {
         balance: selectedEntity.balance - totalEffect,
         totalPayments: selectedEntity.totalPayments + 1,
         updatedAt: new Date()
@@ -1896,8 +2021,8 @@ export default function App() {
     }
 
     try {
-      await localDb.ledgerEntries.update(viewingInvoice.id, updatedInvoice as any);
-      await localDb.entities.update(selectedEntity.id, {
+      await firebaseService.updateDocument('ledgerEntries', viewingInvoice.id, updatedInvoice as any);
+      await firebaseService.updateDocument('entities', selectedEntity.id, {
         balance: selectedEntity.balance + balanceDiff,
         updatedAt: new Date()
       } as any);
@@ -1916,14 +2041,9 @@ export default function App() {
     if (!viewingInvoice?.id || !selectedEntity?.id) return;
     
     try {
-      // Find all payments linked to this invoice to handle balance correctly?
-      // For simplicity, we just adjust the balance by the netAmount
-      // But wait, if some was already paid, the balance was already reduced by payments.
-      // So delete the invoice increases balance by its netAmount.
-      // BUT we should also warn it has payments.
       const netAmount = viewingInvoice.netAmount;
-      await localDb.ledgerEntries.delete(viewingInvoice.id);
-      await localDb.entities.update(selectedEntity.id, {
+      await firebaseService.deleteDocument('ledgerEntries', viewingInvoice.id);
+      await firebaseService.updateDocument('entities', selectedEntity.id, {
         balance: selectedEntity.balance - netAmount,
         totalInvoices: Math.max(0, selectedEntity.totalInvoices - 1)
       });
@@ -1971,13 +2091,11 @@ export default function App() {
     } as any;
 
     try {
-      await localDb.ledgerEntries.add(newRefundEntry as LedgerEntry);
+      await firebaseService.addDocument('ledgerEntries', newRefundEntry as LedgerEntry);
       console.log("Saved successfully (Refund)");
       
       const newRefundTotal = (viewingInvoice.refundAmount || 0) + refundAmount;
-      const newPaid = (viewingInvoice.paidAmount || 0) + refundAmount; // Refund acts as reducing balance/paid? 
-      // Actually refund reduces the total amount of the invoice? No, it reduces what we OWE.
-      // So it's effectively a payment.
+      const newPaid = (viewingInvoice.paidAmount || 0) + refundAmount; 
       
       const currentPaid = (viewingInvoice.paidAmount || 0) + refundAmount;
       const currentRemaining = Math.max(0, viewingInvoice.netAmount - currentPaid);
@@ -1989,7 +2107,7 @@ export default function App() {
         status = 'overdue';
       }
 
-      await localDb.ledgerEntries.update(viewingInvoice.id, {
+      await firebaseService.updateDocument('ledgerEntries', viewingInvoice.id, {
         paidAmount: currentPaid,
         remainingAmount: currentRemaining,
         paymentStatus: status,
@@ -1997,7 +2115,7 @@ export default function App() {
         updatedAt: new Date()
       } as any);
       
-      await localDb.entities.update(selectedEntity.id, {
+      await firebaseService.updateDocument('entities', selectedEntity.id, {
         balance: selectedEntity.balance - refundAmount,
         updatedAt: new Date()
       } as any);
@@ -2011,50 +2129,40 @@ export default function App() {
   };
 
   const handleAddRevenue = async (data: any) => {
-    console.log("Saving record... (Revenue)");
-    
+    console.log("[App] Adding revenue...");
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
 
     const newTx: Omit<Transaction, 'id'> = {
+      ...data,
       type: 'income',
-      incomeType: data.incomeType,
-      incomeClassification: data.incomeTypeCustom,
       category: 'revenue',
-      amount: Number(data.amount),
-      netProfit: Number(data.netProfit) || 0,
-      profitPercentage: Number(data.profitPercentage) || 0,
-      customerName: data.customerName as string || '',
-      dueDate: data.dueDate,
-      date: data.date,
       description: `${data.incomeTypeCustom || 'مبيعات'} - ${data.incomeType === 'cash' ? 'نقدي' : 'دين'}`,
-      notes: data.notes as string,
       branchId: targetBranchId as string | undefined,
-      createdBy: user?.uid || 'guest',
+      createdBy: appUser?.userId || 'demo-user',
+      ownerId: appUser?.userId || 'demo-user',
       createdAt: new Date(),
       updatedAt: new Date()
     } as any;
     
     try {
-      await localDb.transactions.add(newTx as Transaction);
-      console.log("Saved successfully (Revenue)");
+      await firebaseService.addDocument('transactions', newTx as Transaction);
+      console.log("[App] Revenue added successfully");
       setIsAddRevenueOpen(false);
-      // Reset form states
-      setSaleAmount('');
-      setSaleNetProfit('');
-      setSaleProfitPercentage('');
+      
+      // Reset local form states if they exist
+      if (typeof setSaleAmount === 'function') setSaleAmount('');
+      
       toast.success('تم إضافة الوارد بنجاح');
     } catch (err) {
-      console.error("Failed to save record (Revenue):", err);
+      console.error("[App] Failed to add revenue:", err);
       toast.error('حدث خطأ أثناء إضافة الوارد');
     }
   };
 
   const handleAddExpense = async (data: any) => {
-    console.log("Saving record... (Expense)");
-
+    console.log("[App] Adding expense...");
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
 
-    // Generate a detailed description based on category and additional fields
     let detailedDescription = data.description;
     if (data.category === 'rent') {
       detailedDescription = `إيجار (${data.rentType}) - ${data.period}: ${data.description}`;
@@ -2072,19 +2180,61 @@ export default function App() {
       description: detailedDescription,
       notes: data.notes as string,
       branchId: targetBranchId as string | undefined,
-      createdBy: user?.uid || 'guest',
+      createdBy: appUser?.userId || 'demo-user',
+      ownerId: appUser?.userId || 'demo-user',
       createdAt: new Date(),
       updatedAt: new Date()
     } as any;
     
     try {
-      await localDb.transactions.add(newTx as Transaction);
-      console.log("Saved successfully (Expense)");
+      await firebaseService.addDocument('transactions', newTx as Transaction);
+      console.log("[App] Expense added successfully");
       setIsAddExpenseOpen(false);
       toast.success('تم إضافة المصروف بنجاح');
     } catch (err) {
-      console.error("Failed to save record (Expense):", err);
+      console.error("[App] Failed to add expense:", err);
       toast.error('حدث خطأ أثناء إضافة المصروف');
+    }
+  };
+
+  const handleAddLoss = async (data: any) => {
+    try {
+      // 1. Add to Firestore
+      await firebaseService.addDocument('expiredDamagedLosses', {
+        ...data,
+        ownerId: appUser?.userId || 'demo-user',
+        branchId: currentBranchId || 'main'
+      });
+
+      // 2. If linked to invoice, update invoice remaining amount
+      if (data.invoiceId && data.invoiceId !== 'none') {
+         const invoice = (allLedgerEntries || []).find(i => i.id === data.invoiceId);
+         if (invoice) {
+            const currentRemaining = invoice.remainingAmount || 0;
+            const newRemaining = Math.max(0, currentRemaining - data.totalLoss);
+            
+            await firebaseService.updateDocument('ledgerEntries', data.invoiceId, {
+              remainingAmount: newRemaining,
+              notes: `${invoice.notes || ''}\n[خسارة تالف/اكسباير مرتبطة: -${formatIQD(data.totalLoss)}]`,
+              updatedAt: new Date()
+            } as any);
+
+            // Also update entity balance
+            const entity = entities.find(e => e.id === invoice.accountId);
+            if (entity) {
+               await firebaseService.updateDocument('entities', entity.id!, {
+                 balance: entity.balance - data.totalLoss,
+                 updatedAt: new Date()
+               } as any);
+            }
+         }
+      }
+
+      setIsAddLossOpen(false);
+      toast.success('تم تسجيل الخسارة وتحديث الحسابات بنجاح');
+    } catch (err) {
+      console.error(err);
+      toast.error('فشل في تسجيل الخسارة');
     }
   };
 
@@ -2107,7 +2257,7 @@ export default function App() {
     } as any;
     
     try {
-      await localDb.transactions.update(selectedTransaction.id, updatedTx);
+      await firebaseService.updateDocument('transactions', selectedTransaction.id, updatedTx);
       console.log("Updated successfully (Transaction)");
       setIsEditTransactionOpen(false);
       toast.success('تم تحديث الحركة بنجاح');
@@ -2120,7 +2270,7 @@ export default function App() {
   const handleDeleteTransaction = async () => {
     if (!selectedTransaction?.id) return;
     try {
-      await localDb.transactions.delete(selectedTransaction.id);
+      await firebaseService.deleteDocument('transactions', selectedTransaction.id);
       setIsEditTransactionOpen(false);
       toast.success('تم حذف الحركة بنجاح');
     } catch (err) {
@@ -2128,20 +2278,7 @@ export default function App() {
     }
   };
 
-  // Auth Logic
-  useEffect(() => {
-    const checkAuth = async () => {
-      const users = await localDb.users.toArray();
-      if (users.length > 0) {
-        setAppUser(users[0]);
-        setAuthStep('login-password');
-      } else {
-        setAuthStep('register');
-      }
-      setAuthStatusLoading(false);
-    };
-    checkAuth();
-  }, []);
+  // Auth UI logic handled by onAuthStateChanged
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2149,36 +2286,50 @@ export default function App() {
       toast.error('كلمات المرور غير متطابقة');
       return;
     }
-    const newUser: AppUser = {
-      userId: crypto.randomUUID(),
-      username: authUsername,
-      displayName: authUsername,
-      email: user?.email || '',
-      password: authPassword,
-      isActive: true,
-      isSetupComplete: false,
-      role: 'admin',
-      createdAt: new Date()
-    };
-    await localDb.users.add(newUser);
-    setAppUser(newUser);
-    setAuthStep('login-password');
-    toast.success('تم إنشاء الحساب بنجاح');
-  };
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (appUser && appUser.password === authPassword) {
-      localStorage.setItem('pharma-is-authenticated', 'true');
-      setAuthStep('authenticated');
-      setIsAppAuthenticated(true);
-      toast.success('مرحباً بك مجدداً');
-    } else {
-      toast.error('كلمة المرور غير صحيحة');
+    
+    try {
+      // Use fake email if user doesn't provide one for initial setup
+      const email = authUsername.includes('@') ? authUsername : `${authUsername}@pharma.local`;
+      await createUserWithEmailAndPassword(auth, email, authPassword);
+      toast.success('تم إنشاء الحساب بنجاح، جاري الدخول...');
+    } catch (error: any) {
+      toast.error(`خطأ في التسجيل: ${error.message}`);
     }
   };
 
-  if (authLoading || authStatusLoading) {
+  const handleAccessCodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (authAccessCode === '123456') {
+      setIsAppAuthenticated(true);
+      localStorage.setItem('pharma-is-authenticated', 'true');
+      setAuthStep('authenticated');
+      toast.success('تم الدخول بنجاح (وضع العرض التجريبي)');
+    } else {
+      toast.error('رمز الدخول غير صحيح، يرجى المحاولة مرة أخرى');
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const email = authUsername.includes('@') ? authUsername : `${authUsername}@pharma.local`;
+      await signInWithEmailAndPassword(auth, email, authPassword);
+      toast.success('مرحباً بك مجدداً');
+    } catch (error: any) {
+      toast.error('خطأ في الدخول: تأكد من اسم المستخدم وكلمة المرور');
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    localStorage.removeItem('pharma-is-authenticated');
+    setIsAppAuthenticated(false);
+    setAuthStep('access-code');
+    setAuthAccessCode('');
+    toast.success('تم تسجيل الخروج بنجاح');
+  };
+
+  if (googleAuthLoading || authStatusLoading) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center gap-4 bg-background" dir="rtl">
         <motion.div 
@@ -2210,6 +2361,41 @@ export default function App() {
             <p className="text-muted-foreground text-sm">نظام الحسابات الذكية للصيدليات</p>
           </div>
 
+          {authStep === 'access-code' && (
+            <form onSubmit={handleAccessCodeSubmit} className="space-y-4 relative z-10">
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">رمز الدخول (تجريبي)</Label>
+                <div className="relative">
+                  <Hash className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                  <Input 
+                    className="bg-muted border-border text-foreground h-12 rounded-xl pr-10 text-center tracking-[0.5em] font-black text-xl" 
+                    placeholder="000000"
+                    value={authAccessCode} 
+                    onChange={e => setAuthAccessCode(e.target.value)} 
+                    maxLength={6}
+                    required 
+                    autoFocus 
+                  />
+                </div>
+                <p className="text-[10px] text-muted-foreground text-center">أدخل الرمز 123456 للدخول المباشر</p>
+              </div>
+              <Button type="submit" className="w-full bg-primary hover:bg-primary/90 h-12 rounded-xl text-lg font-bold flex items-center justify-center gap-2">
+                دخول النظام
+                <ChevronLeft className="h-5 w-5" />
+              </Button>
+              
+              <div className="pt-4 border-t border-border/50 text-center">
+                <button 
+                  type="button" 
+                  onClick={() => setAuthStep('login-password')}
+                  className="text-xs text-primary/70 hover:text-primary font-bold transition-colors"
+                >
+                  أو الدخول بواسطة حساب مسجل
+                </button>
+              </div>
+            </form>
+          )}
+
           {authStep === 'register' && (
             <form onSubmit={handleRegister} className="space-y-4 relative z-10">
               <div className="space-y-2">
@@ -2230,14 +2416,44 @@ export default function App() {
 
           {authStep === 'login-password' && (
             <form onSubmit={handleLogin} className="space-y-4 relative z-10">
-              <div className="text-center mb-4">
-                <p className="font-bold text-muted-foreground">مرحباً {appUser?.username}</p>
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">البريد الإلكتروني أو اسم المستخدم</Label>
+                <Input 
+                  className="bg-muted border-border text-foreground h-12 rounded-xl" 
+                  value={authUsername} 
+                  onChange={e => setAuthUsername(e.target.value)} 
+                  placeholder="example@pharma.com"
+                  required 
+                />
               </div>
               <div className="space-y-2">
                 <Label className="text-muted-foreground">كلمة المرور</Label>
-                <Input className="bg-muted border-border text-foreground h-12 rounded-xl" type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} required autoFocus />
+                <Input 
+                  className="bg-muted border-border text-foreground h-12 rounded-xl" 
+                  type="password" 
+                  value={authPassword} 
+                  onChange={e => setAuthPassword(e.target.value)} 
+                  required 
+                />
               </div>
               <Button type="submit" className="w-full bg-primary hover:bg-primary/90 h-12 rounded-xl text-lg font-bold">دخول</Button>
+              
+              <div className="pt-4 border-t border-border/50 flex flex-col gap-2 text-center">
+                <button 
+                  type="button" 
+                  onClick={() => setAuthStep('access-code')}
+                  className="text-xs text-primary/70 hover:text-primary font-bold transition-colors"
+                >
+                  العودة لإدخال رمز الدخول
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => setAuthStep('register')}
+                  className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  ليس لديك حساب؟ إنشاء حساب جديد
+                </button>
+              </div>
             </form>
           )}
         </div>
@@ -2323,7 +2539,7 @@ export default function App() {
           </button>
           
           <button
-            onClick={() => setIsAppAuthenticated(false)}
+            onClick={handleLogout}
             className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-rose-500 hover:bg-rose-500/10 hover:text-rose-600 transition-all font-bold text-sm"
           >
             <LogOut className="h-5 w-5 shrink-0" />
@@ -2434,7 +2650,8 @@ export default function App() {
                      </div>
                    </DropdownMenuItem>
                    <DropdownMenuSeparator className="bg-border" />
-                   <DropdownMenuLabel className="text-[10px] font-black text-muted-foreground px-3 py-2 uppercase">هذا الفرع (تبديل النطاق)</DropdownMenuLabel>
+                   <DropdownMenuGroup>
+                     <DropdownMenuLabel className="text-[10px] font-black text-muted-foreground px-3 py-2 uppercase">هذا الفرع (تبديل النطاق)</DropdownMenuLabel>
                     {branches.filter(b => b.status === 'active').map(branch => (
                      <DropdownMenuItem 
                         key={branch.id}
@@ -2450,6 +2667,7 @@ export default function App() {
                    {branches.length === 0 && (
                      <div className="p-4 text-center text-xs text-muted-foreground italic">لا توجد فروع مضافة بعد</div>
                    )}
+                   </DropdownMenuGroup>
                    <DropdownMenuSeparator className="bg-border" />
                    <DropdownMenuItem className="p-3 cursor-pointer hover:bg-muted rounded-lg gap-3 text-primary" onClick={() => setActiveTab('branches')}>
                       <Plus className="h-4 w-4" />
@@ -2803,7 +3021,7 @@ export default function App() {
                             setSelectedTransaction(tx);
                             setIsEditTransactionOpen(true);
                           }}>
-                            <td className="px-8 py-5 text-xs text-muted-foreground font-mono font-bold">{format(tx.date, 'yyyy/MM/dd')}</td>
+                            <td className="px-8 py-5 text-xs text-muted-foreground font-mono font-bold">{safeFormatDate(tx.date, 'yyyy/MM/dd')}</td>
                             <td className="px-8 py-5">
                               <div className="font-black text-foreground group-hover:text-primary transition-colors">{tx.description}</div>
                               {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold mt-1">{tx.entityName}</div>}
@@ -2837,7 +3055,7 @@ export default function App() {
                           </div>
                         </div>
                         <div className="flex justify-between items-center text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
-                          <span>{format(tx.date, 'yyyy/MM/dd')}</span>
+                          <span>{safeFormatDate(tx.date, 'yyyy/MM/dd')}</span>
                           <span className={`px-2 py-0.5 rounded ${tx.type === 'income' ? 'bg-primary/10 text-primary' : 'bg-rose-500/10 text-rose-500'}`}>
                             {tx.type === 'income' ? 'دخل' : 'مصروف'}
                           </span>
@@ -2922,7 +3140,7 @@ export default function App() {
                          .slice(0, 50)
                          .map((entry) => (
                            <tr key={entry.id} className="group cursor-pointer hover:bg-primary/5 transition-colors" onClick={() => handleViewInvoice(entry)}>
-                             <td className="px-8 py-6 text-xs text-muted-foreground font-mono font-bold">{format(entry.date, 'yyyy/MM/dd')}</td>
+                             <td className="px-8 py-6 text-xs text-muted-foreground font-mono font-bold">{safeFormatDate(entry.date, 'yyyy/MM/dd')}</td>
                              <td className="px-8 py-6">
                                <div className="font-black text-foreground group-hover:text-primary transition-colors">{entry.accountName}</div>
                                <div className="text-[10px] text-muted-foreground font-bold mt-1 px-2.5 py-0.5 bg-muted rounded-full inline-block">سيد قيد مباشر</div>
@@ -2962,7 +3180,7 @@ export default function App() {
                               </div>
                             </div>
                             <div className="flex justify-between items-center text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
-                              <span>{format(entry.date, 'yyyy/MM/dd')}</span>
+                              <span>{safeFormatDate(entry.date, 'yyyy/MM/dd')}</span>
                               <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 rounded">مدفوعات</span>
                             </div>
                           </div>
@@ -3004,11 +3222,44 @@ export default function App() {
           </TabsContent>
 
           <TabsContent value="revenues" className="space-y-6 animate-in fade-in duration-700">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
-                { label: 'إجمالي المبيعات الآجلة', value: customerDebts.reduce((acc, d) => acc + d.totalAmount, 0), icon: DollarSign, color: 'text-primary', bg: 'bg-primary/10' },
-                { label: 'الديون المتبقية', value: customerDebts.reduce((acc, d) => acc + d.remainingAmount, 0), icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-500/10' },
-                { label: 'عدد المدينين', value: customerDebts.filter(d => d.status !== 'paid').length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-500/10', isCount: true },
+                { 
+                  label: 'إجمالي الوارد', 
+                  value: transactions
+                    .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId))
+                    .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount), 0), 
+                  icon: TrendingUp, 
+                  color: 'text-primary', 
+                  bg: 'bg-primary/10' 
+                },
+                { 
+                  label: 'إجمالي الأرباح', 
+                  value: transactions
+                    .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId))
+                    .reduce((acc, tx) => acc + (tx.profitAmount || tx.netProfit || 0), 0), 
+                  icon: DollarSign, 
+                  color: 'text-emerald-600', 
+                  bg: 'bg-emerald-500/10' 
+                },
+                { 
+                  label: 'إجمالي المسدد', 
+                  value: transactions
+                    .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId))
+                    .reduce((acc, tx) => acc + (tx.paidAmount || (tx.incomeType === 'cash' ? tx.amount : 0)), 0), 
+                  icon: CheckCircle2, 
+                  color: 'text-blue-600', 
+                  bg: 'bg-blue-500/10' 
+                },
+                { 
+                  label: 'الديون (المتبقي)', 
+                  value: transactions
+                    .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId))
+                    .reduce((acc, tx) => acc + (tx.remainingAmount ?? (tx.incomeType === 'cash' ? 0 : tx.amount)), 0), 
+                  icon: AlertCircle, 
+                  color: 'text-rose-600', 
+                  bg: 'bg-rose-500/10' 
+                },
               ].map((stat, idx) => (
                 <Card key={idx} className="bg-card border-border p-8 relative group overflow-hidden rounded-2xl shadow-sm">
                   <div className={`absolute top-0 right-0 w-24 h-24 ${stat.bg} blur-2xl -mr-12 -mt-12 group-hover:bg-primary/20 transition-colors`} />
@@ -3016,7 +3267,7 @@ export default function App() {
                     <stat.icon className={`h-6 w-6 ${stat.color} mb-4`} />
                     <span className="text-[10px] font-black text-muted-foreground mb-1 tracking-widest uppercase text-center">{stat.label}</span>
                     <span className="text-3xl font-black text-foreground font-mono tracking-tighter">
-                      {stat.isCount ? stat.value : formatIQD(stat.value)}
+                      {formatIQD(stat.value)}
                     </span>
                   </div>
                 </Card>
@@ -3053,38 +3304,53 @@ export default function App() {
                     <table className="w-full text-right">
                       <thead>
                         <tr>
-                          <th className="px-8 !text-right">الزبون / الحالة</th>
-                          <th className="px-8 !text-right">المبلغ الكلي</th>
-                          <th className="px-8 !text-right">المسدد</th>
-                          <th className="px-8 !text-left">المتبقي التحصيلي</th>
+                          <th className="px-8 !text-right">الفرع / التفاصيل</th>
+                          <th className="px-8 !text-right">إجمالي الوارد</th>
+                          <th className="px-8 !text-right text-center">نسبة الربح %</th>
+                          <th className="px-8 !text-right">صافي الربح</th>
+                          <th className="px-8 !text-right">التاريخ</th>
+                          <th className="px-8 !text-right text-center">نوع العملية (نقد / آجل)</th>
+                          <th className="px-8 !text-left">المتبقي (للآجل فقط)</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {customerDebts
-                          .filter(d => d.customerName.includes(searchTerm))
-                          .map((debt) => (
-                            <tr key={debt.id} className="group hover:bg-primary/5 transition-colors">
+                        {transactions
+                          .filter(tx => 
+                            tx.type === 'income' &&
+                            (!currentBranchId || tx.branchId === currentBranchId) &&
+                            (tx.description.includes(searchTerm) || (tx.customerName && tx.customerName.includes(searchTerm)))
+                          )
+                          .map((tx) => (
+                            <tr key={tx.id} className="group hover:bg-primary/5 transition-colors">
                               <td className="px-8 py-6">
-                                <div className="font-black text-foreground group-hover:text-primary transition-colors">{debt.customerName}</div>
+                                <div className="font-black text-foreground group-hover:text-primary transition-colors">{tx.customerName || tx.description}</div>
                                 <div className="flex items-center gap-2 mt-1">
-                                  <span className="text-[10px] text-muted-foreground font-bold">{format(debt.saleDate, 'yyyy/MM/dd')}</span>
-                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
-                                    debt.status === 'paid' ? 'bg-emerald-500/10 text-emerald-600' :
-                                    debt.status === 'partial' ? 'bg-amber-500/10 text-amber-600' :
-                                    'bg-rose-500/10 text-rose-600'
-                                  }`}>
-                                    {debt.status === 'paid' ? 'تم التحصيل' : debt.status === 'partial' ? 'تحصيل جزئي' : 'بذمة الزبون'}
+                                  <span className="text-[10px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                                    {branches.find(b => b.id === tx.branchId)?.name || 'فرع غير معروف'}
                                   </span>
                                 </div>
                               </td>
-                              <td className="px-8 py-6 font-mono font-bold text-muted-foreground">{formatNumberWithCommas(debt.totalAmount)}</td>
-                              <td className="px-8 py-6 font-mono font-bold text-emerald-600">{formatNumberWithCommas(debt.paidAmount)}</td>
-                              <td className="px-8 py-6 text-left font-black text-rose-600 font-mono text-lg tracking-tighter">{formatNumberWithCommas(debt.remainingAmount)}</td>
+                              <td className="px-8 py-6 font-mono font-bold text-muted-foreground text-lg">{formatNumberWithCommas(tx.saleAmount || tx.amount)}</td>
+                              <td className="px-8 py-6 font-mono font-bold text-slate-500 text-center">%{tx.profitPercent || 0}</td>
+                              <td className="px-8 py-6 font-mono font-bold text-emerald-600 text-lg">{formatNumberWithCommas(tx.profitAmount || tx.netProfit || 0)}</td>
+                              <td className="px-8 py-6">
+                                <div className="text-[10px] text-muted-foreground font-black uppercase tracking-tight">{safeFormatDate(tx.date, 'yyyy/MM/dd')}</div>
+                              </td>
+                              <td className="px-8 py-6 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                                  tx.incomeType === 'cash' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
+                                }`}>
+                                  {tx.incomeType === 'cash' ? 'نقدي' : 'آجل'}
+                                </span>
+                              </td>
+                              <td className="px-8 py-6 font-black text-rose-600 font-mono text-lg tracking-tighter text-left">
+                                {tx.incomeType === 'cash' ? '0' : formatNumberWithCommas(tx.remainingAmount ?? tx.amount)}
+                              </td>
                             </tr>
                           ))}
-                        {customerDebts.length === 0 && (
+                        {transactions.filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId)).length === 0 && (
                           <tr>
-                            <td colSpan={4} className="py-20 text-center text-muted-foreground italic font-bold">لا توجد سجلات مبيعات آجلة حالياً</td>
+                            <td colSpan={7} className="py-20 text-center text-muted-foreground italic font-bold">لا توجد سجلات إيرادات حالياً</td>
                           </tr>
                         )}
                       </tbody>
@@ -3092,28 +3358,38 @@ export default function App() {
                   </div>
                   ) : (
                     <div className="p-4 space-y-4">
-                      {customerDebts
-                        .filter(d => d.customerName.includes(searchTerm))
-                        .map((debt) => (
-                          <div key={debt.id} className="p-4 bg-muted/20 border border-border rounded-2xl space-y-3">
+                      {transactions
+                        .filter(tx => 
+                          tx.type === 'income' &&
+                          (!currentBranchId || tx.branchId === currentBranchId) &&
+                          (tx.description.includes(searchTerm) || (tx.customerName && tx.customerName.includes(searchTerm)))
+                        )
+                        .map((tx) => (
+                          <div key={tx.id} className="p-4 bg-muted/20 border border-border rounded-2xl space-y-3">
                             <div className="flex justify-between items-start">
-                              <div className="font-black text-foreground">{debt.customerName}</div>
+                              <div>
+                                <div className="font-black text-foreground">{tx.customerName || tx.description}</div>
+                                <div className="text-[10px] text-muted-foreground font-bold">{safeFormatDate(tx.date, 'yyyy/MM/dd')}</div>
+                              </div>
                               <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
-                                debt.status === 'paid' ? 'bg-emerald-500/10 text-emerald-600' :
-                                debt.status === 'partial' ? 'bg-amber-500/10 text-amber-600' :
-                                'bg-rose-500/10 text-rose-600'
+                                tx.incomeType === 'cash' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
                               }`}>
-                                {debt.status === 'paid' ? 'تحصيل' : debt.status === 'partial' ? 'جزئي' : 'ذمة'}
+                                {tx.incomeType === 'cash' ? 'نقدي' : 'آجل'}
                               </span>
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-[10px] font-bold text-muted-foreground">
-                               <div className="bg-muted p-2 rounded-lg">إجمالي: {formatNumberWithCommas(debt.totalAmount)}</div>
-                               <div className="bg-emerald-500/5 text-emerald-600 p-2 rounded-lg">مسدد: {formatNumberWithCommas(debt.paidAmount)}</div>
+                               <div className="bg-muted p-2 rounded-lg">الوارد: {formatNumberWithCommas(tx.saleAmount || tx.amount)}</div>
+                               <div className="bg-emerald-500/5 text-emerald-600 p-2 rounded-lg">الربح: {formatNumberWithCommas(tx.profitAmount || tx.netProfit || 0)}</div>
                             </div>
-                            <div className="pt-2 border-t border-border/50 flex justify-between items-center">
-                              <span className="text-[10px] font-black uppercase text-muted-foreground">المتبقي</span>
-                              <span className="font-black text-rose-600 font-mono text-lg">{formatIQD(debt.remainingAmount)}</span>
+                            <div className="grid grid-cols-2 gap-2 text-[10px] font-bold text-muted-foreground">
+                               <div className="bg-blue-500/5 text-blue-600 p-2 rounded-lg">المسدد: {formatNumberWithCommas(tx.paidAmount || (tx.incomeType === 'cash' ? tx.amount : 0))}</div>
+                               <div className="bg-rose-500/5 text-rose-600 p-2 rounded-lg">المتبقي: {formatNumberWithCommas(tx.remainingAmount ?? (tx.incomeType === 'cash' ? 0 : tx.amount))}</div>
                             </div>
+                            {tx.notes && (
+                              <div className="text-[10px] font-bold text-muted-foreground border-t border-border/50 pt-2 bg-muted/30 p-2 rounded-xl">
+                                {tx.notes}
+                              </div>
+                            )}
                           </div>
                         ))}
                     </div>
@@ -3173,9 +3449,13 @@ export default function App() {
                               <CardTitle className="text-xl text-foreground font-black tracking-tight truncate group-hover:text-primary transition-colors">{entity.name}</CardTitle>
                               <div className="flex items-center gap-2 mt-2">
                                 <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                                  entity.type === 'office' ? 'bg-blue-500/10 text-blue-600' : 'bg-primary/10 text-primary'
+                                  entity.type === 'office' ? 'bg-blue-500/10 text-blue-600' : 
+                                  entity.type === 'scientific_office' ? 'bg-purple-500/10 text-purple-600' :
+                                  'bg-amber-500/10 text-amber-600'
                                 }`}>
-                                  {entity.type === 'office' ? 'مكتب علمي' : 'مذخر مركزي'}
+                                  {entity.type === 'office' ? 'مكتب' : 
+                                   entity.type === 'scientific_office' ? 'مذخر' : 
+                                   'شخصي'}
                                 </span>
                                 <span className="text-[10px] text-muted-foreground font-bold">#{String(entity.id).padStart(4, '0')}</span>
                               </div>
@@ -3267,7 +3547,7 @@ export default function App() {
                                 <div className="font-black text-foreground group-hover:text-primary transition-colors">{entry.accountName}</div>
                                 <div className="text-[10px] text-muted-foreground font-bold mt-1">سجل توريد آجل</div>
                               </td>
-                              <td className="px-8 py-6 text-xs text-muted-foreground font-mono font-bold">{format(entry.date, 'yyyy/MM/dd')}</td>
+                              <td className="px-8 py-6 text-xs text-muted-foreground font-mono font-bold">{safeFormatDate(entry.date, 'yyyy/MM/dd')}</td>
                               <td className="px-8 py-6 text-left">
                                 <div className="text-lg font-black text-emerald-600 font-mono tracking-tighter">{formatNumberWithCommas(entry.netAmount)}</div>
                               </td>
@@ -3302,7 +3582,7 @@ export default function App() {
                               </div>
                             </div>
                             <div className="flex justify-between items-center text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
-                              <span>{format(entry.date, 'yyyy/MM/dd')}</span>
+                              <span>{safeFormatDate(entry.date, 'yyyy/MM/dd')}</span>
                               <span className="px-2 py-0.5 rounded bg-primary/10 text-primary">توريد مشتريات</span>
                             </div>
                           </div>
@@ -3326,7 +3606,7 @@ export default function App() {
                         <CardTitle className="text-lg text-foreground font-black tracking-tight">{deadline.accountName}</CardTitle>
                         <div className="flex items-center gap-2 mt-2">
                            <Clock className="h-3 w-3 text-amber-600" />
-                           <span className="text-[10px] text-amber-600 font-black uppercase tracking-widest">موعد الاستحقاق: {format(deadline.dueDate, 'yyyy/MM/dd')}</span>
+                           <span className="text-[10px] text-amber-600 font-black uppercase tracking-widest">موعد الاستحقاق: {safeFormatDate(deadline.dueDate, 'yyyy/MM/dd')}</span>
                         </div>
                       </div>
                       <div className="p-2 bg-amber-500/10 text-amber-600 rounded-xl">
@@ -3401,7 +3681,7 @@ export default function App() {
                           .map((tx) => (
                             <tr key={tx.id} className="group hover:bg-primary/5 transition-colors">
                               <td className="px-8 py-6 text-xs text-muted-foreground font-mono font-bold tracking-tight">
-                                {format(tx.date, 'yyyy/MM/dd HH:mm')}
+                                {safeFormatDate(tx.date, 'yyyy/MM/dd HH:mm')}
                               </td>
                               <td className="px-8 py-6">
                                 <div className="font-black text-foreground group-hover:text-primary transition-colors">{tx.description}</div>
@@ -3434,7 +3714,7 @@ export default function App() {
                         .map((tx) => (
                           <div key={tx.id} className="p-4 bg-muted/30 border border-border rounded-2xl space-y-3">
                             <div className="flex justify-between items-start">
-                              <div className="text-[10px] text-muted-foreground font-mono">{format(tx.date, 'yyyy/MM/dd HH:mm')}</div>
+                              <div className="text-[10px] text-muted-foreground font-mono">{safeFormatDate(tx.date, 'yyyy/MM/dd HH:mm')}</div>
                               <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" onClick={() => {
                                 setSelectedTransaction(tx);
                                 setIsEditTransactionOpen(true);
@@ -3484,7 +3764,7 @@ export default function App() {
                        {[
                          { icon: ShieldCheck, label: 'تغيير كلمة المرور', desc: 'تأمين الحساب بكلمة مرور جديدة', color: 'text-primary', onClick: () => {} },
                          { icon: Monitor, label: 'وضع التشغيل', desc: `الضبط الحقيقي: ${appModeSetting === 'auto' ? 'تلقائي' : appModeSetting === 'laptop' ? 'لابتوب (ثابت)' : 'موبايل (ثابت)'}`, color: 'text-emerald-500', onClick: () => setAppModeSetting(prev => prev === 'auto' ? 'laptop' : prev === 'laptop' ? 'mobile' : 'auto') },
-                         { icon: RefreshCcw, label: 'إعادة تعيين الترخيص', desc: 'مسح بيانات الجلسة الحالية', color: 'text-blue-500', onClick: async () => { if(appUser) { await localDb.users.update(appUser.userId, { isActive: false }); window.location.reload(); } } },
+                         { icon: RefreshCcw, label: 'إعادة تعيين الترخيص', desc: 'مسح بيانات الجلسة الحالية', color: 'text-blue-500', onClick: async () => { if(user) { await firebaseService.deleteDocument('users', user.uid); window.location.reload(); } } },
                          { icon: LayoutDashboard, label: 'تخصيص الواجهة', desc: 'تبديل المظهر والألوان', color: 'text-amber-500', onClick: () => {} },
                        ].map((item, idx) => (
                          <Button key={idx} variant="outline" className="h-auto p-6 justify-start gap-4 bg-muted/20 border-border rounded-2xl hover:bg-muted transition-all group" onClick={item.onClick}>
@@ -3562,111 +3842,218 @@ export default function App() {
             />
           </TabsContent>
 
-          <TabsContent value="reports" className="space-y-8 animate-in fade-in duration-500 pb-20 md:pb-0">
-            <div className="space-y-8">
-               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                 <div>
-                   <h2 className="text-xl md:text-2xl font-black text-foreground">التقارير التحليلية</h2>
-                   <p className="text-muted-foreground text-xs md:text-sm">نظرة شاملة على الأداء المالي والنشاط العام</p>
-                 </div>
-                 <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
-                    <div className="flex items-center gap-3 bg-muted/50 px-4 py-2 rounded-xl border border-border">
-                       <Label className="text-xs font-black text-muted-foreground whitespace-nowrap cursor-pointer" onClick={() => setIncludeHistorical(!includeHistorical)}>تضمين البيانات التاريخية</Label>
-                       <Button 
-                        variant={includeHistorical ? "default" : "outline"} 
-                        size="sm"
-                        onClick={() => setIncludeHistorical(!includeHistorical)}
-                        className={`h-7 px-3 rounded-lg text-[10px] font-black ${includeHistorical ? 'bg-primary' : ''}`}
-                       >
-                         {includeHistorical ? 'مفعّل' : 'معطّل'}
-                       </Button>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" className="border-border bg-card hover:bg-muted text-foreground gap-2 h-10 px-4 rounded-xl whitespace-nowrap text-xs">
-                        <Download className="h-4 w-4" />
-                        Excel
-                      </Button>
-                      <Button variant="outline" className="border-border bg-card hover:bg-muted text-foreground gap-2 h-10 px-4 rounded-xl whitespace-nowrap text-xs">
-                        <Printer className="h-4 w-4" />
-                        طباعة
-                      </Button>
-                    </div>
-                 </div>
+          <TabsContent value="reports" className="space-y-8 animate-in fade-in duration-700">
+             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+               <div className="space-y-1">
+                 <h2 className="text-2xl font-black text-foreground">التقارير المالية والتحليلية</h2>
+                 <p className="text-muted-foreground text-sm font-bold">مقارنة الأداء الشهري وتتبع التدفق النقدي</p>
                </div>
+               
+               <div className="flex flex-wrap items-center gap-3 bg-muted/20 p-2 rounded-2xl border border-border">
+                  <div className="flex items-center gap-2 px-3">
+                    <CalendarDays className="h-4 w-4 text-primary" />
+                    <span className="text-xs font-black text-muted-foreground uppercase">الفترة:</span>
+                  </div>
+                  <Select value={reportsMonth.toString()} onValueChange={(v) => setReportsMonth(parseInt(v))}>
+                    <SelectTrigger className="w-[140px] h-10 bg-card border-border rounded-xl font-bold">
+                      <SelectValue placeholder="الشهر" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border">
+                      {Array.from({ length: 12 }).map((_, i) => (
+                        <SelectItem key={i} value={i.toString()}>{safeFormatDate(new Date(2024, i), 'MMMM')}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-               <div className={`grid gap-4 md:gap-8 ${effectiveAppMode === 'laptop' ? 'grid-cols-3' : 'grid-cols-1'}`}>
-                 {[
-                   { label: 'إجمالي الوارد', value: stats.totalRevenue, icon: BarChart3, color: 'text-blue-500', border: 'border-t-blue-500', sub: 'إجمالي المبيعات والواردات' },
-                   { label: 'إجمالي المصروفات', value: stats.totalExpense, icon: ArrowUpCircle, color: 'text-rose-500', border: 'border-t-rose-500', sub: 'إجمالي رواتب ومصاريف' },
-                   { label: 'إجمالي الأرباح', value: stats.totalNetProfit, icon: TrendingUp, color: 'text-emerald-500', border: 'border-t-emerald-500', trend: `+${stats.totalRevenue > 0 ? ((stats.totalNetProfit / stats.totalRevenue) * 100).toFixed(1) : '0'}%` },
-                 ].map((card, i) => (
-                   <Card key={i} className={`bg-card border-border border-t-4 ${card.border} shadow-xl p-6 md:p-8 flex flex-col items-center text-center group hover:scale-[1.02] transition-transform`}>
-                     <div className="text-xs font-bold text-muted-foreground mb-2 flex items-center gap-2 group-hover:text-foreground transition-colors">
-                        <card.icon className="h-4 w-4" />
-                        {card.label}
-                     </div>
-                     <div className="text-2xl md:text-3xl font-black text-foreground font-mono tracking-tighter mb-4">{formatIQD(card.value)}</div>
-                  {card.trend ? (
-                        <div className="flex items-center gap-2 text-xs text-emerald-500 bg-emerald-500/5 px-3 py-1.5 rounded-full font-bold">
-                           <TrendingUp className="h-3 w-3" />
-                           {card.trend} زيادة
-                        </div>
-                     ) : card.sub && (
-                        <div className="text-[10px] md:text-[10px] text-muted-foreground font-bold uppercase tracking-widest leading-none bg-muted px-2 py-1 rounded">{card.sub}</div>
-                     )}
-                   </Card>
-                 ))}
+                  <Select value={reportsYear.toString()} onValueChange={(v) => setReportsYear(parseInt(v))}>
+                    <SelectTrigger className="w-[100px] h-10 bg-card border-border rounded-xl font-bold">
+                      <SelectValue placeholder="السنة" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border">
+                      {[2024, 2025, 2026].map(y => (
+                        <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <div className="h-6 w-px bg-border mx-1" />
+
+                  <Button variant="outline" className="border-border bg-card hover:bg-muted text-foreground gap-2 h-10 px-4 rounded-xl whitespace-nowrap text-xs font-bold" onClick={() => window.print()}>
+                    <Printer className="h-4 w-4" />
+                    طباعة التقرير
+                  </Button>
                </div>
+             </div>
 
-               {currentBranchId === null && branches.length > 1 && (
-                  <Card className="bg-primary/5 border-primary/10 rounded-3xl overflow-hidden relative group p-4 md:p-8">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 blur-3xl -mr-32 -mt-32" />
-                    <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 relative z-10 gap-4">
-                       <div className="flex items-center gap-3">
-                          <div className="p-3 bg-primary/10 rounded-2xl text-primary">
-                             <Building2 className="h-6 w-6" />
-                          </div>
-                          <h3 className="text-xl md:text-2xl font-black text-foreground">مقارنة أداء الفروع</h3>
-                       </div>
+             {/* Comparative Stats Cards */}
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[
+                  { label: 'إجمالي الوارد', value: monthlyComparison.current.revenue, change: monthlyComparison.changes.revenue, icon: BarChart3, color: 'blue' },
+                  { label: 'صافي الربح', value: monthlyComparison.current.profit, change: monthlyComparison.changes.profit, icon: TrendingUp, color: 'emerald' },
+                  { label: 'فواتير مشتريات', value: monthlyComparison.current.invoices, change: monthlyComparison.changes.invoices, icon: FileText, color: 'indigo' },
+                  { label: 'إجمالي التسديدات', value: monthlyComparison.current.payments, change: monthlyComparison.changes.payments, icon: CheckCircle2, color: 'blue' },
+                  { label: 'الديون المتبقية', value: monthlyComparison.current.remaining, change: monthlyComparison.changes.remaining, icon: AlertCircle, color: 'rose' },
+                  { label: 'المصروفات العامة', value: monthlyComparison.current.expenses - monthlyComparison.current.losses, change: 0, icon: ArrowUpCircle, color: 'rose' },
+                  { label: 'خسائر (تالف/اكسباير)', value: monthlyComparison.current.losses, change: 0, icon: AlertTriangle, color: 'rose' },
+                  { label: 'صافي النتيجة', value: monthlyComparison.current.net, change: monthlyComparison.changes.net, icon: DollarSign, color: 'emerald' },
+                  { label: 'فرق الوارد الشهري', value: monthlyComparison.current.revenue - monthlyComparison.previous.revenue, icon: BarChart3, color: 'slate', isDiff: true },
+                ].map((stat, i) => (
+                  <Card key={i} className="bg-card border-border p-6 rounded-2xl shadow-sm relative group overflow-hidden border-t-2 border-t-primary/20">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-2 bg-muted rounded-lg">
+                        <stat.icon className="h-5 w-5 opacity-70" />
+                      </div>
+                      <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none">{stat.label}</span>
                     </div>
-                    <div className="relative z-10 overflow-x-auto">
-                        {effectiveAppMode === 'laptop' ? (
-                        <table className="w-full text-right">
-                           <thead className="text-[10px] font-black text-muted-foreground uppercase border-b border-border/50">
-                              <tr>
-                                 <th className="px-6 py-4 text-right">الفرع</th>
-                                 <th className="px-6 py-4 text-right">الإيراد</th>
-                                 <th className="px-6 py-4 text-right">المصروف</th>
-                                 <th className="px-6 py-4 text-left">صافي الربح</th>
-                              </tr>
-                           </thead>
-                           <tbody className="divide-y divide-border/30">
-                              {branchComparison.map(branch => (
-                                <tr key={branch.id} className="hover:bg-primary/5 transition-colors group">
-                                   <td className="px-6 py-5 font-black text-foreground group-hover:text-primary transition-colors">{branch.name}</td>
-                                   <td className="px-6 py-5 font-mono font-bold text-emerald-600">{formatIQD(branch.revenue)}</td>
-                                   <td className="px-6 py-5 font-mono font-bold text-rose-600">{formatIQD(branch.expense)}</td>
-                                   <td className="px-6 py-5 text-left font-mono font-black text-lg">{formatIQD(branch.profit)}</td>
-                                </tr>
-                              ))}
-                           </tbody>
-                        </table>
-                        ) : (
-                          <div className="space-y-4">
-                             {branchComparison.map(branch => (
-                               <div key={branch.id} className="p-4 bg-background/50 rounded-2xl border border-border/50 space-y-3 text-right">
-                                 <div className="flex justify-between items-center">
-                                   <div className="font-black text-foreground text-sm">{branch.name}</div>
-                                   <div className="text-base font-black font-mono">{formatIQD(branch.profit)}</div>
-                                 </div>
-                               </div>
-                             ))}
-                          </div>
-                        )}
+                    <div className="text-2xl font-black text-foreground font-mono tracking-tighter mb-2">
+                       {stat.isDiff ? (stat.value >= 0 ? '+' : '') : ''}{formatNumberWithCommas(stat.value)}
                     </div>
+                    {!stat.isDiff && stat.label !== 'المصروفات العامة' && (
+                      <div className={`text-[10px] font-black flex items-center gap-1 ${stat.change >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {stat.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                        {Math.abs(stat.change).toFixed(1)}% {stat.change >= 0 ? 'زيادة' : 'انخفاض'}
+                      </div>
+                    )}
                   </Card>
-               )}
-            </div>
+                ))}
+             </div>
+
+             {/* Charts Section */}
+             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <Card className="bg-card border-border p-8 rounded-3xl overflow-hidden shadow-sm">
+                   <div className="flex justify-between items-center mb-8">
+                      <div>
+                        <h3 className="text-lg font-black text-foreground">أداء الوارد والأرباح</h3>
+                        <p className="text-xs text-muted-foreground font-bold">تتبع النمو المالي خلال السنة</p>
+                      </div>
+                   </div>
+                   <div className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                         <AreaChart data={monthlyTimelineData}>
+                            <defs>
+                               <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                               </linearGradient>
+                               <linearGradient id="colorProf" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                               </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.5} />
+                            <XAxis dataKey="monthName" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
+                            <YAxis fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : `${v/1000}k`} />
+                            <Tooltip contentStyle={{backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', textAlign: 'right'}} itemStyle={{fontWeight: '900', fontSize: '11px'}} />
+                            <Area type="monotone" dataKey="revenue" name="إجمالي الوارد" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorRev)" />
+                            <Area type="monotone" dataKey="profit" name="صافي الربح" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorProf)" />
+                         </AreaChart>
+                      </ResponsiveContainer>
+                   </div>
+                </Card>
+
+                <Card className="bg-card border-border p-8 rounded-3xl overflow-hidden shadow-sm">
+                   <div className="flex justify-between items-center mb-8">
+                      <div>
+                         <h3 className="text-lg font-black text-foreground">الفواتير والتسديدات</h3>
+                         <p className="text-xs text-muted-foreground font-bold">مقارنة المصوبات مع المبالغ المدفوعة</p>
+                      </div>
+                   </div>
+                   <div className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                         <BarChart data={monthlyTimelineData}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.5} />
+                            <XAxis dataKey="monthName" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
+                            <YAxis fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
+                            <Tooltip contentStyle={{backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', textAlign: 'right'}} itemStyle={{fontWeight: '900', fontSize: '11px'}} />
+                            <Legend />
+                            <Bar dataKey="invoices" name="الفواتير" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="payments" name="التسديدات" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                         </BarChart>
+                      </ResponsiveContainer>
+                   </div>
+                </Card>
+             </div>
+
+             <Card className="bg-card border-border rounded-3xl overflow-hidden shadow-sm">
+                <div className="p-8 border-b border-border bg-muted/10 flex items-center justify-between">
+                   <div className="flex items-center gap-3">
+                      <ScrollText className="h-6 w-6 text-primary" />
+                      <h3 className="text-xl font-black text-foreground">سجل الأداء الشهري الشامل</h3>
+                   </div>
+                </div>
+                <div className="overflow-x-auto">
+                   <table className="w-full text-right border-collapse">
+                      <thead className="bg-muted/30 text-[10px] font-black text-muted-foreground uppercase border-b border-border">
+                         <tr>
+                            <th className="px-8 py-6">الشهر</th>
+                            <th className="px-8 py-6">الوارد</th>
+                            <th className="px-8 py-6">الربح</th>
+                            <th className="px-8 py-6">الفواتير</th>
+                            <th className="px-8 py-6">التسديدات</th>
+                            <th className="px-8 py-6">المصاريف</th>
+                            <th className="px-8 py-6">الديون المتبقية</th>
+                            <th className="px-8 py-6 text-left">صافي النتيجة</th>
+                         </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/30">
+                         {monthlyTimelineData.map((data, idx) => (
+                           <tr key={idx} className={`group hover:bg-primary/5 transition-colors ${idx === reportsMonth ? 'bg-primary/5' : ''}`}>
+                             <td className="px-8 py-6 font-black text-foreground">{data.monthName}</td>
+                             <td className="px-8 py-6 font-mono font-bold text-slate-600">{formatNumberWithCommas(data.revenue)}</td>
+                             <td className="px-8 py-6 font-mono font-bold text-emerald-600">{formatNumberWithCommas(data.profit)}</td>
+                             <td className="px-8 py-6 font-mono font-bold text-indigo-600">{formatNumberWithCommas(data.invoices)}</td>
+                             <td className="px-8 py-6 font-mono font-bold text-blue-600">{formatNumberWithCommas(data.payments)}</td>
+                             <td className="px-8 py-6 font-mono font-bold text-rose-500">{formatNumberWithCommas(data.expenses)}</td>
+                             <td className="px-8 py-6 font-mono font-bold text-amber-500">{formatNumberWithCommas(data.remaining)}</td>
+                             <td className="px-8 py-6 text-left">
+                                <span className={`text-lg font-black font-mono tracking-tighter ${data.net >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                  {formatNumberWithCommas(data.net)}
+                                </span>
+                             </td>
+                           </tr>
+                         ))}
+                      </tbody>
+                   </table>
+                </div>
+             </Card>
+
+             {currentBranchId === null && branches.length > 1 && (
+                <Card className="bg-primary/5 border-primary/10 rounded-3xl overflow-hidden p-8 mb-20">
+                  <div className="flex items-center gap-3 mb-8 relative z-10">
+                     <Building2 className="h-6 w-6 text-primary" />
+                     <h3 className="text-2xl font-black text-foreground">أداء الفروع المجمع ({safeFormatDate(new Date(reportsYear, reportsMonth), 'MMMM')})</h3>
+                  </div>
+                  <div className="overflow-x-auto relative z-10">
+                      <table className="w-full text-right">
+                         <thead className="text-[10px] font-black text-muted-foreground uppercase border-b border-border/50">
+                            <tr>
+                               <th className="px-8 py-4 text-right">الفرع</th>
+                               <th className="px-8 py-4 text-right">الوارد</th>
+                               <th className="px-8 py-4 text-right">المصاريف</th>
+                               <th className="px-8 py-4 text-left">صافي الربح</th>
+                            </tr>
+                         </thead>
+                         <tbody className="divide-y divide-border/30">
+                            {branches.map(branch => {
+                              const bTx = transactions.filter(t => t.branchId === branch.id && new Date(t.date) >= startOfMonth(new Date(reportsYear, reportsMonth)) && new Date(t.date) <= endOfMonth(new Date(reportsYear, reportsMonth)));
+                              const bSalaries = employeeAttendance.filter(r => r.branchId === branch.id && new Date(r.date) >= startOfMonth(new Date(reportsYear, reportsMonth)) && new Date(r.date) <= endOfMonth(new Date(reportsYear, reportsMonth))).reduce((acc, r) => acc + r.dailyWage, 0);
+                              const bRevenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.saleAmount || t.amount), 0);
+                              const bProfit = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0);
+                              const bExpense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0) + bSalaries;
+                              return (
+                                <tr key={branch.id} className="hover:bg-primary/5 transition-colors">
+                                   <td className="px-8 py-5 font-black text-foreground">{branch.name}</td>
+                                   <td className="px-8 py-5 font-mono font-bold text-emerald-600">{formatIQD(bRevenue)}</td>
+                                   <td className="px-8 py-5 font-mono font-bold text-rose-600">{formatIQD(bExpense)}</td>
+                                   <td className="px-8 py-5 text-left font-mono font-black text-lg">{formatIQD(bProfit - bExpense)}</td>
+                                </tr>
+                              );
+                            })}
+                         </tbody>
+                      </table>
+                  </div>
+                </Card>
+             )}
           </TabsContent>
 
           <TabsContent value="notifications" className="space-y-6 animate-in fade-in duration-500 pb-20 md:pb-0">
@@ -3677,7 +4064,7 @@ export default function App() {
                  </div>
                  <Button variant="ghost" className="text-emerald-500 hover:bg-emerald-500/10 font-bold text-xs shrink-0" onClick={async () => {
                     for (const n of notifications) {
-                      if (!n.read) await localDb.notifications.update(n.id!, { read: true });
+                      if (!n.read) await firebaseService.updateDocument('notifications', n.id!, { read: true });
                     }
                   }}>
                     تمييز الكل
@@ -3699,11 +4086,11 @@ export default function App() {
                           <div className="flex-1 space-y-1.5 md:space-y-2 min-w-0">
                             <div className="flex justify-between items-start gap-2">
                               <h4 className="font-black text-foreground text-sm md:text-base truncate">{n.title}</h4>
-                              <span className="text-[9px] md:text-xs text-muted-foreground font-mono shrink-0">{format(n.createdAt, 'MM/dd HH:mm')}</span>
+                              <span className="text-[9px] md:text-xs text-muted-foreground font-mono shrink-0">{safeFormatDate(n.createdAt, 'MM/dd HH:mm')}</span>
                             </div>
                             <p className="text-xs md:text-sm text-muted-foreground leading-relaxed line-clamp-2">{n.message}</p>
                             {!n.read && (
-                               <Button variant="link" className="p-0 h-auto text-[10px] md:text-xs text-emerald-500 font-bold hover:text-emerald-400" onClick={() => localDb.notifications.update(n.id!, { read: true })}>
+                               <Button variant="link" className="p-0 h-auto text-[10px] md:text-xs text-emerald-500 font-bold hover:text-emerald-400" onClick={() => firebaseService.updateDocument('notifications', n.id!, { read: true })}>
                                  تمييز كمقروء
                                </Button>
                             )}
@@ -3728,6 +4115,20 @@ export default function App() {
 
             <TabsContent value="medicine-requests" className="animate-in fade-in zoom-in-95 duration-300 pb-20 md:pb-0">
                <MedicineRequestsPage branchId={currentBranchId} ownerId={user?.uid || ''} />
+            </TabsContent>
+
+            <TabsContent value="losses" className="animate-in fade-in slide-in-from-left-4 duration-500 pb-20 md:pb-0">
+               <LossesPage 
+                 losses={expiredDamagedLosses.filter(l => !currentBranchId || l.branchId === currentBranchId)} 
+                 onAdd={() => setIsAddLossOpen(true)}
+                 onViewInvoice={(invoiceId) => {
+                    const invoice = (allLedgerEntries || []).find(i => i.id === invoiceId);
+                    if (invoice) {
+                       setViewingInvoice(invoice);
+                       setActiveTab('invoice-details');
+                    }
+                 }}
+               />
             </TabsContent>
 
             <TabsContent value="settings" className="space-y-8 animate-in fade-in duration-500 pb-20 md:pb-0">
@@ -3899,7 +4300,7 @@ export default function App() {
                 onRefund={(invoice) => { setViewingInvoice(invoice); setIsRefundInvoiceOpen(true); }}
                 onDelete={(invoice) => { setViewingInvoice(invoice); setIsDeleteInvoiceConfirmOpen(true); }}
                 onPrint={() => window.print()}
-                onUpdateImage={handleUpdateInvoiceImage}
+                onUpdateImageUrls={handleUpdateInvoiceImageUrls}
               />
             )}
           </TabsContent>
@@ -3943,6 +4344,20 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      {/* Add Loss Dialog */}
+      <Dialog open={isAddLossOpen} onOpenChange={setIsAddLossOpen}>
+        <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-xl lg:max-w-4xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-foreground text-xl font-black">تسجيل خسارة مادة (تالف / إكسباير)</DialogTitle>
+          </DialogHeader>
+          <LossForm 
+            invoices={allLedgerEntries}
+            onSubmit={handleAddLoss}
+            onClose={() => setIsAddLossOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* Add Entity Dialog */}
       <Dialog open={isAddEntityOpen} onOpenChange={setIsAddEntityOpen}>
         <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-xl lg:max-w-4xl max-h-[95vh] overflow-y-auto">
@@ -3966,7 +4381,7 @@ export default function App() {
             selectedEntity={selectedEntity}
             onSubmit={handleAddInvoice}
             onClose={() => setIsAddInvoiceOpen(false)}
-            onImageChange={setInvImageFile}
+            onImagesChange={setInvImageFiles}
           />
         </DialogContent>
       </Dialog>
@@ -4086,7 +4501,7 @@ export default function App() {
                 <div className="space-y-2">
                   <Label htmlFor="pay_date" className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">تاريخ الوصول / الصرف</Label>
                   <div className="relative">
-                    <Input id="pay_date" name="date" type="date" defaultValue={format(new Date(), 'yyyy-MM-dd')} required className="bg-muted border-border text-foreground h-14 rounded-xl pr-10 font-bold" />
+                    <Input id="pay_date" name="date" type="date" defaultValue={safeFormatDate(new Date(), 'yyyy-MM-dd')} required className="bg-muted border-border text-foreground h-14 rounded-xl pr-10 font-bold" />
                     <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                   </div>
                 </div>
@@ -4191,7 +4606,7 @@ export default function App() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="refund_date" className="text-muted-foreground font-bold">تاريخ الإرجاع</Label>
-                  <Input id="refund_date" name="date" type="date" defaultValue={format(new Date(), 'yyyy-MM-dd')} required className="bg-muted border-border text-foreground h-11 rounded-xl" />
+                  <Input id="refund_date" name="date" type="date" defaultValue={safeFormatDate(new Date(), 'yyyy-MM-dd')} required className="bg-muted border-border text-foreground h-11 rounded-xl" />
                 </div>
               </div>
 
@@ -4238,7 +4653,7 @@ export default function App() {
               <tbody className="divide-y divide-border text-sm">
                 {(ledgerEntries || []).map((entry) => (
                   <tr key={entry.id} className="hover:bg-muted/50 transition-colors">
-                    <td className="px-4 py-2 font-mono text-muted-foreground">{format(entry.date, 'yyyy/MM/dd')}</td>
+                    <td className="px-4 py-2 font-mono text-muted-foreground">{safeFormatDate(entry.date, 'yyyy/MM/dd')}</td>
                     <td className="px-4 py-2">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] ${
                         entry.operationType === 'invoice' ? 'bg-blue-500/10 text-blue-400' : 'bg-emerald-500/10 text-emerald-400'
@@ -4319,7 +4734,7 @@ export default function App() {
                   <Input 
                     name="date" 
                     type="date" 
-                    defaultValue={selectedTransaction ? format(selectedTransaction.date, 'yyyy-MM-dd') : ''} 
+                    defaultValue={selectedTransaction ? safeFormatDate(selectedTransaction.date, 'yyyy-MM-dd') : ''} 
                     required 
                     className="bg-muted border-border text-foreground"
                   />

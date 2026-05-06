@@ -59,14 +59,15 @@ export const EntityForm = ({ onSubmit, onClose, entity }: EntityFormProps) => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
-            <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">تصنيف المنشأ (النوع)</Label>
+            <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest text-right block">تصنيف المنشأة</Label>
             <Select name="type" defaultValue={entity?.type || "office"}>
-              <SelectTrigger className="bg-muted border-border text-foreground h-14 rounded-xl font-black text-lg shadow-sm">
+              <SelectTrigger className="bg-muted border-border text-foreground h-14 rounded-xl font-black text-lg shadow-sm w-full text-right px-4">
                 <SelectValue placeholder="اختر النوع" />
               </SelectTrigger>
-              <SelectContent className="bg-card border-border text-foreground">
-                <SelectItem value="office" className="py-3 font-bold">مكتب علمي / مذخر</SelectItem>
-                <SelectItem value="warehouse" className="py-3 font-bold">مستودع / مخزن توزيع</SelectItem>
+              <SelectContent className="bg-card border-border text-foreground" align="end">
+                <SelectItem value="office" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">مكتب</SelectItem>
+                <SelectItem value="scientific_office" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">مذخر</SelectItem>
+                <SelectItem value="personal" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">شخصي</SelectItem>
               </SelectContent>
             </Select>
           </div>

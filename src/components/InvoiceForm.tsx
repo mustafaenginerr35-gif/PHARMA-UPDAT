@@ -31,16 +31,16 @@ interface InvoiceFormProps {
   selectedEntity: Entity | null;
   onSubmit: (data: any) => void;
   onClose: () => void;
-  onImageChange: (file: File | null) => void;
+  onImagesChange: (files: File[]) => void;
 }
 
-export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit, onClose, onImageChange }: InvoiceFormProps) => {
+export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit, onClose, onImagesChange }: InvoiceFormProps) => {
   const [purchaseType, setPurchaseType] = useState<'cash' | 'credit'>('credit');
   const [bonusLater, setBonusLater] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState<string>(initialEntity?.id || '');
   const [amount, setAmount] = useState<number>(0);
   const [discount, setDiscount] = useState<number>(0);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [images, setImages] = useState<{file: File, preview: string}[]>([]);
 
   const currentEntity = entities.find(e => e.id === selectedEntityId) || initialEntity;
 
@@ -58,19 +58,29 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
       discount: discount,
       bonus: parseFormattedNumber(data.bonus as string),
       date: new Date(data.date as string),
-      dueDate: purchaseType === 'credit' && data.dueDate ? new Date(data.dueDate as string) : undefined,
-      bonusArrivalDate: bonusLater && data.bonusArrivalDate ? new Date(data.bonusArrivalDate as string) : undefined,
+      dueDate: purchaseType === 'credit' && data.dueDate ? new Date(data.dueDate as string) : null,
+      bonusArrivalDate: bonusLater && data.bonusArrivalDate ? new Date(data.bonusArrivalDate as string) : null,
     });
   };
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    onImageChange(file);
-    if (file) {
-      setImagePreview(URL.createObjectURL(file));
-    } else {
-      setImagePreview(null);
-    }
+  const handleImagesSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    
+    const newImages = files.map(file => ({
+      file,
+      preview: URL.createObjectURL(file as any)
+    }));
+    
+    const updatedImages = [...images, ...newImages];
+    setImages(updatedImages);
+    onImagesChange(updatedImages.map(img => img.file));
+  };
+
+  const removeImage = (index: number) => {
+    const updatedImages = images.filter((_, i) => i !== index);
+    setImages(updatedImages);
+    onImagesChange(updatedImages.map(img => img.file));
   };
 
   return (
@@ -227,32 +237,45 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
         </div>
 
         <div className="space-y-2">
-          <Label className="text-muted-foreground font-bold">صور القائمة</Label>
-          <div 
-            className="group relative border-2 border-dashed border-border rounded-xl p-4 text-center cursor-pointer hover:bg-muted/50 transition-all overflow-hidden aspect-video flex flex-col items-center justify-center"
-            onClick={() => document.getElementById('inv-image-input-new')?.click()}
-          >
-            {imagePreview ? (
-              <img src={imagePreview} alt="Preview" className="absolute inset-0 w-full h-full object-cover" />
-            ) : (
-              <>
-                <Upload className="h-8 w-8 mb-2 text-muted-foreground group-hover:text-primary transition-colors" />
-                <span className="text-xs text-muted-foreground font-bold">اضغط أو اسحب صورة الفاتورة هنا</span>
-              </>
-            )}
-            <input 
-              id="inv-image-input-new"
-              type="file" 
-              className="hidden" 
-              onChange={handleImageSelect}
-              accept="image/*"
-            />
-            {imagePreview && (
-              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                 <ImageIcon className="h-8 w-8 text-white" />
-              </div>
-            )}
+          <Label className="text-muted-foreground font-bold">صور الفاتورة</Label>
+          <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+            <AnimatePresence>
+              {images.map((img, index) => (
+                <motion.div 
+                  key={img.preview} 
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="group relative aspect-square rounded-xl overflow-hidden border border-border"
+                >
+                  <img src={img.preview} alt={`Preview ${index}`} className="w-full h-full object-cover" />
+                  <button 
+                    type="button"
+                    onClick={() => removeImage(index)}
+                    className="absolute top-1 right-1 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <AlertCircle className="h-3 w-3 rotate-45" />
+                  </button>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+            <button
+              type="button"
+              onClick={() => document.getElementById('inv-images-input')?.click()}
+              className="aspect-square rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center gap-1 hover:bg-muted/50 transition-all text-muted-foreground hover:text-primary"
+            >
+              <Upload className="h-6 w-6" />
+              <span className="text-[10px] font-bold text-center px-1">إضافة صور</span>
+            </button>
           </div>
+          <input 
+            id="inv-images-input"
+            type="file" 
+            className="hidden" 
+            onChange={handleImagesSelect}
+            accept="image/*"
+            multiple
+          />
         </div>
 
         <div className="space-y-2">

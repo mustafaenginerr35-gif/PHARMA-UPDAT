@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial income or expense transaction",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "ownerId": { "type": "string" }
+      },
+       "required": ["type", "amount", "date", "ownerId"]
+    },
+    "Entity": {
+      "title": "Entity",
+      "description": "Supplier or customer entity",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" }
+      },
+      "required": ["name", "ownerId"]
+    },
+    "LedgerEntry": {
+      "title": "Ledger Entry",
+      "description": "Invoice or payment record in the ledger",
+      "type": "object",
+      "properties": {
+        "accountId": { "type": "string" },
+        "ownerId": { "type": "string" }
+      },
+      "required": ["accountId", "ownerId"]
+    },
+    "UserSettings": {
+      "title": "User Settings",
+      "description": "Application settings for a user",
+      "type": "object",
+      "properties": {
+        "syncSettings": { "type": "object" },
+        "imageSettings": { "type": "object" }
+      }
+    }
+  },
+  "firestore": {
+    "transactions": { "schema": "Transaction", "description": "Global transactions" },
+    "entities": { "schema": "Entity", "description": "Suppliers and accounts" },
+    "ledgerEntries": { "schema": "LedgerEntry", "description": "Detailed accounting" },
+    "branches": { "schema": "object", "description": "Pharmacy branches" },
+    "medicineRequests": { "schema": "object", "description": "Customer medicine requests" },
+    "historicalRecords": { "schema": "object", "description": "Past data migration" },
+    "settings": { "schema": "UserSettings", "description": "User preferences and sync settings" },
+    "notifications": { "schema": "object", "description": "System notifications" },
+    "customerDebts": { "schema": "object", "description": "Customer debts" },
+    "deadlines": { "schema": "object", "description": "Payment deadlines" },
+    "employees": { "schema": "object", "description": "Staff data" },
+    "employeeAttendance": { "schema": "object", "description": "Staff attendance" },
+    "bonuses": { "schema": "object", "description": "Bonus records" },
+    "expiredDamagedLosses": { "schema": "object", "description": "Records of expired and damaged items" },
+    "announcements": { "schema": "object", "description": "System announcements" },
+    "announcementReads": { "schema": "object", "description": "Announcements read status" },
+    "activationCodes": { "schema": "object", "description": "App activation codes" },
+    "activationRequests": { "schema": "object", "description": "Activation requests" },
+    "recoveryRequests": { "schema": "object", "description": "Account recovery" }
+  }
+}

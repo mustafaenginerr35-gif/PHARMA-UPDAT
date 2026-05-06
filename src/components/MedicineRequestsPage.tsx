@@ -41,10 +41,12 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
-import { db as localDb, type MedicineRequest } from '../db';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { firebaseService } from '../services/firebaseService';
+import { useFirebaseQuery } from '../hooks/useFirebaseQuery';
+import { where, orderBy } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MedicineRequest } from '../db';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { ImageCapture } from './ImageCapture';
@@ -69,14 +71,17 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
     imageUrl: ''
   });
 
-  const medicineRequests = useLiveQuery(
-    () => localDb.medicineRequests
-      .where('ownerId').equals(ownerId)
-      .and(r => !branchId || r.branchId === branchId)
-      .reverse()
-      .sortBy('createdAt'),
-    [ownerId, branchId]
-  ) || [];
+  const constraints = useMemo(() => [
+    where('ownerId', '==', ownerId)
+  ], [ownerId]);
+
+  const { data: medicineRequestsRaw = [] } = useFirebaseQuery<MedicineRequest>('medicineRequests', constraints);
+
+  const medicineRequests = useMemo(() => {
+    const sortedRaw = [...medicineRequestsRaw].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (!branchId) return sortedRaw;
+    return sortedRaw.filter(r => r.branchId === branchId);
+  }, [medicineRequestsRaw, branchId]);
 
   const filteredRequests = useMemo(() => {
     return medicineRequests.filter(req => {
@@ -123,13 +128,13 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
         quantity: formData.quantity || '1',
         status: 'waiting',
         notes: formData.notes,
-        imageUrl: formData.imageUrl || undefined,
-        branchId: branchId || undefined,
+        imageUrl: formData.imageUrl || null,
+        branchId: branchId || null,
         ownerId,
         createdAt: new Date()
       };
 
-      await localDb.medicineRequests.add(newRequest as MedicineRequest);
+      await firebaseService.addDocument('medicineRequests', newRequest as MedicineRequest);
       toast.success('تم تسجيل الطلب بنجاح');
       setIsAddDialogOpen(false);
       setFormData({
@@ -147,7 +152,7 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
 
   const handleUpdateStatus = async (id: string, newStatus: MedicineRequest['status']) => {
     try {
-      await localDb.medicineRequests.update(id, { status: newStatus });
+      await firebaseService.updateDocument('medicineRequests', id, { status: newStatus });
       toast.success('تم تحديث حالة الطلب');
     } catch (err) {
       toast.error('حدث خطأ أثناء تحديث الحالة');
@@ -157,7 +162,7 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
   const handleDeleteRequest = async (id: string) => {
     if (window.confirm('هل أنت متأكد من حذف هذا الطلب؟')) {
       try {
-        await localDb.medicineRequests.delete(id);
+        await firebaseService.deleteDocument('medicineRequests', id);
         toast.success('تم حذف الطلب');
       } catch (err) {
         toast.error('حدث خطأ أثناء الحذف');
@@ -168,7 +173,7 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
   const handleDeleteImage = async (id: string) => {
     if (window.confirm('هل أنت متأكد من حذف صورة العلاج؟')) {
       try {
-        await localDb.medicineRequests.update(id, { imageUrl: undefined });
+        await firebaseService.updateDocument('medicineRequests', id, { imageUrl: null });
         toast.success('تم حذف الصورة');
       } catch (err) {
         toast.error('حدث خطأ أثناء حذف الصورة');
@@ -246,12 +251,14 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
         </div>
 
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="rounded-xl px-6 h-11 font-black gap-2 shadow-lg shadow-primary/20">
-              <Plus className="h-5 w-5" />
-              تسجيل طلب جديد
-            </Button>
-          </DialogTrigger>
+          <DialogTrigger
+            render={
+              <Button className="rounded-xl px-6 h-11 font-black gap-2 shadow-lg shadow-primary/20">
+                <Plus className="h-5 w-5" />
+                تسجيل طلب جديد
+              </Button>
+            }
+          />
           <DialogContent className="max-w-xl rounded-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
             <DialogHeader>
               <DialogTitle className="text-xl font-black text-right">إضافة طلب علاج جديد</DialogTitle>

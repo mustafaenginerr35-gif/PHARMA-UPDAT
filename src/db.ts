@@ -10,6 +10,12 @@ export interface Transaction {
   employeeName?: string;
   customerName?: string;
   amount: number;
+  saleAmount?: number;
+  costAmount?: number;
+  profitAmount?: number;
+  profitPercent?: number;
+  paidAmount?: number;
+  remainingAmount?: number;
   netProfit?: number;
   profitPercentage?: number;
   date: Date;
@@ -36,7 +42,7 @@ export interface Entity {
   name: string;
   phone?: string;
   address?: string;
-  type: 'office' | 'warehouse';
+  type: 'office' | 'scientific_office' | 'personal' | 'warehouse';
   balance: number;
   initialBalance: number;
   totalInvoices: number;
@@ -72,6 +78,7 @@ export interface LedgerEntry {
   notes?: string;
   imageUrl?: string;
   receiptImageUrl?: string;
+  imageUrls?: string[];
   balanceAfterOperation: number;
   transactionId?: string;
   dueDate?: Date;
@@ -301,6 +308,22 @@ export interface MedicineRequest {
   createdAt: Date;
 }
 
+export interface ExpiredDamagedLoss {
+  id?: string;
+  date: Date;
+  lossType: 'expired' | 'damaged';
+  itemName: string;
+  quantity: number;
+  purchasePrice: number;
+  totalLoss: number;
+  invoiceId?: string | null;
+  notes?: string;
+  branchId?: string | null;
+  ownerId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export class PharmacyDatabase extends Dexie {
   transactions!: Table<Transaction>;
   entities!: Table<Entity>;
@@ -321,10 +344,11 @@ export class PharmacyDatabase extends Dexie {
   branches!: Table<PharmacyBranch>;
   historicalRecords!: Table<HistoricalRecord>;
   medicineRequests!: Table<MedicineRequest>;
+  expiredDamagedLosses!: Table<ExpiredDamagedLoss>;
 
   constructor() {
     super('PharmacyDatabase');
-    this.version(16).stores({
+    this.version(17).stores({
       transactions: '++id, type, incomeType, category, date, entityId, branchId, createdBy',
       entities: '++id, name, type, branchId, ownerId',
       ledgerEntries: '++id, accountId, date, operationType, purchaseType, branchId, ownerId',
@@ -343,7 +367,8 @@ export class PharmacyDatabase extends Dexie {
       employeeAttendance: '++id, employeeId, date, branchId, ownerId',
       branches: '++id, name, status, ownerId',
       historicalRecords: '++id, type, startDate, endDate, branchId, ownerId',
-      medicineRequests: '++id, patientName, phone, medicineName, status, branchId, ownerId'
+      medicineRequests: '++id, patientName, phone, medicineName, status, branchId, ownerId',
+      expiredDamagedLosses: '++id, date, lossType, invoiceId, branchId, ownerId'
     });
   }
 }

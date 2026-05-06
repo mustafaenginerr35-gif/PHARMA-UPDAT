@@ -1,4 +1,36 @@
 
+import { format } from 'date-fns';
+import { ar } from 'date-fns/locale';
+
+/**
+ * Formats a date safely, handling Firestore Timestamps and invalid dates.
+ * @param date The date to format (can be Date, Timestamp, string, number)
+ * @param formatStr The format string
+ * @returns Formatted date string
+ */
+export const safeFormatDate = (date: any, formatStr: string): string => {
+  if (!date) return '-';
+  try {
+    let d = date;
+    // Handle Firestore Timestamp
+    if (d && typeof d.toDate === 'function') {
+      d = d.toDate();
+    } 
+    // Handle other types
+    else if (!(d instanceof Date)) {
+      d = new Date(d);
+    }
+    
+    // Check if the date is valid
+    if (isNaN(d.getTime())) return '-';
+    
+    return format(d, formatStr, { locale: ar });
+  } catch (error) {
+    console.error("Format error:", error, date);
+    return '-';
+  }
+};
+
 /**
  * Formats a number with thousand separators and the IQD currency suffix.
  * @param amount The number to format

@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
+import { safeFormatDate } from '../lib/formatters';
 import { ar } from 'date-fns/locale';
 import { EmployeeForm } from './EmployeeForm';
 import { AttendanceForm } from './AttendanceForm';
@@ -72,7 +73,7 @@ export const EmployeesPage = ({
   const [activeSubTab, setActiveSubTab] = useState<'list' | 'attendance' | 'summary'>('list');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('all');
-  const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
+  const [selectedMonth, setSelectedMonth] = useState<string>(safeFormatDate(new Date(), 'yyyy-MM'));
   
   const [isAddEmployeeOpen, setIsAddEmployeeOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
@@ -91,7 +92,7 @@ export const EmployeesPage = ({
   const filteredAttendance = useMemo(() => {
     return attendance.filter(record => {
       const matchesEmployee = selectedEmployeeId === 'all' || record.employeeId === selectedEmployeeId;
-      const recordMonth = format(record.date, 'yyyy-MM');
+      const recordMonth = safeFormatDate(record.date, 'yyyy-MM');
       const matchesMonth = recordMonth === selectedMonth;
       return matchesEmployee && matchesMonth;
     }).sort((a, b) => b.date.getTime() - a.date.getTime());
@@ -123,7 +124,7 @@ export const EmployeesPage = ({
     });
 
     // Filter attendance for the selected month and aggregate
-    attendance.filter(record => format(record.date, 'yyyy-MM') === selectedMonth).forEach(record => {
+    attendance.filter(record => safeFormatDate(record.date, 'yyyy-MM') === selectedMonth).forEach(record => {
       const summary = summaryMap.get(record.employeeId);
       if (summary) {
         summary.totalHours += record.hoursWork;

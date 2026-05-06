@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Building2, 
   History, 
@@ -26,8 +26,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { db as localDb, type HistoricalRecord } from '../db';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { firebaseService } from '../services/firebaseService';
+import { useFirebaseQuery } from '../hooks/useFirebaseQuery';
+import { where, orderBy } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -35,6 +36,7 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { formatIQD } from '@/src/lib/formatters';
+import { HistoricalRecord } from '../db';
 
 interface HistoricalMigrationPageProps {
   branchId: string | null;
@@ -44,13 +46,17 @@ interface HistoricalMigrationPageProps {
 export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = ({ branchId, ownerId }) => {
   const [activeTab, setActiveTab] = useState('opening');
   
-  const historicalRecords = useLiveQuery(
-    () => localDb.historicalRecords
-      .where('ownerId').equals(ownerId)
-      .and(r => !branchId || r.branchId === branchId)
-      .toArray(),
-    [ownerId, branchId]
-  );
+  const constraints = useMemo(() => [
+    where('ownerId', '==', ownerId)
+  ], [ownerId]);
+
+  const { data: historicalRecordsRaw = [] } = useFirebaseQuery<HistoricalRecord>('historicalRecords', constraints);
+
+  const historicalRecords = useMemo(() => {
+    const sortedRaw = [...historicalRecordsRaw].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (!branchId) return sortedRaw;
+    return sortedRaw.filter(r => r.branchId === branchId);
+  }, [historicalRecordsRaw, branchId]);
 
   const [openingBalance, setOpeningBalance] = useState({
     cashHand: 0,
@@ -82,12 +88,12 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
         type: 'opening_balance',
         ...openingBalance,
         isHistorical: true,
-        branchId: branchId || undefined,
+        branchId: branchId || null,
         ownerId,
         createdAt: new Date()
       };
       
-      await localDb.historicalRecords.add(record as HistoricalRecord);
+      await firebaseService.addDocument('historicalRecords', record as HistoricalRecord);
       toast.success('تمت إضافة الأرصدة الافتتاحية بنجاح');
       // Reset form
       setOpeningBalance({
@@ -118,12 +124,12 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
         startDate: new Date(batchEntry.startDate),
         endDate: new Date(batchEntry.endDate),
         isHistorical: true,
-        branchId: branchId || undefined,
+        branchId: branchId || null,
         ownerId,
         createdAt: new Date()
       };
       
-      await localDb.historicalRecords.add(record as HistoricalRecord);
+      await firebaseService.addDocument('historicalRecords', record as HistoricalRecord);
       toast.success('تم ترحيل العمليات التاريخية بنجاح');
       // Reset form
       setBatchEntry({
@@ -169,7 +175,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
 
   const handleDeleteRecord = async (id: string) => {
     if (window.confirm('هل أنت متأكد من حذف هذا السجل التاريخي؟')) {
-      await localDb.historicalRecords.delete(id);
+      await firebaseService.deleteDocument('historicalRecords', id);
       toast.success('تم حذف السجل');
     }
   };

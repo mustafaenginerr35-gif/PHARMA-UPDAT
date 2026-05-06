@@ -24,37 +24,46 @@ interface RevenueFormProps {
 export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
   const [incomeType, setIncomeType] = useState<'cash' | 'credit'>('cash');
   const [saleAmount, setSaleAmount] = useState<string>('');
-  const [saleNetProfit, setSaleNetProfit] = useState<string>('');
-  const [saleProfitPercentage, setSaleProfitPercentage] = useState<string>('15');
-
-  // Sync profit when amount or percentage changes
-  useEffect(() => {
-    const amountNum = parseFormattedNumber(saleAmount);
-    const percentNum = parseFloat(saleProfitPercentage) || 0;
-    setSaleNetProfit(formatNumberWithCommas(((amountNum * percentNum) / 100).toFixed(0)));
-  }, [saleAmount, saleProfitPercentage]);
+  const [profitPercent, setProfitPercent] = useState<string>('15');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData.entries());
+    
+    const sAmount = parseFormattedNumber(saleAmount);
+    const pPercent = parseFloat(profitPercent) || 0;
+    const profAmount = (sAmount * pPercent) / 100;
+    const cAmount = sAmount - profAmount;
+    
+    const pAmount = incomeType === 'cash' ? sAmount : 0;
+    const remAmount = incomeType === 'cash' ? 0 : sAmount;
+
     onSubmit({
       ...data,
       incomeType,
-      amount: parseFormattedNumber(saleAmount),
-      netProfit: parseFormattedNumber(saleNetProfit),
-      profitPercentage: Number(saleProfitPercentage),
+      paymentType: incomeType,
+      type: 'income',
+      saleAmount: sAmount,
+      costAmount: cAmount,
+      profitPercent: pPercent,
+      profitAmount: profAmount,
+      paidAmount: pAmount,
+      remainingAmount: remAmount,
+      amount: sAmount, // Legacy compatibility
+      netProfit: profAmount,
       date: new Date(data.date as string),
-      dueDate: data.dueDate ? new Date(data.dueDate as string) : undefined,
+      dueDate: data.dueDate ? new Date(data.dueDate as string) : null,
+      createdAt: new Date()
     });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="space-y-6">
-        {/* Income Type Selection (Wide/Responsive) */}
+        {/* Income Type Selection */}
         <div className="space-y-3 p-5 bg-muted/10 border border-border rounded-2xl">
-          <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest block">طبيعة العملية وتصنيف الوارد</Label>
+          <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest block">نوع العملية</Label>
           <div className="grid grid-cols-2 gap-4">
             <button
               type="button"
@@ -65,13 +74,8 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
                 : 'border-border bg-muted/30 text-muted-foreground hover:border-border/80'
               }`}
             >
-              <div className={`p-3 rounded-full ${incomeType === 'cash' ? 'bg-emerald-500 text-white shadow-lg' : 'bg-muted text-muted-foreground'}`}>
-                <DollarSign className="h-6 w-6" />
-              </div>
-              <div className="text-center">
-                <div className="text-sm font-black uppercase">وارد نقدي مباشر</div>
-                <div className="text-[10px] font-bold opacity-60">صندوق الكاش (الصيدلية)</div>
-              </div>
+              <DollarSign className={`h-6 w-6 ${incomeType === 'cash' ? 'text-emerald-600' : 'text-muted-foreground'}`} />
+              <div className="text-sm font-black uppercase">نقدي</div>
             </button>
             <button
               type="button"
@@ -82,26 +86,21 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
                 : 'border-border bg-muted/30 text-muted-foreground hover:border-border/80'
               }`}
             >
-              <div className={`p-3 rounded-full ${incomeType === 'credit' ? 'bg-amber-500 text-white shadow-lg' : 'bg-muted text-muted-foreground'}`}>
-                <Clock3 className="h-6 w-6" />
-              </div>
-              <div className="text-center">
-                <div className="text-sm font-black uppercase">بيع بالدين (آجل)</div>
-                <div className="text-[10px] font-bold opacity-60">بذمة زبون أو جهة</div>
-              </div>
+              <Clock3 className={`h-6 w-6 ${incomeType === 'credit' ? 'text-amber-600' : 'text-muted-foreground'}`} />
+              <div className="text-sm font-black uppercase">آجل</div>
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Column 1: Financials */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Amount and Profit % */}
           <div className="space-y-6">
             <div className="space-y-2 p-5 bg-card/40 border border-border rounded-2xl relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 blur-2xl rounded-full" />
-              <Label className="text-primary font-black text-[10px] uppercase tracking-widest block mb-2">القيمة الإجمالية للمبيعات</Label>
+              <Label className="text-primary font-black text-[10px] uppercase tracking-widest block mb-2">إجمالي الوارد</Label>
               <div className="relative">
                 <CurrencyInput 
-                  name="amount" 
+                  name="saleAmount" 
                   required 
                   value={parseFormattedNumber(saleAmount)}
                   onChange={(val) => setSaleAmount(formatNumberWithCommas(val))}
@@ -113,57 +112,34 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">نوع الإيراد (التصنيف)</Label>
-              <select 
-                name="incomeTypeCustom" 
-                defaultValue="مبيعات"
-                className="w-full bg-muted border border-border text-foreground h-11 rounded-xl px-4 font-bold focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all appearance-none"
-              >
-                <option value="مبيعات">مبيعات</option>
-                <option value="خدمات">خدمات</option>
-                <option value="أخرى">أخرى</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 p-5 bg-emerald-500/5 rounded-2xl border border-emerald-500/10 shadow-sm">
-              <div className="space-y-2">
-                <Label className="text-emerald-700 font-black text-[10px] uppercase tracking-widest">صافي الربح المتحقق</Label>
-                <div className="relative">
-                  <CurrencyInput 
-                    name="netProfit" 
-                    value={parseFormattedNumber(saleNetProfit)}
-                    onChange={(val) => {
-                      const formatted = formatNumberWithCommas(val);
-                      setSaleNetProfit(formatted);
-                      const sAmount = parseFormattedNumber(saleAmount);
-                      if (sAmount > 0) {
-                        setSaleProfitPercentage(((val / sAmount) * 100).toFixed(1));
-                      }
-                    }}
-                    className="bg-background border-emerald-500/20 text-emerald-600 font-black font-mono h-12 rounded-xl text-lg shadow-inner" 
-                  />
-                </div>
+              <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">نسبة الربح %</Label>
+              <div className="relative">
+                <Input 
+                  name="profitPercent" 
+                  type="number"
+                  required
+                  value={profitPercent}
+                  onChange={(e) => setProfitPercent(e.target.value)}
+                  className="bg-muted border-border text-foreground h-12 rounded-xl font-mono font-bold pl-10" 
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-bold">%</span>
               </div>
-              <div className="space-y-2">
-                <Label className="text-emerald-700 font-black text-[10px] uppercase tracking-widest text-left">النسبة المئوية %</Label>
-                <div className="relative">
-                  <Input 
-                    name="profitPercentage" 
-                    type="number" 
-                    value={saleProfitPercentage}
-                    onChange={(e) => setSaleProfitPercentage(e.target.value)}
-                    className="bg-background border-emerald-500/20 text-emerald-600 font-black font-mono h-12 rounded-xl pl-10 text-lg shadow-inner" 
-                  />
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-500 font-black text-sm">%</span>
-                </div>
+            </div>
+            
+            <div className="p-4 bg-emerald-500/5 rounded-2xl border border-emerald-500/10">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-emerald-700 uppercase">الربح المحسوب:</span>
+                <span className="font-mono font-black text-emerald-600 text-lg">
+                  {formatNumberWithCommas(((parseFormattedNumber(saleAmount) * (parseFloat(profitPercent) || 0)) / 100).toFixed(0))}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Column 2: Date & Notes */}
+          {/* Date and Notes */}
           <div className="space-y-6">
             <div className="space-y-2">
-              <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">تاريخ التسجيل</Label>
+              <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">التاريخ</Label>
               <div className="relative">
                 <Input 
                   name="date" 
@@ -177,10 +153,10 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">ملاحظات وشهادات</Label>
+              <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">ملاحظات (اختياري)</Label>
               <textarea 
                 name="notes" 
-                placeholder="اكتب ملاحظات حول هذه العملية، مثلاً: مبيعات علاج مزمن..." 
+                placeholder="اكتب ملاحظات حول العملية..." 
                 className="w-full bg-muted border border-border text-foreground rounded-2xl p-4 h-[7.5rem] focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-bold resize-none" 
               />
             </div>
@@ -196,26 +172,18 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
               className="overflow-hidden"
             >
               <div className="space-y-4 p-5 bg-amber-500/5 rounded-3xl border border-amber-500/10 shadow-sm relative">
-                <div className="absolute top-0 left-0 w-32 h-32 bg-amber-500/5 blur-3xl -ml-16 -mt-16" />
-                <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="md:col-span-1 space-y-2">
+                <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
                     <Label className="text-amber-700 font-black text-[10px] flex items-center gap-2 uppercase tracking-wide">
                       <User className="h-3 w-3" />
-                      اسم الزبون (المدين)
+                      اسم الزبون
                     </Label>
-                    <Input name="customerName" placeholder="الاسم الكامل للزبون" className="bg-background border-amber-500/20 text-foreground h-12 rounded-xl font-bold" />
-                  </div>
-                  <div className="space-y-2">
-                      <Label className="text-amber-700 font-black text-[10px] flex items-center gap-2 uppercase tracking-wide">
-                        <Phone className="h-3 w-3" />
-                        رقم التواصل
-                      </Label>
-                      <Input name="customerPhone" placeholder="07xx xxx xxxx" className="bg-background border-amber-500/10 text-foreground h-12 rounded-xl font-mono font-bold" />
+                    <Input name="customerName" placeholder="الاسم الكامل" className="bg-background border-amber-500/20 text-foreground h-12 rounded-xl font-bold" />
                   </div>
                   <div className="space-y-2">
                     <Label className="text-amber-700 font-black text-[10px] flex items-center gap-2 uppercase tracking-wide">
                       <CalendarDays className="h-3 w-3" />
-                      موعد الاستحقاق المتوقع
+                      موعد الاستحقاق
                     </Label>
                     <Input name="dueDate" type="date" className="bg-background border-amber-500/20 text-foreground h-12 rounded-xl font-bold" />
                   </div>
@@ -229,15 +197,15 @@ export const RevenueForm = ({ onSubmit, onClose }: RevenueFormProps) => {
       <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-border">
         <Button 
           type="submit" 
-          className="flex-3 font-black text-2xl h-16 rounded-3xl shadow-2xl transition-all scale-100 hover:scale-[1.02] active:scale-[0.98] bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/30"
+          className="flex-3 font-black text-xl h-16 rounded-3xl shadow-2xl transition-all scale-100 hover:scale-[1.02] active:scale-[0.98] bg-emerald-600 hover:bg-emerald-700"
         >
-          حفظ عملية البيع والتنزيل من الجرد
+          حفظ عملية الوارد
         </Button>
         <Button 
           type="button" 
           variant="outline" 
           onClick={onClose}
-          className="flex-1 font-black h-16 rounded-3xl border-border hover:bg-muted text-lg"
+          className="flex-1 font-black h-16 rounded-3xl border-border text-lg"
         >
           إلغاء
         </Button>
