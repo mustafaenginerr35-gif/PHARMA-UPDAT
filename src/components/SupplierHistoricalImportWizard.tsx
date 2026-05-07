@@ -30,6 +30,7 @@ import { Entity, LedgerEntry } from '../db';
 import { firebaseService } from '../services/firebaseService';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { cn, fileToBase64 } from '@/lib/utils';
+import { safeFormatDate } from '@/src/lib/formatters';
 
 interface SupplierHistoricalImportWizardProps {
   entity: Entity;
@@ -69,8 +70,8 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
 }) => {
   const [step, setStep] = useState<Step>('period');
   const [period, setPeriod] = useState({
-    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-    endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
+    startDate: safeFormatDate(startOfMonth(new Date()), 'yyyy-MM-dd', { useAr: false }),
+    endDate: safeFormatDate(endOfMonth(new Date()), 'yyyy-MM-dd', { useAr: false }),
     year: new Date().getFullYear().toString(),
     month: (new Date().getMonth() + 1).toString(),
     importType: 'manual' as 'manual' | 'excel'
@@ -79,7 +80,7 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
   const [invoices, setInvoices] = useState<InvoiceRow[]>([
     {
       invoiceNumber: '',
-      date: format(new Date(), 'yyyy-MM-dd'),
+      date: safeFormatDate(new Date(), 'yyyy-MM-dd', { useAr: false }),
       amount: 0,
       discount: 0,
       discountType: 'fixed',
@@ -102,7 +103,7 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
   const handleAddRow = () => {
     setInvoices([...invoices, {
       invoiceNumber: '',
-      date: format(new Date(), 'yyyy-MM-dd'),
+      date: safeFormatDate(new Date(), 'yyyy-MM-dd', { useAr: false }),
       amount: 0,
       discount: 0,
       discountType: 'fixed',
@@ -183,13 +184,13 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
 
           return {
             invoiceNumber: String(row['رقم الفاتورة'] || row['invoice_number'] || ''),
-            date: format(new Date(row['التاريخ'] || row['date'] || Date.now()), 'yyyy-MM-dd'),
+            date: safeFormatDate(new Date(row['التاريخ'] || row['date'] || Date.now()), 'yyyy-MM-dd', { useAr: false }),
             amount,
             discount,
             purchaseType: (row['نوع الشراء'] === 'نقدي' || row['type'] === 'cash') ? 'cash' : 'credit',
             paidAmount: paid,
-            dueDate: row['تاريخ الاستحقاق'] ? format(new Date(row['تاريخ الاستحقاق']), 'yyyy-MM-dd') : '',
-            paymentDate: row['تاريخ التسديد'] ? format(new Date(row['تاريخ التسديد']), 'yyyy-MM-dd') : '',
+            dueDate: row['تاريخ الاستحقاق'] ? safeFormatDate(new Date(row['تاريخ الاستحقاق']), 'yyyy-MM-dd', { useAr: false }) : '',
+            paymentDate: row['تاريخ التسديد'] ? safeFormatDate(new Date(row['تاريخ التسديد']), 'yyyy-MM-dd', { useAr: false }) : '',
             notes: row['ملاحظات'] || row['notes'] || '',
             discountType: 'fixed',
             discountPercentage: 0,
@@ -233,7 +234,7 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
 
         return {
           invoiceNumber: row[0] || '',
-          date: row[1] || format(new Date(), 'yyyy-MM-dd'),
+          date: row[1] || safeFormatDate(new Date(), 'yyyy-MM-dd', { useAr: false }),
           amount,
           discount,
           purchaseType: row[4]?.includes('نقدي') ? 'cash' : 'credit',

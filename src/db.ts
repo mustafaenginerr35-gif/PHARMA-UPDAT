@@ -2,7 +2,7 @@ import Dexie, { type Table } from 'dexie';
 
 export interface Transaction {
   id?: string;
-  type: 'income' | 'expense';
+  type: 'revenue' | 'expense' | 'invoice' | 'payment' | 'income'; // added income for legacy support if needed
   incomeType?: 'cash' | 'credit';
   incomeClassification?: string;
   category: string;
@@ -31,9 +31,14 @@ export interface Transaction {
   refundAmount?: number;
   dueDate?: Date;
   imageUrl?: string;
+  imageUrls?: string[];
   branchId?: string;
   createdBy: string;
+  ownerId: string; // added ownerId explicitly
+  userId?: string; // user convenience field requested
   username?: string;
+  source?: string;
+  isHistorical?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -52,12 +57,19 @@ export interface Entity {
   dueDate?: Date;
   nextDueDate?: Date;
   lastPaymentDate?: Date;
+  lastInvoiceDate?: Date;
+  totalPaidAmount?: number;
   notes?: string;
   branchId?: string;
   ownerId: string;
   username?: string;
   createdAt?: Date;
   updatedAt?: Date;
+  deletedAt?: Date | null;
+  isArchived?: boolean;
+  status? : 'نشط' | 'مؤرشف' | 'محذوف';
+  imageUrl?: string;
+  imageUrls?: string[];
 }
 
 export interface LedgerEntry {
@@ -94,6 +106,7 @@ export interface LedgerEntry {
   branchId?: string;
   ownerId: string;
   username?: string;
+  source?: string;
   createdAt: Date;
   updatedAt?: Date;
 }
@@ -253,10 +266,13 @@ export interface EmployeeAttendance {
   id?: string;
   employeeId: string;
   employeeName: string;
-  date: Date;
-  hoursWork: number;
+  date: Date; // Keep for legacy and sorting
+  month: number;
+  year: number;
+  attendanceDays: number;
+  hoursWork: number; // Total monthly hours
   hourlyRate: number;
-  dailyWage: number;
+  dailyWage: number; // For monthly it will be the total pay
   notes?: string;
   branchId?: string;
   ownerId: string;
@@ -364,6 +380,19 @@ export interface ExpiredDamagedLoss {
   updatedAt: Date;
 }
 
+export interface EntityActivity {
+  id?: string;
+  entityId: string;
+  type: 'add_invoice' | 'update_invoice' | 'delete_invoice' | 'payment' | 'update_entity' | 'archive_entity' | 'delete_entity';
+  action: string;
+  details?: string;
+  performedBy: string;
+  createdAt: Date;
+  updatedAt?: Date;
+  ownerId: string;
+  branchId?: string;
+}
+
 export class PharmacyDatabase extends Dexie {
   transactions!: Table<Transaction>;
   entities!: Table<Entity>;
@@ -385,10 +414,11 @@ export class PharmacyDatabase extends Dexie {
   historicalRecords!: Table<HistoricalRecord>;
   medicineRequests!: Table<MedicineRequest>;
   expiredDamagedLosses!: Table<ExpiredDamagedLoss>;
+  entityActivities!: Table<EntityActivity>;
 
   constructor() {
     super('PharmacyDatabase');
-    this.version(17).stores({
+    this.version(18).stores({
       transactions: '++id, type, incomeType, category, date, entityId, branchId, createdBy',
       entities: '++id, name, type, branchId, ownerId',
       ledgerEntries: '++id, accountId, date, operationType, purchaseType, branchId, ownerId',
@@ -408,7 +438,8 @@ export class PharmacyDatabase extends Dexie {
       branches: '++id, name, status, ownerId',
       historicalRecords: '++id, type, startDate, endDate, branchId, ownerId',
       medicineRequests: '++id, patientName, phone, medicineName, status, branchId, ownerId',
-      expiredDamagedLosses: '++id, date, lossType, invoiceId, branchId, ownerId'
+      expiredDamagedLosses: '++id, date, lossType, invoiceId, branchId, ownerId',
+      entityActivities: '++id, entityId, type, createdAt, performedBy, branchId, ownerId'
     });
   }
 }

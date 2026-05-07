@@ -24,6 +24,8 @@ import { motion } from 'framer-motion';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { parseFormattedNumber } from '@/src/lib/formatters';
 
+import { safeFormatDate, toValidDate } from '@/src/lib/formatters';
+
 interface BonusFormProps {
   entities: Entity[];
   selectedEntity?: Entity | null;
@@ -40,13 +42,16 @@ export const BonusForm = ({ entities, selectedEntity: initialEntity, onSubmit, o
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData.entries());
     
+    // Fallback logic as requested
+    const finalDate = toValidDate(data.dueDate as string || new Date());
+
     onSubmit({
       ...data,
       entityId: selectedEntityId,
       status,
       amount: parseFormattedNumber(data.amount as string),
       quantity: Number(data.quantity || 0),
-      dueDate: new Date(data.dueDate as string),
+      dueDate: finalDate,
     });
   };
 
@@ -146,7 +151,7 @@ export const BonusForm = ({ entities, selectedEntity: initialEntity, onSubmit, o
               <div className="space-y-2">
                 <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">تاريخ الاستحقاق المتوقع</Label>
                 <div className="relative">
-                  <Input name="dueDate" type="date" defaultValue={format(new Date(), 'yyyy-MM-dd')} required className="bg-muted border-border text-foreground h-14 rounded-xl pr-10 font-bold shadow-sm" />
+                  <Input name="dueDate" type="date" defaultValue={safeFormatDate(new Date(), 'yyyy-MM-dd', { useAr: false })} required className="bg-muted border-border text-foreground h-14 rounded-xl pr-10 font-bold shadow-sm" />
                   <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 </div>
               </div>

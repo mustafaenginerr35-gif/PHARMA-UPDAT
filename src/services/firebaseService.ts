@@ -207,6 +207,29 @@ export const firebaseService = {
       handleFirestoreError(error, OperationType.LIST, collectionName);
     });
   },
+  
+  async queryDocuments(collectionName: string, filters: { field: string, operator: any, value: any }[] = []) {
+    const { uid, authenticated } = getEffectiveUserInfo();
+    if (!authenticated) throw new Error('يرجى تسجيل الدخول أولاً');
+
+    try {
+      const constraints = filters.map(f => where(f.field, f.operator, f.value));
+      const q = query(
+        collection(db, collectionName),
+        where('ownerId', '==', uid),
+        ...constraints
+      );
+
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id
+      }));
+    } catch (error) {
+      console.error(`[Firebase] Error querying ${collectionName}:`, error);
+      handleFirestoreError(error, OperationType.LIST, collectionName);
+    }
+  },
 
   async uploadImage(path: string, base64String: string) {
     const { uid, authenticated } = getEffectiveUserInfo();

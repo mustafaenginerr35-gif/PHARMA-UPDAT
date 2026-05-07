@@ -39,8 +39,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { format, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
-import { safeFormatDate } from '../lib/formatters';
+import { startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
+import { safeFormatDate, toValidDate } from '../lib/formatters';
 import { ar } from 'date-fns/locale';
 import { EmployeeForm } from './EmployeeForm';
 import { AttendanceForm } from './AttendanceForm';
@@ -92,10 +92,12 @@ export const EmployeesPage = ({
   const filteredAttendance = useMemo(() => {
     return attendance.filter(record => {
       const matchesEmployee = selectedEmployeeId === 'all' || record.employeeId === selectedEmployeeId;
-      const recordMonth = safeFormatDate(record.date, 'yyyy-MM');
+      const recordMonth = record.month && record.year 
+        ? `${record.year}-${record.month.toString().padStart(2, '0')}`
+        : safeFormatDate(record.date, 'yyyy-MM');
       const matchesMonth = recordMonth === selectedMonth;
       return matchesEmployee && matchesMonth;
-    }).sort((a, b) => b.date.getTime() - a.date.getTime());
+    }).sort((a, b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime());
   }, [attendance, selectedEmployeeId, selectedMonth]);
 
   // Summaries
@@ -124,13 +126,18 @@ export const EmployeesPage = ({
     });
 
     // Filter attendance for the selected month and aggregate
-    attendance.filter(record => safeFormatDate(record.date, 'yyyy-MM') === selectedMonth).forEach(record => {
+    attendance.filter(record => {
+      if (record.month && record.year) {
+        return `${record.year}-${record.month.toString().padStart(2, '0')}` === selectedMonth;
+      }
+      return safeFormatDate(record.date, 'yyyy-MM') === selectedMonth;
+    }).forEach(record => {
       const summary = summaryMap.get(record.employeeId);
       if (summary) {
         summary.totalHours += record.hoursWork;
-        summary.daysAttended += 1;
-        summary.totalSalary += record.dailyWage;
-        summary.hourlyRate = record.hourlyRate; // Assuming it's relatively stable or taking last one
+        summary.daysAttended += (record.attendanceDays || 0);
+        summary.totalSalary += record.dailyWage; // This is hours * rate from form
+        summary.hourlyRate = record.hourlyRate;
       }
     });
 
@@ -314,7 +321,7 @@ export const EmployeesPage = ({
                               </span>
                             </td>
                             <td className="px-6 py-4 text-xs font-bold text-muted-foreground">
-                              {format(emp.createdAt || new Date(), 'yyyy/MM/dd')}
+                              {safeFormatDate(emp.createdAt || new Date(), 'yyyy/MM/dd')}
                             </td>
                             <td className="px-6 py-4 text-center">
                               <div className="flex items-center justify-center gap-2">
@@ -379,7 +386,7 @@ export const EmployeesPage = ({
                           <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-600 text-[10px] font-black">
                             {emp.jobTitle}
                           </span>
-                          <span className="text-[10px] font-bold text-muted-foreground">تاريخ الإضافة: {format(emp.createdAt || new Date(), 'yyyy/MM/dd')}</span>
+                          <span className="text-[10px] font-bold text-muted-foreground">تاريخ الإضافة: {safeFormatDate(emp.createdAt || new Date(), 'yyyy/MM/dd')}</span>
                        </div>
                      </div>
                    ))}
@@ -397,32 +404,38 @@ export const EmployeesPage = ({
                     <table className="w-full text-right">
                       <thead>
                         <tr className="bg-muted/50 border-b border-border">
-                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase">التاريخ</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase">الموظف</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-right">الشهر / السنة</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-right">الموظف</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-center">أيام الحضور</th>
                           <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-center">ساعات العمل</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase">أجر الساعة</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase">أجر اليوم</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase">الإجراءات</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-right">أجر الساعة</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-right">أجر الشهر</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-center">الإجراءات</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredAttendance.map((record) => (
                           <tr key={record.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
-                            <td className="px-6 py-4 font-mono font-bold text-muted-foreground">
-                              {format(record.date, 'yyyy/MM/dd')}
+                            <td className="px-6 py-4 font-mono font-bold text-muted-foreground text-right">
+                              {record.month && record.year ? `${record.month}/${record.year}` : safeFormatDate(record.date, 'MM/yyyy')}
                             </td>
-                            <td className="px-6 py-4">
+                            <td className="px-6 py-4 text-right">
                               <div className="font-black text-foreground">{record.employeeName}</div>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 text-[10px] font-black font-mono">
+                                {record.attendanceDays || 0} يوم
+                              </span>
                             </td>
                             <td className="px-6 py-4 text-center">
                               <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-600 text-[10px] font-black font-mono">
                                 {record.hoursWork} ساعة
                               </span>
                             </td>
-                            <td className="px-6 py-4 font-mono font-black text-muted-foreground">
+                            <td className="px-6 py-4 font-mono font-black text-muted-foreground text-right">
                               {record.hourlyRate.toLocaleString()}
                             </td>
-                            <td className="px-6 py-4">
+                            <td className="px-6 py-4 text-right">
                               <div className="font-black text-emerald-600 font-mono tracking-tighter">
                                 {record.dailyWage.toLocaleString()} <span className="text-[9px] font-sans">د.ع</span>
                               </div>
@@ -454,19 +467,23 @@ export const EmployeesPage = ({
                    {filteredAttendance.map((record) => (
                      <div key={record.id} className="p-4 bg-muted/30 border border-border rounded-2xl space-y-3">
                        <div className="flex justify-between items-center text-[10px] font-bold text-muted-foreground uppercase">
-                         <span className="font-mono">{format(record.date, 'yyyy/MM/dd')}</span>
+                         <span className="font-mono">{safeFormatDate(record.date, 'yyyy/MM/dd')}</span>
                          <span className="text-primary">{record.employeeName}</span>
                        </div>
-                       <div className="flex justify-between items-center">
-                          <div className="flex flex-col gap-1">
-                             <div className="text-xs font-black text-foreground">{record.hoursWork} ساعة عمل</div>
-                             <div className="text-[10px] font-bold text-muted-foreground">أجر الساعة: {record.hourlyRate.toLocaleString()} د.ع</div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="bg-muted px-2 py-1 rounded text-center">
+                            <span className="text-muted-foreground block text-[8px]">أيام الحضور</span>
+                            <span className="font-black text-amber-600">{record.attendanceDays || 0}</span>
                           </div>
-                          <div className="text-xl font-black text-emerald-600 font-mono tracking-tighter">
-                             {record.dailyWage.toLocaleString()} <span className="text-[10px] font-sans">د.ع</span>
+                          <div className="bg-muted px-2 py-1 rounded text-center">
+                            <span className="text-muted-foreground block text-[8px]">ساعات العمل</span>
+                            <span className="font-black text-blue-600">{record.hoursWork}</span>
                           </div>
-                       </div>
-                       <div className="flex justify-end gap-2 pt-2 border-t border-border/50">
+                        </div>
+                        <div className="text-xl font-black text-emerald-600 font-mono tracking-tighter">
+                           {record.dailyWage.toLocaleString()} <span className="text-[10px] font-sans">د.ع</span>
+                        </div>
+                        <div className="flex justify-end gap-2 pt-2 border-t border-border/50">
                           <Button variant="ghost" size="sm" className="h-8 gap-2 font-bold text-blue-500" onClick={() => {
                             setEditingAttendance(record);
                             setIsAddAttendanceOpen(true);

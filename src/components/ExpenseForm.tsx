@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { safeFormatDate } from '../lib/formatters';
 import { 
   ArrowDownCircle, 
   Calendar, 
@@ -54,7 +55,7 @@ export const ExpenseForm = ({ onSubmit, onClose, initialData }: ExpenseFormProps
       category,
       expenseType,
       amount: amount,
-      date: new Date(data.date as string),
+      date: (data.date && !isNaN(new Date(data.date as string).getTime())) ? new Date(data.date as string) : new Date(),
       updatedAt: new Date()
     });
   };
@@ -115,13 +116,13 @@ export const ExpenseForm = ({ onSubmit, onClose, initialData }: ExpenseFormProps
                 </div>
                 <p className="text-[10px] text-rose-500 font-bold mr-1 italic">أدخل المبلغ بالدينار العراقي</p>
               </div>
-              <div className="space-y-2">
+                  <div className="space-y-2">
                 <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">تاريخ الصرف</Label>
                 <div className="relative">
                   <Input 
                     name="date" 
                     type="date" 
-                    defaultValue={initialData?.date ? format(new Date(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
+                    defaultValue={initialData?.date ? safeFormatDate(initialData.date, 'yyyy-MM-dd', { useAr: false }) : safeFormatDate(new Date(), 'yyyy-MM-dd', { useAr: false })} 
                     required 
                     className="bg-muted border-border text-foreground h-14 rounded-xl pr-10 font-bold shadow-sm" 
                   />

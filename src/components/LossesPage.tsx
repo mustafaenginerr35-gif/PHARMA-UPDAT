@@ -17,7 +17,7 @@ import {
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { formatIQD, safeFormatDate } from '../lib/formatters';
+import { formatIQD, safeFormatDate, toValidDate } from '../lib/formatters';
 import { type ExpiredDamagedLoss } from '../db';
 
 interface LossesPageProps {
@@ -38,7 +38,7 @@ export const LossesPage = ({ losses, onAdd, onEdit, onDelete, onViewInvoice }: L
       const matchesType = filterType === 'all' || l.lossType === filterType;
       return matchesSearch && matchesType;
     })
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .sort((a, b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime());
 
   const totalLossAmount = filteredLosses.reduce((acc, l) => acc + l.totalLoss, 0);
   const expiredCount = filteredLosses.filter(l => l.lossType === 'expired').length;

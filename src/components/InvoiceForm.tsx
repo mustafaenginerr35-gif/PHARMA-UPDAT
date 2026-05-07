@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { safeFormatDate } from '../lib/formatters';
 import { 
   Building2, 
   Calendar, 
@@ -99,9 +100,9 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
       discountPercentage,
       netAmount,
       bonus: parseFormattedNumber(data.bonus as string || '0'),
-      date: new Date(data.date as string),
-      dueDate: purchaseType === 'credit' && data.dueDate ? new Date(data.dueDate as string) : null,
-      bonusArrivalDate: bonusLater && data.bonusArrivalDate ? new Date(data.bonusArrivalDate as string) : null,
+      date: (data.date && !isNaN(new Date(data.date as string).getTime())) ? new Date(data.date as string) : new Date(),
+      dueDate: purchaseType === 'credit' && data.dueDate ? (isNaN(new Date(data.dueDate as string).getTime()) ? null : new Date(data.dueDate as string)) : null,
+      bonusArrivalDate: bonusLater && data.bonusArrivalDate ? (isNaN(new Date(data.bonusArrivalDate as string).getTime()) ? null : new Date(data.bonusArrivalDate as string)) : null,
       updatedAt: new Date()
     });
   };
@@ -203,7 +204,7 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
               <Input 
                 name="date" 
                 type="date" 
-                defaultValue={initialData?.date ? format(new Date(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
+                defaultValue={initialData?.date ? safeFormatDate(initialData.date, 'yyyy-MM-dd', { useAr: false }) : safeFormatDate(new Date(), 'yyyy-MM-dd', { useAr: false })} 
                 required 
                 className="bg-muted border-border text-foreground h-11 rounded-xl pr-10" 
               />
@@ -299,7 +300,7 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
                 <Input 
                   name="dueDate" 
                   type="date" 
-                  defaultValue={initialData?.dueDate ? format(new Date(initialData.dueDate), 'yyyy-MM-dd') : ''}
+                  defaultValue={initialData?.dueDate ? safeFormatDate(initialData.dueDate, 'yyyy-MM-dd', { useAr: false }) : ''}
                   className="bg-background border-amber-500/20 text-foreground h-10 rounded-lg" 
                 />
               </div>
@@ -338,7 +339,7 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
                 <Input 
                   name="bonusArrivalDate" 
                   type="date" 
-                  defaultValue={initialData?.bonusArrivalDate ? format(new Date(initialData.bonusArrivalDate), 'yyyy-MM-dd') : ''}
+                  defaultValue={initialData?.bonusArrivalDate ? safeFormatDate(initialData.bonusArrivalDate, 'yyyy-MM-dd', { useAr: false }) : ''}
                   className="bg-background border-blue-500/20 text-foreground h-10 rounded-lg" 
                 />
               </div>

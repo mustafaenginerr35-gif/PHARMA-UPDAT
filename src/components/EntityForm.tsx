@@ -4,7 +4,8 @@ import {
   Phone, 
   MapPin, 
   Info,
-  DollarSign
+  DollarSign,
+  Image as ImageIcon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,36 +20,23 @@ import {
 import { format } from 'date-fns';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { parseFormattedNumber } from '@/src/lib/formatters';
+import { ImageCapture } from './ImageCapture';
 
 interface EntityFormProps {
   onSubmit: (data: any) => void;
   onClose: () => void;
   entity?: any;
+  onImagesChange?: (files: File[]) => void;
 }
 
-export interface Entity {
-  id?: string;
-  name: string;
-  phone?: string;
-  address?: string;
-  type: 'office' | 'scientific_office' | 'personal' | 'warehouse';
-  balance: number;
-  initialBalance: number;
-  totalInvoices: number;
-  totalPayments: number;
-  limit: number;
-  dueDate?: Date;
-  nextDueDate?: Date;
-  lastPaymentDate?: Date;
-  notes?: string;
-  branchId?: string;
-  ownerId: string;
-  username?: string;
-  createdAt?: Date;
-  updatedAt?: Date;
-}
+export const EntityForm = ({ onSubmit, onClose, entity, onImagesChange }: EntityFormProps) => {
+  const [imageFiles, setImageFiles] = React.useState<File[]>([]);
 
-export const EntityForm = ({ onSubmit, onClose, entity }: EntityFormProps) => {
+  const handleImagesResult = (files: File[]) => {
+    setImageFiles(files);
+    if (onImagesChange) onImagesChange(files);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
@@ -91,6 +79,7 @@ export const EntityForm = ({ onSubmit, onClose, entity }: EntityFormProps) => {
                 <SelectItem value="office" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">مكتب</SelectItem>
                 <SelectItem value="scientific_office" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">مذخر</SelectItem>
                 <SelectItem value="personal" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">شخصي</SelectItem>
+                <SelectItem value="warehouse" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">مذخر / مستودع</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -141,6 +130,14 @@ export const EntityForm = ({ onSubmit, onClose, entity }: EntityFormProps) => {
               className="bg-muted border-rose-500/20 text-rose-500 h-14 rounded-xl font-mono text-xl font-black shadow-sm" 
             />
           </div>
+        </div>
+
+        <div className="space-y-4">
+           <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest flex items-center gap-2">
+              <ImageIcon className="h-4 w-4" />
+              صور المرفقات أو عقد التوريد
+           </Label>
+           <ImageCapture onImagesChange={handleImagesResult} maxImages={3} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

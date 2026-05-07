@@ -43,6 +43,7 @@ import {
   Hash,
   CloudLightning,
   Check,
+  FileUp,
   Package,
   PackageSearch,
   Info,
@@ -62,7 +63,8 @@ import {
   MoreHorizontal,
   PlusCircle,
   Bug,
-  Pencil
+  Pencil,
+  Table as TableIcon
 } from 'lucide-react';
 import { SupplierHistoricalImportWizard } from './components/SupplierHistoricalImportWizard';
 
@@ -149,7 +151,8 @@ import {
   type AnnouncementRead,
   type HistoricalRecord,
   type MedicineRequest,
-  type ExpiredDamagedLoss
+  type ExpiredDamagedLoss,
+  type EntityActivity
 } from './db';
 import { 
   AreaChart, 
@@ -174,6 +177,7 @@ import { ExpenseForm } from './components/ExpenseForm';
 import { RevenueForm } from './components/RevenueForm';
 import { InvoiceForm } from './components/InvoiceForm';
 import { EntityForm } from './components/EntityForm';
+import { SupplierAccountPage } from './components/SupplierAccountPage';
 import { BonusForm } from './components/BonusForm';
 import { InvoiceDetailsPage } from './components/InvoiceDetailsPage';
 import { EmployeesPage } from './components/EmployeesPage';
@@ -183,8 +187,10 @@ import { BranchesPage } from './components/BranchesPage';
 import { BranchForm } from './components/BranchForm';
 import { HistoricalMigrationPage } from './components/HistoricalMigrationPage';
 import { MedicineRequestsPage } from './components/MedicineRequestsPage';
+import { ExcelImportWizard } from './components/ExcelImportWizard';
+import { MultiInvoiceEntry } from './components/MultiInvoiceEntry';
 import { DataPersistenceService } from './services/dataPersistenceService';
-import { formatIQD, formatNumberWithCommas, parseFormattedNumber, safeFormatDate } from './lib/formatters';
+import { formatIQD, formatNumberWithCommas, parseFormattedNumber, safeFormatDate, toValidDate } from './lib/formatters';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { LossesPage } from './components/LossesPage';
 import { LossForm } from './components/LossForm';
@@ -215,6 +221,100 @@ const ThemeToggle = ({ theme, setTheme }: { theme: Theme, setTheme: (t: Theme) =
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+};
+
+const ViewRevenueDialog = ({ 
+  isOpen, 
+  onOpenChange, 
+  revenue,
+  branches
+}: { 
+  isOpen: boolean; 
+  onOpenChange: (open: boolean) => void; 
+  revenue: Transaction | null;
+  branches: PharmacyBranch[];
+}) => {
+  if (!revenue) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-0">
+        <div className="p-8 space-y-8">
+          <div className="flex justify-between items-start">
+            <div>
+              <Label className="text-emerald-500 font-black text-[10px] uppercase tracking-widest block mb-2">تفاصيل الوارد</Label>
+              <h2 className="text-3xl font-black text-foreground">{revenue.customerName || revenue.description}</h2>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-[10px] font-bold text-muted-foreground bg-muted px-2.5 py-1 rounded-full uppercase">
+                  {branches.find(b => b.id === revenue.branchId)?.name || 'فرع غير معروف'}
+                </span>
+                <span className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase ${
+                  revenue.incomeType === 'cash' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
+                }`}>
+                  {revenue.incomeType === 'cash' ? 'نقدي' : 'آجل'}
+                </span>
+              </div>
+            </div>
+            <div className="text-left">
+              <div className="text-[10px] text-muted-foreground font-black mb-1 uppercase tracking-widest">التاريخ</div>
+              <div className="font-mono font-bold text-lg">{safeFormatDate(revenue.date, 'yyyy/MM/dd')}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="p-5 bg-muted/30 rounded-2xl border border-border group hover:border-emerald-500/30 transition-colors">
+              <div className="text-[10px] text-muted-foreground font-black mb-2 uppercase">إجمالي الوارد</div>
+              <div className="text-xl font-black text-foreground font-mono">{formatNumberWithCommas(revenue.saleAmount || revenue.amount)}</div>
+            </div>
+            <div className="p-5 bg-muted/30 rounded-2xl border border-border group hover:border-emerald-500/30 transition-colors">
+              <div className="text-[10px] text-muted-foreground font-black mb-2 uppercase">نسبة الربح</div>
+              <div className="text-xl font-black text-blue-600 font-mono">%{revenue.profitPercent || 0}</div>
+            </div>
+            <div className="p-5 bg-emerald-500/5 rounded-2xl border border-emerald-500/10 group hover:bg-emerald-500/10 transition-colors">
+              <div className="text-[10px] text-emerald-700 font-black mb-2 uppercase">صافي الربح</div>
+              <div className="text-xl font-black text-emerald-600 font-mono">{formatNumberWithCommas(revenue.profitAmount || revenue.netProfit || 0)}</div>
+            </div>
+            <div className="p-5 bg-rose-500/5 rounded-2xl border border-rose-500/10 group hover:bg-rose-500/10 transition-colors">
+              <div className="text-[10px] text-rose-700 font-black mb-2 uppercase">المتبقي</div>
+              <div className="text-xl font-black text-rose-600 font-mono">{formatNumberWithCommas(revenue.remainingAmount ?? (revenue.incomeType === 'cash' ? 0 : revenue.amount))}</div>
+            </div>
+          </div>
+
+          {revenue.notes && (
+            <div className="space-y-3">
+              <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest block">ملاحظات</Label>
+              <div className="p-6 bg-muted/30 rounded-2xl border border-border italic text-foreground font-bold leading-relaxed">
+                {revenue.notes}
+              </div>
+            </div>
+          )}
+
+          {((revenue.imageUrls && revenue.imageUrls.length > 0) || revenue.imageUrl) && (
+            <div className="space-y-4">
+              <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest block">المرفقات والصور</Label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                {(revenue.imageUrls || (revenue.imageUrl ? [revenue.imageUrl] : [])).map((url: string, idx: number) => (
+                  <div key={idx} className="aspect-square rounded-2xl border-2 border-border overflow-hidden bg-muted group cursor-zoom-in shadow-xl hover:shadow-primary/5 transition-all">
+                    <img src={url} alt={`Revenue Image ${idx + 1}`} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {revenue.updatedAt && (
+             <div className="pt-6 border-t border-border flex justify-between items-center text-[9px] font-bold text-muted-foreground uppercase opacity-50">
+                <span>آخر تحديث: {safeFormatDate(revenue.updatedAt, 'yyyy/MM/dd HH:mm')}</span>
+                <span>ID: {revenue.id}</span>
+             </div>
+          )}
+        </div>
+        <div className="p-6 bg-muted/20 border-t border-border flex justify-end">
+           <Button onClick={() => onOpenChange(false)} className="rounded-xl h-12 px-8 font-black">إغلاق</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -288,712 +388,26 @@ const EditInvoiceDialog = ({
   );
 };
 
-const SupplierAccountPage = ({
-  entity, 
-  onBack, 
-  ledgerEntries,
-  bonuses,
-  onAddInvoice,
-  onAddPayment,
-  onAddBonus,
-  onEditEntity,
-  onViewInvoice,
-  onEditInvoice,
-  onDeleteInvoice,
-  onRefundInvoice,
-  onPartialPayment,
-  onFullPayment,
-  onShowImage,
-  onEditPayment,
-  onDeletePayment,
-  onEditBonus,
-  onDeleteBonus,
-  onImportHistorical,
-  appMode = 'laptop'
-}: { 
-  entity: Entity; 
-  onBack: () => void;
-  ledgerEntries: LedgerEntry[];
-  bonuses: Bonus[];
-  onAddInvoice: () => void;
-  onAddPayment: () => void;
-  onAddBonus: () => void;
-  onEditEntity: () => void;
-  onViewInvoice: (invoice: LedgerEntry) => void;
-  onEditInvoice: (invoice: LedgerEntry) => void;
-  onDeleteInvoice: (invoice: LedgerEntry) => void;
-  onRefundInvoice: (invoice: LedgerEntry) => void;
-  onPartialPayment: (invoice: LedgerEntry) => void;
-  onFullPayment: (invoice: LedgerEntry) => void;
-  onShowImage?: (url: string) => void;
-  onEditPayment?: (payment: LedgerEntry) => void;
-  onDeletePayment?: (paymentId: string) => void;
-  onEditBonus?: (bonus: Bonus) => void;
-  onDeleteBonus?: (bonusId: string) => void;
-  onImportHistorical?: () => void;
-  appMode?: 'laptop' | 'mobile';
-}) => {
-  const [archiveYear, setArchiveYear] = useState(new Date().getFullYear().toString());
-  const [archiveMonth, setArchiveMonth] = useState('all');
-  const [archiveStatus, setArchiveStatus] = useState('all');
-  const [archiveSearch, setArchiveSearch] = useState('');
 
-  const stats = useMemo(() => {
-    const invoices = ledgerEntries.filter(e => e.operationType === 'invoice');
-    const payments = ledgerEntries.filter(e => e.operationType === 'payment');
-    
-    return {
-      totalPurchases: invoices.reduce((acc, i) => acc + i.netAmount, 0),
-      totalPayments: payments.reduce((acc, p) => acc + p.amount, 0),
-      openInvoices: invoices.filter(i => i.paymentStatus !== 'paid').length,
-      overdueInvoices: invoices.filter(i => i.paymentStatus === 'overdue').length,
-      pendingBonuses: bonuses.filter(b => b.status === 'pending').length
-    };
-  }, [ledgerEntries, bonuses]);
 
-  const historicalInvoices = useMemo(() => {
-    return ledgerEntries.filter(e => e.operationType === 'invoice' && e.isHistorical === true);
-  }, [ledgerEntries]);
 
-  const filteredArchive = useMemo(() => {
-    return historicalInvoices.filter(inv => {
-      const date = new Date(inv.date);
-      const yearMatch = archiveYear === 'all' || date.getFullYear().toString() === archiveYear;
-      const monthMatch = archiveMonth === 'all' || (date.getMonth() + 1).toString() === archiveMonth;
-      const statusMatch = archiveStatus === 'all' || inv.paymentStatus === archiveStatus;
-      const searchMatch = archiveSearch === '' || inv.invoiceNumber?.includes(archiveSearch);
-      return yearMatch && monthMatch && statusMatch && searchMatch;
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [historicalInvoices, archiveYear, archiveMonth, archiveStatus, archiveSearch]);
 
-  return (
-    <div className="space-y-6 animate-in slide-in-from-left duration-300">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full hover:bg-muted shrink-0">
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-xl md:text-2xl font-black text-foreground truncate">{entity.name}</h2>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                entity.type === 'office' ? 'bg-blue-500/10 text-blue-500' : 
-                entity.type === 'scientific_office' ? 'bg-purple-500/10 text-purple-500' :
-                'bg-amber-500/10 text-amber-600'
-              }`}>
-                {entity.type === 'office' ? 'مكتب' : 
-                 entity.type === 'scientific_office' ? 'مذخر' : 
-                 'شخصي'}
-              </span>
-            </div>
-            <p className="text-xs md:text-sm text-muted-foreground truncate">{entity.phone || 'لا يوجد رقم هاتف'} • آخر تعامل: {ledgerEntries.length > 0 ? safeFormatDate(ledgerEntries[ledgerEntries.length -1].date, 'yyyy/MM/dd') : 'لا يوجد'}</p>
-          </div>
-        </div>
-        <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-          <Button onClick={onEditEntity} variant="outline" size="sm" className="gap-2 border-border text-foreground hover:bg-muted whitespace-nowrap">
-            <Edit className="h-4 w-4" />
-            تعديل
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger className="h-7 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 flex items-center gap-2 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all outline-none">
-              <Plus className="h-4 w-4" />
-              إجراء سريع
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-48 p-2 rounded-xl">
-              <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={onAddInvoice}>
-                <FileText className="h-4 w-4 text-blue-500" />
-                <span>إضافة فاتورة</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={onAddPayment}>
-                <Receipt className="h-4 w-4 text-emerald-500" />
-                <span>تسديد دفعة</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={onAddBonus}>
-                <Gift className="h-4 w-4 text-amber-500" />
-                <span>إضافة بونص</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-border" />
-              <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted text-primary" onClick={onImportHistorical}>
-                <RefreshCcw className="h-4 w-4" />
-                <span>استيراد فواتير قديمة</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
 
-      <div className={`grid gap-4 ${appMode === 'laptop' ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-6' : 'grid-cols-2'}`}>
-        {[
-          { label: 'الرصيد الحالي', value: entity.balance, color: 'text-rose-600', border: 'border-r-rose-500' },
-          { label: 'إجمالي المشتريات', value: stats.totalPurchases, color: 'text-foreground', border: 'border-r-primary' },
-          { label: 'إجمالي التسديدات', value: stats.totalPayments, color: 'text-emerald-600', border: 'border-r-emerald-500' },
-          { label: 'الفواتير المفتوحة', value: stats.openInvoices, color: 'text-foreground', border: 'border-r-blue-500', isCount: true },
-          { label: 'الفواتير المتأخرة', value: stats.overdueInvoices, color: 'text-rose-600', border: 'border-r-rose-500', isCount: true },
-          { label: 'البونصات المنتظرة', value: stats.pendingBonuses, color: 'text-primary', border: 'border-r-primary', isCount: true },
-        ].map((stat, idx) => (
-          <Card key={idx} className={`bg-card border-border border-r-4 ${stat.border} group hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 rounded-2xl`}>
-            <CardContent className="p-4 md:p-6 text-center">
-              <div className="text-[10px] font-black text-muted-foreground uppercase mb-2 tracking-widest leading-tight">{stat.label}</div>
-              <div className={`text-lg md:text-xl font-black ${stat.color} font-mono tracking-tighter`}>
-                {stat.isCount ? stat.value : formatNumberWithCommas(stat.value)}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
 
-      <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="bg-muted p-1 border border-border w-full justify-start overflow-x-auto rounded-xl h-auto flex flex-nowrap scrollbar-none">
-          <TabsTrigger value="overview" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
-            <LayoutDashboard className="h-4 w-4" />
-            الحساب العام
-          </TabsTrigger>
-          <TabsTrigger value="invoices" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
-            <FileText className="h-4 w-4" />
-            الفواتير
-          </TabsTrigger>
-          <TabsTrigger value="payments" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
-            <Receipt className="h-4 w-4" />
-            التسديدات
-          </TabsTrigger>
-          <TabsTrigger value="bonuses" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
-            <Gift className="h-4 w-4" />
-            البونصات
-          </TabsTrigger>
-          <TabsTrigger value="archive" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
-            <History className="h-4 w-4 text-primary" />
-             الأرشيف القديم
-          </TabsTrigger>
-          <TabsTrigger value="attachments" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
-            <ImageIcon className="h-4 w-4" />
-            المرفقات
-          </TabsTrigger>
-          <TabsTrigger value="timeline" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
-            <History className="h-4 w-4" />
-            السجل
-          </TabsTrigger>
-        </TabsList>
 
-        <div className="mt-6 font-sans">
-          <TabsContent value="overview" className="animate-in fade-in zoom-in-95 duration-300">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card className="bg-card border-border">
-                <CardHeader>
-                  <CardTitle className="text-lg">معلومات المورد</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <div className="text-xs text-muted-foreground">الرصيد الابتدائي</div>
-                      <div className="font-bold text-foreground font-mono">{formatIQD(entity.initialBalance)}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="text-xs text-muted-foreground">تاريخ الإنشاء</div>
-                      <div className="font-bold text-foreground">{entity.createdAt ? safeFormatDate(entity.createdAt, 'yyyy/MM/dd') : '-'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="text-xs text-muted-foreground">السقف المالي</div>
-                      <div className="font-bold text-rose-500 font-mono">{formatIQD(entity.limit || 0)}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="text-xs text-muted-foreground">حالة الحساب</div>
-                      <div className="flex items-center gap-1 text-emerald-500 font-bold">
-                        <CheckCircle2 className="h-3 w-3" />
-                        نشط
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-1 border-t border-border pt-4">
-                    <div className="text-xs text-muted-foreground">ملاحظات</div>
-                    <p className="text-sm text-foreground italic">{entity.notes || 'لا توجد ملاحظات إضافية'}</p>
-                  </div>
-                </CardContent>
-              </Card>
 
-              <Card className="bg-card border-border">
-                <CardHeader>
-                  <CardTitle className="text-lg">الكشف السريع</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="divide-y divide-border">
-                    {ledgerEntries.slice(-5).reverse().map((entry) => (
-                      <div key={entry.id} className="p-4 flex justify-between items-center hover:bg-muted/30 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${
-                            entry.operationType === 'invoice' ? 'bg-blue-500/10 text-blue-500' : 'bg-emerald-500/10 text-emerald-500'
-                          }`}>
-                            {entry.operationType === 'invoice' ? <FileText className="h-4 w-4" /> : <Receipt className="h-4 w-4" />}
-                          </div>
-                          <div>
-                            <div className="text-sm font-bold text-foreground">
-                              {entry.operationType === 'invoice' ? `فاتورة رقم ${entry.invoiceNumber}` : 'دفعة سداد'}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground">{safeFormatDate(entry.date, 'yyyy/MM/dd HH:mm')}</div>
-                          </div>
-                        </div>
-                        <div className={`font-bold font-mono text-sm ${entry.operationType === 'invoice' ? 'text-blue-500' : 'text-emerald-500'}`}>
-                          {entry.operationType === 'invoice' ? '+' : '-'}{formatNumberWithCommas(entry.netAmount)}
-                        </div>
-                      </div>
-                    ))}
-                    {ledgerEntries.length === 0 && (
-                      <div className="p-8 text-center text-muted-foreground text-sm italic">لا يوجد سجل عمليات لهذا المورد حتى الآن</div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
 
-          <TabsContent value="invoices" className="animate-in fade-in zoom-in-95 duration-300">
-            <Card className="bg-card border-border overflow-hidden">
-               {appMode === 'laptop' ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-right">
-                    <thead className="bg-muted/50 border-b border-border text-[10px] font-bold text-muted-foreground uppercase">
-                      <tr>
-                        <th className="px-6 py-4">رقم القائمة</th>
-                        <th className="px-6 py-4 text-center">التاريخ</th>
-                        <th className="px-6 py-4">المبلغ الكلي</th>
-                        <th className="px-6 py-4">المتبقي</th>
-                        <th className="px-6 py-4">الخصم</th>
-                        <th className="px-6 py-4 text-center">الاستحقاق</th>
-                        <th className="px-6 py-4 text-center">الحالة</th>
-                        <th className="px-6 py-4 text-center">إجراءات</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {ledgerEntries.filter(e => e.operationType === 'invoice').reverse().map((invoice) => (
-                        <tr key={invoice.id} className="hover:bg-muted/30 transition-colors group">
-                          <td className="px-6 py-4 font-bold text-foreground">{invoice.invoiceNumber}</td>
-                          <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{safeFormatDate(invoice.date, 'yyyy/MM/dd')}</td>
-                          <td className="px-6 py-4 font-bold font-mono">{formatNumberWithCommas(invoice.amount)}</td>
-                          <td className="px-6 py-4 font-bold font-mono text-amber-500">{formatNumberWithCommas(invoice.remainingAmount || 0)}</td>
-                          <td className="px-6 py-4 font-bold font-mono text-emerald-500">{formatNumberWithCommas(invoice.discount || 0)}</td>
-                          <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{invoice.dueDate ? safeFormatDate(invoice.dueDate, 'yyyy/MM/dd') : '-'}</td>
-                          <td className="px-6 py-4 text-center">
-                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${
-                              invoice.paymentStatus === 'paid' ? 'bg-emerald-500/10 text-emerald-500' :
-                              invoice.paymentStatus === 'partial' ? 'bg-blue-500/10 text-blue-500' :
-                              invoice.paymentStatus === 'overdue' ? 'bg-rose-500/10 text-rose-500' :
-                              'bg-amber-500/10 text-amber-500'
-                            }`}>
-                              {invoice.paymentStatus === 'paid' ? 'مسدد' :
-                               invoice.paymentStatus === 'partial' ? 'جزئي' :
-                               invoice.paymentStatus === 'overdue' ? 'متأخر' : 'غير مسدد'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-muted outline-none transition-colors">
-                                <MoreVertical className="h-4 w-4" />
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-48 p-2 rounded-xl">
-                                <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onViewInvoice(invoice)}>
-                                  <Eye className="h-4 w-4 text-blue-500" />
-                                  <span>عرض القائمة</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onEditInvoice(invoice)}>
-                                  <Edit className="h-4 w-4 text-amber-500" />
-                                  <span>تعديل القائمة</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onAddPayment()}>
-                                  <DollarSign className="h-4 w-4 text-emerald-500" />
-                                  <span>تسديد</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onPartialPayment(invoice)}>
-                                  <Clock className="h-4 w-4 text-blue-400" />
-                                  <span>تسديد جزئي</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onFullPayment(invoice)}>
-                                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                                  <span>تسديد كلي</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onRefundInvoice(invoice)}>
-                                  <RefreshCcw className="h-4 w-4 text-rose-500" />
-                                  <span>استرجاع (مرتجع)</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator className="bg-border" />
-                                <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted text-rose-500" onClick={() => onDeleteInvoice(invoice)}>
-                                  <Trash2 className="h-4 w-4" />
-                                  <span>حذف القائمة</span>
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </td>
-                        </tr>
-                      ))}
-                      {ledgerEntries.filter(e => e.operationType === 'invoice').length === 0 && (
-                        <tr>
-                          <td colSpan={8} className="py-20 text-center text-muted-foreground">لا توجد فواتير مسجلة</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-               ) : (
-                 <div className="divide-y divide-border">
-                    {ledgerEntries.filter(e => e.operationType === 'invoice').reverse().map((invoice) => (
-                      <div key={invoice.id} className="p-4 space-y-4 hover:bg-muted/30 transition-colors">
-                        <div className="flex justify-between items-start">
-                          <div onClick={() => onViewInvoice(invoice)} className="cursor-pointer">
-                            <div className="font-black text-foreground">قائمة رقم: {invoice.invoiceNumber}</div>
-                            <div className="text-[10px] text-muted-foreground font-bold">{safeFormatDate(invoice.date, 'yyyy/MM/dd')}</div>
-                          </div>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-muted outline-none transition-colors">
-                              <MoreVertical className="h-4 w-4" />
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-48 p-2 rounded-xl">
-                              <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onViewInvoice(invoice)}>
-                                <Eye className="h-4 w-4 text-blue-500" />
-                                <span>عرض القائمة</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onEditInvoice(invoice)}>
-                                <Edit className="h-4 w-4 text-amber-500" />
-                                <span>تعديل</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onFullPayment(invoice)}>
-                                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                                <span>تسديد كلي</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted text-rose-500" onClick={() => onDeleteInvoice(invoice)}>
-                                <Trash2 className="h-4 w-4" />
-                                <span>حذف</span>
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs font-bold">
-                           <div className="p-2 bg-muted rounded-lg flex justify-between">
-                              <span className="text-muted-foreground">الصافي:</span>
-                              <span className="font-mono text-foreground">{formatNumberWithCommas(invoice.amount)}</span>
-                           </div>
-                           <div className={`p-2 rounded-lg flex justify-between ${invoice.remainingAmount && invoice.remainingAmount > 0 ? 'bg-amber-500/5 text-amber-600' : 'bg-emerald-500/5 text-emerald-600'}`}>
-                              <span className="opacity-70">المتبقي:</span>
-                              <span className="font-mono">{formatNumberWithCommas(invoice.remainingAmount || 0)}</span>
-                           </div>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                            invoice.paymentStatus === 'paid' ? 'bg-emerald-500/10 text-emerald-500' :
-                            invoice.paymentStatus === 'partial' ? 'bg-blue-500/10 text-blue-500' :
-                            invoice.paymentStatus === 'overdue' ? 'bg-rose-500/10 text-rose-500' :
-                            'bg-amber-500/10 text-amber-500'
-                          }`}>
-                            {invoice.paymentStatus === 'paid' ? 'تم التسديد' : 
-                             invoice.paymentStatus === 'overdue' ? 'متأخرة السداد' : 'قيد الانتظار'}
-                          </span>
-                          {invoice.dueDate && (
-                            <div className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground">
-                              <Clock className="h-3 w-3" />
-                              <span>الاستحقاق: {safeFormatDate(invoice.dueDate, 'MM/dd')}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {ledgerEntries.filter(e => e.operationType === 'invoice').length === 0 && (
-                      <div className="py-20 text-center text-muted-foreground">لا تنوجد فواتير مسجلة</div>
-                    )}
-                 </div>
-               )}
-            </Card>
-          </TabsContent>
 
-          <TabsContent value="payments" className="animate-in fade-in zoom-in-95 duration-300">
-             <div className="space-y-6 relative before:absolute before:right-6 before:top-4 before:bottom-4 before:w-px before:bg-border">
-                {ledgerEntries.filter(e => e.operationType === 'payment').reverse().map((payment, idx) => (
-                  <div key={payment.id} className="relative pr-12">
-                    <div className="absolute right-[21px] top-1 w-2 h-2 rounded-full bg-emerald-500 border-2 border-background z-10" />
-                    <Card className="bg-card border-border overflow-hidden">
-                       <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
-                          <div className="flex items-center gap-3">
-                             <div className="p-2 bg-emerald-500/10 rounded-lg">
-                                <Receipt className="h-5 w-5 text-emerald-500" />
-                             </div>
-                             <div>
-                                <CardTitle className="text-sm font-bold">تسديد دفعة مالية</CardTitle>
-                                <div className="text-[10px] text-muted-foreground">{safeFormatDate(payment.date, 'yyyy/MM/dd HH:mm')}</div>
-                             </div>
-                          </div>
-                          <div className="flex items-center gap-4">
-                             <div className="text-lg font-black text-emerald-500 font-mono">-{formatNumberWithCommas(payment.amount)}</div>
-                             <DropdownMenu>
-                                <DropdownMenuTrigger className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-muted outline-none transition-colors">
-                                  <MoreVertical className="h-4 w-4 text-muted-foreground" />
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-40 p-1">
-                                  <DropdownMenuItem className="gap-2 p-2 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onEditPayment?.(payment)}>
-                                    <Edit className="h-4 w-4 text-primary" />
-                                    <span>تعديل</span>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem className="gap-2 p-2 cursor-pointer rounded-lg hover:bg-muted text-rose-500" onClick={() => onDeletePayment?.(payment.id!)}>
-                                    <Trash2 className="h-4 w-4" />
-                                    <span>حذف</span>
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                             </DropdownMenu>
-                          </div>
-                       </CardHeader>
-                       <CardContent className="p-4 pt-0">
-                          <p className="text-xs text-muted-foreground mb-4">{payment.notes || 'لا يوجد ملاحظات على هذه الدفعة'}</p>
-                          {payment.imageUrl && (
-                             <div className="w-32 h-32 rounded-lg border border-border overflow-hidden cursor-zoom-in" onClick={() => onShowImage?.(payment.imageUrl)}>
-                                <img src={payment.imageUrl} alt="Bond" className="w-full h-full object-cover" />
-                             </div>
-                          )}
-                       </CardContent>
-                    </Card>
-                  </div>
-                ))}
-                {ledgerEntries.filter(e => e.operationType === 'payment').length === 0 && (
-                  <div className="py-20 text-center text-muted-foreground">لا توجد سجلات دفع لهذا المورد</div>
-                )}
-             </div>
-          </TabsContent>
 
-          <TabsContent value="bonuses" className="animate-in fade-in zoom-in-95 duration-300">
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {bonuses.reverse().map((bonus) => (
-                  <Card key={bonus.id} className="bg-card border-border overflow-hidden">
-                    <div className={`h-1.5 w-full ${bonus.status === 'received' ? 'bg-emerald-500' : bonus.status === 'pending' ? 'bg-amber-500' : 'bg-slate-500'}`} />
-                    <CardHeader className="p-4">
-                       <div className="flex justify-between items-start">
-                          <div>
-                             <CardTitle className="text-base font-bold">{bonus.description}</CardTitle>
-                             <div className="text-xs text-muted-foreground mt-1">تاريخ الاستحقاق: {safeFormatDate(bonus.dueDate, 'yyyy/MM/dd')}</div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                             <DropdownMenu>
-                                <DropdownMenuTrigger className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-muted outline-none transition-colors">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="bg-card border-border text-foreground w-40 p-1">
-                                  <DropdownMenuItem className="gap-2 p-2 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onEditBonus?.(bonus)}>
-                                    <Edit className="h-4 w-4 text-amber-500" />
-                                    <span>تعديل</span>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem className="gap-2 p-2 cursor-pointer rounded-lg hover:bg-muted text-rose-500" onClick={() => onDeleteBonus?.(bonus.id!)}>
-                                    <Trash2 className="h-4 w-4" />
-                                    <span>حذف</span>
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                             </DropdownMenu>
-                             <Gift className={`h-5 w-5 ${bonus.status === 'received' ? 'text-emerald-500' : 'text-amber-500'}`} />
-                          </div>
-                       </div>
-                    </CardHeader>
-                    <CardContent className="p-4 pt-0 space-y-4">
-                       <div className="flex justify-between items-center">
-                          <div className="text-xl font-black text-foreground font-mono">{formatNumberWithCommas(bonus.amount || 0)}</div>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                             bonus.status === 'received' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'
-                          }`}>
-                            {bonus.status === 'received' ? 'تم الاستلام' : 'قيد الانتظار'}
-                          </span>
-                       </div>
-                       {bonus.notes && <p className="text-xs text-muted-foreground italic border-t border-border pt-4">{bonus.notes}</p>}
-                    </CardContent>
-                  </Card>
-                ))}
-                {bonuses.length === 0 && (
-                  <div className="col-span-full py-20 text-center text-muted-foreground">لا توجد بونصات مسجلة حالياً</div>
-                )}
-             </div>
-          </TabsContent>
 
-          <TabsContent value="archive" className="animate-in fade-in zoom-in-95 duration-300">
-             <div className="space-y-6">
-                <Card className="bg-muted/50 border-border p-4 rounded-2xl">
-                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                      <div className="space-y-2">
-                         <Label className="text-[10px] font-black text-muted-foreground uppercase">السنة</Label>
-                         <Select value={archiveYear} onValueChange={setArchiveYear}>
-                            <SelectTrigger className="bg-card h-10 border-border rounded-xl text-xs font-bold">
-                               <SelectValue placeholder="السنة" />
-                            </SelectTrigger>
-                            <SelectContent className="bg-card border-border">
-                               <SelectItem value="all">كل السنوات</SelectItem>
-                               {['2020','2021','2022','2023','2024','2025','2026'].map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
-                            </SelectContent>
-                         </Select>
-                      </div>
-                      <div className="space-y-2">
-                         <Label className="text-[10px] font-black text-muted-foreground uppercase">الشهر</Label>
-                         <Select value={archiveMonth} onValueChange={setArchiveMonth}>
-                            <SelectTrigger className="bg-card h-10 border-border rounded-xl text-xs font-bold">
-                               <SelectValue placeholder="الشهر" />
-                            </SelectTrigger>
-                            <SelectContent className="bg-card border-border">
-                               <SelectItem value="all">كل الأشهر</SelectItem>
-                               {Array.from({length: 12}).map((_, i) => (
-                                 <SelectItem key={i+1} value={(i+1).toString()}>{format(new Date(2024, i, 1), 'MMMM', { locale: ar })}</SelectItem>
-                               ))}
-                            </SelectContent>
-                         </Select>
-                      </div>
-                      <div className="space-y-2">
-                         <Label className="text-[10px] font-black text-muted-foreground uppercase">حالة الدفع</Label>
-                         <Select value={archiveStatus} onValueChange={setArchiveStatus}>
-                            <SelectTrigger className="bg-card h-10 border-border rounded-xl text-xs font-bold">
-                               <SelectValue placeholder="الحالة" />
-                            </SelectTrigger>
-                            <SelectContent className="bg-card border-border text-xs font-bold">
-                               <SelectItem value="all">الكل</SelectItem>
-                               <SelectItem value="paid">مسددة</SelectItem>
-                               <SelectItem value="unpaid">غير مسددة</SelectItem>
-                               <SelectItem value="partial">مسددة جزئياً</SelectItem>
-                            </SelectContent>
-                         </Select>
-                      </div>
-                      <div className="space-y-2">
-                         <Label className="text-[10px] font-black text-muted-foreground uppercase">رقم الفاتورة</Label>
-                         <div className="relative">
-                            <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                            <Input 
-                              placeholder="بحث برقم الفاتورة..." 
-                              value={archiveSearch}
-                              onChange={e => setArchiveSearch(e.target.value)}
-                              className="bg-card h-10 pr-9 border-border rounded-xl text-xs font-bold"
-                            />
-                         </div>
-                      </div>
-                   </div>
-                </Card>
 
-                <div className="border border-border rounded-2xl overflow-hidden bg-card">
-                   <table className="w-full text-xs">
-                      <thead className="bg-muted text-muted-foreground font-black border-b border-border">
-                         <tr>
-                            <th className="px-4 py-3 text-right">رقم الفاتورة</th>
-                            <th className="px-4 py-3 text-right">التاريخ</th>
-                            <th className="px-4 py-3 text-right">المبلغ الصافي</th>
-                            <th className="px-4 py-3 text-right">المسدد</th>
-                            <th className="px-4 py-3 text-right">المتبقي</th>
-                            <th className="px-4 py-3 text-right">الحالة</th>
-                            <th className="px-4 py-3 text-right w-10">المرفقات</th>
-                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/50">
-                         {filteredArchive.map((inv) => {
-                            const remaining = inv.netAmount - (inv.paidAmount || 0);
-                            return (
-                               <tr key={inv.id} className="hover:bg-muted/10 group cursor-pointer" onClick={() => onViewInvoice(inv)}>
-                                  <td className="px-4 py-4 font-black flex items-center gap-2">
-                                     <span className="text-primary bg-primary/10 px-1.5 py-0.5 rounded text-[8px]">قديمة</span>
-                                     {inv.invoiceNumber}
-                                  </td>
-                                  <td className="px-4 py-4 font-bold">{safeFormatDate(inv.date, 'yyyy/MM/dd')}</td>
-                                  <td className="px-4 py-4 font-mono font-bold">{formatNumberWithCommas(inv.netAmount)}</td>
-                                  <td className="px-4 py-4 font-mono font-bold text-emerald-600">{formatNumberWithCommas(inv.paidAmount || 0)}</td>
-                                  <td className="px-4 py-4 font-mono font-bold text-rose-600">{formatNumberWithCommas(remaining)}</td>
-                                  <td className="px-4 py-4">
-                                     <span className={`px-2 py-0.5 rounded-full font-black text-[9px] ${
-                                        inv.paymentStatus === 'paid' ? 'bg-emerald-500/10 text-emerald-600' :
-                                        inv.paymentStatus === 'partial' ? 'bg-blue-500/10 text-blue-600' : 'bg-rose-500/10 text-rose-600'
-                                     }`}>
-                                        {inv.paymentStatus === 'paid' ? 'مسددة بالكامل' : inv.paymentStatus === 'partial' ? 'مسددة جزئياً' : 'غير مسددة'}
-                                     </span>
-                                  </td>
-                                  <td className="px-4 py-4">
-                                     <div className="flex gap-1 overflow-hidden truncate">
-                                        {(inv.imageUrls?.length || 0) > 0 && <ImageIcon className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
-                                     </div>
-                                  </td>
-                               </tr>
-                            );
-                         })}
-                         {filteredArchive.length === 0 && (
-                            <tr>
-                               <td colSpan={7} className="px-4 py-20 text-center text-muted-foreground font-bold italic">
-                                  لاتوجد فواتير قديمة مطابقة للفلاتر
-                               </td>
-                            </tr>
-                         )}
-                      </tbody>
-                   </table>
-                </div>
-             </div>
-          </TabsContent>
 
-          <TabsContent value="attachments" className="animate-in fade-in zoom-in-95 duration-300">
-             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {ledgerEntries.filter(e => e.imageUrl || e.receiptImageUrl).map((e) => (
-                  <Card key={e.id} className="group relative aspect-square overflow-hidden border-border bg-muted hover:border-emerald-500 transition-all">
-                    <img 
-                      src={e.imageUrl || e.receiptImageUrl} 
-                      alt="Attachment" 
-                      className="w-full h-full object-cover transition-transform group-hover:scale-110 cursor-zoom-in" 
-                      onClick={() => onShowImage?.(e.imageUrl || e.receiptImageUrl || '')}
-                    />
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-all pointer-events-none">
-                       <span className="text-[10px] text-white font-bold">{e.operationType === 'invoice' ? 'صورة فاتورة' : 'صورة وصل'}</span>
-                       <span className="text-[8px] text-white/60 font-mono mt-1">{safeFormatDate(e.date, 'yyyy/MM/dd')}</span>
-                    </div>
-                    <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                      <Button 
-                        size="icon" 
-                        variant="destructive" 
-                        className="h-7 w-7 rounded-lg"
-                        onClick={(e_stop) => {
-                          e_stop.stopPropagation();
-                          if (window.confirm('هل تريد حذف هذا المرفق؟')) {
-                            // Using standard delete document for images if they are separate or clearing field
-                            // But here they are part of ledgerEntries.
-                            // If user wants to delete image, they probably want to clear that field.
-                            // Let's assume onUpdateInvoice or similar if it's an invoice, or a generic field clear.
-                            // Since ledgerEntries is read-only here in terms of direct state, we use onDeletePayment's logic or similar.
-                            // The user specifically asked for "Delete images and attachments".
-                            // For simplicity, let's trigger a Toast for now if we don't have a clear path or clear the field.
-                            toast.info('حذف الصور يتطلب تعديل السجل المالي المرتبط بها');
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
-                {ledgerEntries.filter(e => e.imageUrl || e.receiptImageUrl).length === 0 && (
-                  <div className="col-span-full py-20 text-center text-muted-foreground italic">لا توجد مرفقات صور لهذا الحساب</div>
-                )}
-             </div>
-          </TabsContent>
 
-          <TabsContent value="timeline" className="animate-in fade-in zoom-in-95 duration-300">
-             <div className="space-y-4">
-                {[...ledgerEntries, ...bonuses].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map((item: any, idx) => (
-                   <div key={item.id} className="flex gap-4 items-start border-r-2 border-border pr-2 pb-4">
-                      <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                         item.operationType === 'invoice' ? 'bg-blue-500/10 text-blue-500' :
-                         item.operationType === 'payment' ? 'bg-emerald-500/10 text-emerald-500' :
-                         'bg-purple-500/10 text-purple-500'
-                      }`}>
-                         {item.operationType === 'invoice' ? <FileText className="h-4 w-4" /> :
-                          item.operationType === 'payment' ? <Receipt className="h-4 w-4" /> :
-                          <Gift className="h-4 w-4" />}
-                      </div>
-                      <div className="flex-1">
-                         <div className="flex justify-between items-center">
-                            <h4 className="text-sm font-bold text-foreground">
-                               {item.operationType === 'invoice' ? `أضافة فاتورة جديدة رقم ${item.invoiceNumber}` :
-                                item.operationType === 'payment' ? `تسديد دفعة مالية بمبلغ ${formatIQD(item.amount)}` :
-                                `تسجيل بونص جديد: ${item.description}`}
-                            </h4>
-                            <span className="text-[10px] text-muted-foreground font-mono">{safeFormatDate(item.createdAt, 'yyyy/MM/dd HH:mm')}</span>
-                         </div>
-                         <p className="text-xs text-muted-foreground mt-1">{item.notes || 'تمت العملية بنجاح بواسطة النظام'}</p>
-                      </div>
-                   </div>
-                ))}
-             </div>
-          </TabsContent>
-        </div>
-      </Tabs>
-    </div>
-  );
-};
+
+
+
+
+
 
 export default function App() {
   const { user: googleUser, isDriveLinked, loading: googleAuthLoading, linkDrive, unlinkDrive } = useGoogleAuth();
@@ -1133,6 +547,7 @@ export default function App() {
   const attendanceQuery = useMemo(() => [], []);
   const ledgerEntriesQuery = useMemo(() => [], []);
   const historicalQuery = useMemo(() => [], []);
+  const entityActivitiesQuery = useMemo(() => [], []);
 
   // Firebase Real-time Queries
   const { data: rawBranches = [] } = useFirebaseQuery<PharmacyBranch>('branches', branchesQuery);
@@ -1145,19 +560,47 @@ export default function App() {
   const { data: rawEmployeeAttendance = [] } = useFirebaseQuery<EmployeeAttendance>('employeeAttendance', attendanceQuery);
   const { data: rawAllLedgerEntries = [] } = useFirebaseQuery<LedgerEntry>('ledgerEntries', ledgerEntriesQuery);
   const { data: rawHistoricalRecords = [] } = useFirebaseQuery<HistoricalRecord>('historicalRecords', historicalQuery);
+  const { data: rawEntityActivities = [] } = useFirebaseQuery<EntityActivity>('entityActivities', entityActivitiesQuery);
 
   // Client-side sorting to avoid Firestore Index requirements
-  const branches = useMemo(() => [...rawBranches].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawBranches]);
-  const transactions = useMemo(() => [...rawTransactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [rawTransactions]);
+  const branches = useMemo(() => {
+    return [...rawBranches].sort((a, b) => {
+      const da = toValidDate(a.createdAt || Date.now());
+      const db = toValidDate(b.createdAt || Date.now());
+      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+      return tb - ta;
+    });
+  }, [rawBranches]);
+
+  const transactions = useMemo(() => {
+    return [...rawTransactions].sort((a, b) => {
+      const da = toValidDate(a.date || a.createdAt || Date.now());
+      const db = toValidDate(b.date || b.createdAt || Date.now());
+      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+      return tb - ta;
+    });
+  }, [rawTransactions]);
   const entities = useMemo(() => [...rawEntities].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')), [rawEntities]);
+  const entityActivities = useMemo(() => {
+    return [...rawEntityActivities].sort((a, b) => {
+      const da = toValidDate(a.createdAt || Date.now());
+      const db = toValidDate(b.createdAt || Date.now());
+      return db.getTime() - da.getTime();
+    });
+  }, [rawEntityActivities]);
+
   const filteredEntities = useMemo(() => {
     let filtered = [...entities];
     
     // Status Filter
     if (entityStatusFilter === 'active') {
-      filtered = filtered.filter(e => !e.status || e.status === 'نشط' || e.status !== 'مؤرشف');
+      filtered = filtered.filter(e => (!e.status || e.status === 'نشط') && !e.deletedAt);
     } else if (entityStatusFilter === 'archived') {
-      filtered = filtered.filter(e => e.status === 'مؤرشف');
+      filtered = filtered.filter(e => e.status === 'مؤرشف' && !e.deletedAt);
+    } else {
+      filtered = filtered.filter(e => !e.deletedAt);
     }
 
     // Search Filter
@@ -1168,13 +611,67 @@ export default function App() {
 
     return filtered;
   }, [entities, entityStatusFilter, entitySearch]);
-  const customerDebts = useMemo(() => [...rawCustomerDebts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawCustomerDebts]);
-  const notifications = useMemo(() => [...rawNotifications].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawNotifications]);
-  const bonuses = useMemo(() => [...rawBonuses].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawBonuses]);
+  const customerDebts = useMemo(() => {
+    return [...rawCustomerDebts].sort((a, b) => {
+      const da = toValidDate(a.createdAt || Date.now());
+      const db = toValidDate(b.createdAt || Date.now());
+      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+      return tb - ta;
+    });
+  }, [rawCustomerDebts]);
+
+  const notifications = useMemo(() => {
+    return [...rawNotifications].sort((a, b) => {
+      const da = toValidDate(a.createdAt || Date.now());
+      const db = toValidDate(b.createdAt || Date.now());
+      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+      return tb - ta;
+    });
+  }, [rawNotifications]);
+
+  const bonuses = useMemo(() => {
+    return [...rawBonuses].sort((a, b) => {
+      const da = toValidDate(a.createdAt || Date.now());
+      const db = toValidDate(b.createdAt || Date.now());
+      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+      return tb - ta;
+    });
+  }, [rawBonuses]);
+
   const employees = useMemo(() => [...rawEmployees].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')), [rawEmployees]);
-  const employeeAttendance = useMemo(() => [...rawEmployeeAttendance].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [rawEmployeeAttendance]);
-  const allLedgerEntries = useMemo(() => [...rawAllLedgerEntries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [rawAllLedgerEntries]);
-  const historicalRecords = useMemo(() => [...rawHistoricalRecords].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [rawHistoricalRecords]);
+  
+  const employeeAttendance = useMemo(() => {
+    return [...rawEmployeeAttendance].sort((a, b) => {
+      const da = toValidDate(a.date || a.createdAt || Date.now());
+      const db = toValidDate(b.date || b.createdAt || Date.now());
+      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+      return tb - ta;
+    });
+  }, [rawEmployeeAttendance]);
+
+  const allLedgerEntries = useMemo(() => {
+    return [...rawAllLedgerEntries].sort((a, b) => {
+      const da = toValidDate(a.date || a.createdAt || Date.now());
+      const db = toValidDate(b.date || b.createdAt || Date.now());
+      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+      return tb - ta;
+    });
+  }, [rawAllLedgerEntries]);
+
+  const historicalRecords = useMemo(() => {
+    return [...rawHistoricalRecords].sort((a, b) => {
+      const da = toValidDate(a.createdAt || Date.now());
+      const db = toValidDate(b.createdAt || Date.now());
+      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+      return tb - ta;
+    });
+  }, [rawHistoricalRecords]);
 
   const [user, setUser] = useState(auth.currentUser);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
@@ -1272,15 +769,21 @@ export default function App() {
   ], [selectedEntity?.id]);
 
   const { data: rawLedgerEntries = [] } = useFirebaseQuery<LedgerEntry>('ledgerEntries', ledgerConstraints);
-  const ledgerEntries = useMemo(() => [...rawLedgerEntries].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()), [rawLedgerEntries]);
+  const ledgerEntries = useMemo(() => [...rawLedgerEntries].sort((a, b) => toValidDate(a.date).getTime() - toValidDate(b.date).getTime()), [rawLedgerEntries]);
 
   const [isLedgerOpen, setIsLedgerOpen] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [isAddInvoiceOpen, setIsAddInvoiceOpen] = useState(false);
+  const [isExcelImportOpen, setIsExcelImportOpen] = useState(false);
+  const [isMultiEntryOpen, setIsMultiEntryOpen] = useState(false);
   const [isAddPaymentOpen, setIsAddPaymentOpen] = useState(false);
   const [isEditEntityOpen, setIsEditEntityOpen] = useState(false);
   const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
   const [isEditTransactionOpen, setIsEditTransactionOpen] = useState(false);
+  const [isViewRevenueOpen, setIsViewRevenueOpen] = useState(false);
+  const [viewingRevenue, setViewingRevenue] = useState<Transaction | null>(null);
+  const [revenueImageFiles, setRevenueImageFiles] = useState<File[]>([]);
+  const [entityImageFiles, setEntityImageFiles] = useState<File[]>([]);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
   const [isDeleteTransactionConfirmOpen, setIsDeleteTransactionConfirmOpen] = useState(false);
@@ -1497,17 +1000,17 @@ export default function App() {
     
     // Daily revenue (Income today)
     const dailyRevenue = transactions
-      .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && startOfDay(new Date(tx.date)).getTime() === today.getTime())
-      .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount), 0);
+      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && startOfDay(new Date(tx.date)).getTime() === today.getTime())
+      .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount || 0), 0);
 
     // Monthly stats
     const monthlyRevenue = transactions
-      .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount), 0);
+      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
+      .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount || 0), 0);
 
     // GROSS Profit from sales this month
     const monthlyGrossProfit = transactions
-      .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
+      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
       .reduce((acc, tx) => acc + (tx.profitAmount || tx.netProfit || 0), 0);
 
     const monthlySalary = employeeAttendance
@@ -1516,8 +1019,8 @@ export default function App() {
 
     // Monthly Expense
     const monthlyExpense = transactions
-      .filter(tx => tx.type === 'expense' && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + tx.amount, 0) + monthlySalary;
+      .filter(tx => (tx.type === 'expense' || tx.type === 'invoice' || tx.type === 'payment') && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
+      .reduce((acc, tx) => acc + (tx.amount || 0), 0) + monthlySalary;
 
     // Net Profit (Monthly) = Gross Profit from Sales - Expenses
     const netProfit = monthlyGrossProfit - monthlyExpense;
@@ -1526,7 +1029,7 @@ export default function App() {
     // Supplier Dues
     const supplierDues = entities
       .filter(e => !currentBranchId || e.branchId === currentBranchId)
-      .reduce((acc, e) => acc + e.balance, 0);
+      .reduce((acc, e) => acc + (e.balance || 0), 0);
 
     // Due InvoicesCount
     const dueInvoicesCount = (allLedgerEntries || [])
@@ -1544,27 +1047,27 @@ export default function App() {
     const histExpenses = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalExpenses || 0) + (r.accumulatedExpenses || 0), 0) : 0;
     const histDues = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalDebtOwed || 0) + (r.officeDebts || 0) + (r.warehouseDebts || 0), 0) : 0;
 
-    const currentRevenue = showCurrent ? bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.saleAmount || t.amount), 0) : 0;
+    const currentRevenue = showCurrent ? bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + (t.saleAmount || t.amount || 0), 0) : 0;
     const totalRevenue = currentRevenue + histSales;
     
     // Calculate total losses from expired/damaged items
     const totalLossesAmount = showCurrent ? expiredDamagedLosses
       .filter(l => !currentBranchId || l.branchId === currentBranchId)
-      .reduce((acc, l) => acc + l.totalLoss, 0) : 0;
+      .reduce((acc, l) => acc + (l.totalLoss || 0), 0) : 0;
 
-    const currentExpense = showCurrent ? (bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0) + 
+    const currentExpense = showCurrent ? (bTx.filter(t => t.type === 'expense' || t.type === 'invoice' || t.type === 'payment').reduce((acc, t) => acc + (t.amount || 0), 0) + 
       employeeAttendance.filter(record => !currentBranchId || record.branchId === currentBranchId).reduce((acc, record) => acc + record.dailyWage, 0) + totalLossesAmount) : 0;
     
     const totalExpense = currentExpense + histExpenses;
     
     // Total Gross Profit from transactions
-    const currentGrossProfit = showCurrent ? bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0) : 0;
+    const currentGrossProfit = showCurrent ? bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0) : 0;
     const totalGrossProfit = currentGrossProfit + histProfits;
     
     // TOTAL Net Profit = Total Gross Profit - Total Expenses
     const totalNetProfit = totalGrossProfit - totalExpense;
     
-    return {
+    const totals = {
       dailyRevenue,
       monthlyRevenue,
       monthlyExpense,
@@ -1577,7 +1080,10 @@ export default function App() {
       totalNetProfit,
       totalLosses: totalLossesAmount
     };
-  }, [transactions, entities, allLedgerEntries, employeeAttendance, historicalRecords, reportTypeFilter, currentBranchId]);
+
+    console.log("Dashboard totals:", totals);
+    return totals;
+  }, [transactions, entities, allLedgerEntries, employeeAttendance, historicalRecords, expiredDamagedLosses, reportTypeFilter, currentBranchId]);
 
   const [reportsMonth, setReportsMonth] = useState(new Date().getMonth());
   const [reportsYear, setReportsYear] = useState(new Date().getFullYear());
@@ -1709,11 +1215,11 @@ export default function App() {
 
     return last7Days.map(dateStr => {
       const dayIncome = transactions
-        .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
-        .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount), 0);
+        .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
+        .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount || 0), 0);
       
       const dayGrossProfit = transactions
-        .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
+        .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
         .reduce((acc, tx) => acc + (tx.profitAmount || tx.netProfit || 0), 0);
       
       const daySalary = employeeAttendance
@@ -1721,8 +1227,8 @@ export default function App() {
         .reduce((acc, record) => acc + record.dailyWage, 0);
       
       const dayExpense = transactions
-        .filter(tx => tx.type === 'expense' && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
-        .reduce((acc, tx) => acc + tx.amount, 0) + daySalary;
+        .filter(tx => (tx.type === 'expense' || tx.type === 'invoice' || tx.type === 'payment') && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
+        .reduce((acc, tx) => acc + (tx.amount || 0), 0) + daySalary;
 
       return {
         name: safeFormatDate(new Date(dateStr), 'EEE'),
@@ -1747,6 +1253,21 @@ export default function App() {
     console.log("Adding entity...");
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
     const initialBalance = Number(data.initialBalance) || 0;
+
+    let imageUrl = '';
+    const imageUrls: string[] = [];
+    if (entityImageFiles && entityImageFiles.length > 0) {
+      try {
+        for (const file of entityImageFiles) {
+          const b64 = await fileToBase64(file);
+          imageUrls.push(b64);
+        }
+        imageUrl = imageUrls[0];
+      } catch (e) {
+        console.error('Error converting images to base64', e);
+      }
+    }
+
     const newEntity: Omit<Entity, 'id'> = {
       name: data.name as string,
       type: data.type as 'office' | 'warehouse',
@@ -1759,13 +1280,31 @@ export default function App() {
       limit: Number(data.limit) || 0,
       branchId: (targetBranchId as string) || undefined,
       ownerId: appUser?.userId || 'demo-user',
-      createdAt: new Date()
+      status: data.status || 'نشط',
+      notes: data.notes as string,
+      imageUrl,
+      imageUrls,
+      createdAt: new Date(),
+      updatedAt: new Date()
     } as any;
     
     try {
-      await firebaseService.addDocument('entities', newEntity as Entity);
-      console.log("[App] Entity added successfully");
+      const docRef = await firebaseService.addDocument('entities', newEntity as Entity);
+      
+      // Activity
+      await firebaseService.addDocument('entityActivities', {
+        entityId: (docRef as any).id,
+        type: 'add_invoice',
+        action: 'تأسيس حساب جديد',
+        details: `تم إنشاء حساب مورد جديد: ${data.name}`,
+        performedBy: appUser?.username || 'user',
+        createdAt: new Date(),
+        ownerId: appUser?.userId || 'demo-user',
+        branchId: targetBranchId as string || undefined
+      });
+
       setIsAddEntityOpen(false);
+      setEntityImageFiles([]);
       toast.success('تم إضافة المورد بنجاح');
     } catch (err) {
       console.error("[App] Error adding entity:", err);
@@ -1775,6 +1314,26 @@ export default function App() {
 
   const handleUpdateEntity = async (id: string, data: any) => {
     console.log("Updating entity...", id);
+    const prevEntity = entities.find(e => e.id === id);
+    const nameChanged = prevEntity && prevEntity.name !== data.name;
+
+    let imageUrl = prevEntity?.imageUrl || '';
+    const imageUrls = [...(prevEntity?.imageUrls || [])];
+
+    if (entityImageFiles && entityImageFiles.length > 0) {
+      try {
+        const newImageUrls: string[] = [];
+        for (const file of entityImageFiles) {
+          const b64 = await fileToBase64(file);
+          newImageUrls.push(b64);
+        }
+        imageUrls.push(...newImageUrls);
+        imageUrl = imageUrls[0];
+      } catch (e) {
+        console.error('Error converting images to base64', e);
+      }
+    }
+
     try {
       await firebaseService.updateDocument('entities', id, {
         name: data.name,
@@ -1784,8 +1343,33 @@ export default function App() {
         notes: data.notes,
         limit: Number(data.limit) || 0,
         status: data.status,
+        initialBalance: Number(data.initialBalance) || 0,
+        imageUrl,
+        imageUrls,
+        isArchived: data.status === 'مؤرشف',
         updatedAt: new Date()
       });
+
+      // Propagate name change to ledger entries if name changed
+      if (nameChanged) {
+        const relatedEntries = rawAllLedgerEntries.filter(e => e.accountId === id);
+        for (const entry of relatedEntries) {
+          if (entry.id) await firebaseService.updateDocument('ledgerEntries', entry.id, { accountName: data.name });
+        }
+      }
+
+      // Add Activity
+      await firebaseService.addDocument('entityActivities', {
+        entityId: id,
+        type: 'update_entity',
+        action: 'تعديل بيانات الحساب',
+        details: `تعديل بيانات المورد: ${data.name}`,
+        performedBy: appUser?.username || 'user',
+        createdAt: new Date(),
+        ownerId: appUser?.userId || 'demo-user',
+        branchId: currentBranchId || undefined
+      });
+
       setIsEditEntityOpen(false);
       setEditingEntity(null);
       toast.success('تم تحديث بيانات المورد بنجاح');
@@ -1799,8 +1383,21 @@ export default function App() {
     try {
       await firebaseService.updateDocument('entities', id, { 
         status: 'مؤرشف',
+        isArchived: true,
         updatedAt: new Date()
       });
+
+      await firebaseService.addDocument('entityActivities', {
+        entityId: id,
+        type: 'archive_entity',
+        action: 'أرشفة المورد',
+        details: 'تم نقل المورد إلى الأرشيف',
+        performedBy: appUser?.username || 'user',
+        createdAt: new Date(),
+        ownerId: appUser?.userId || 'demo-user',
+        branchId: currentBranchId || undefined
+      });
+
       setIsEntityDeleteOptionsOpen(false);
       setDeletingEntityData(null);
       toast.success('تم أرشفة المورد بنجاح (مع الاحتفاظ ببياناته)');
@@ -1810,18 +1407,47 @@ export default function App() {
     }
   };
 
+  const handleSoftDeleteEntity = async (id: string) => {
+    try {
+      await firebaseService.updateDocument('entities', id, { 
+        status: 'محذوف',
+        deletedAt: new Date(),
+        updatedAt: new Date()
+      });
+
+      await firebaseService.addDocument('entityActivities', {
+        entityId: id,
+        type: 'delete_entity',
+        action: 'حذف (Soft Delete)',
+        details: 'تم وسم المورد كمحذوف',
+        performedBy: appUser?.username || 'user',
+        createdAt: new Date(),
+        ownerId: appUser?.userId || 'demo-user',
+        branchId: currentBranchId || undefined
+      });
+
+      setIsDeleteConfirmOpen(false);
+      toast.success('تم حذف المورد بنجاح');
+    } catch (error) {
+      console.error(error);
+      toast.error('فشل في عملية الحذف');
+    }
+  };
+
   const handleFullDeleteEntity = async (id: string) => {
     try {
       // 1. Delete entity
       await firebaseService.deleteDocument('entities', id);
       
-      // 2. Safely find and delete related records if possible
-      // In a real app we might want to query where accountId == id
-      // Since we have local state rawAllLedgerEntries, we can loop if needed but better to use a batch/function
-      // For this environment, we'll delete the ones we find in state that match
       const relatedEntries = rawAllLedgerEntries.filter(e => e.accountId === id);
       for (const entry of relatedEntries) {
         if (entry.id) await firebaseService.deleteDocument('ledgerEntries', entry.id);
+      }
+
+      // Also delete activities
+      const relatedActivities = rawEntityActivities.filter(a => a.entityId === id);
+      for (const act of relatedActivities) {
+        if (act.id) await firebaseService.deleteDocument('entityActivities', act.id);
       }
 
       setIsEntityDeleteOptionsOpen(false);
@@ -1991,7 +1617,7 @@ export default function App() {
   };
 
   const handleAddInvoice = async (data: any) => {
-    console.log("Saving record... (Invoice)");
+    console.log("Saving operation (Invoice):", data);
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
 
     const entityToInvoice = entities.find(e => e.id === data.accountId) || selectedEntity;
@@ -2007,10 +1633,7 @@ export default function App() {
     const imageUrls: string[] = [];
     if (invImageFiles && invImageFiles.length > 0) {
       try {
-        // Use first image for backward compatibility imageUrl field
         imageUrl = await fileToBase64(invImageFiles[0]);
-        
-        // Convert all images to base64
         for (const file of invImageFiles) {
           const b64 = await fileToBase64(file);
           imageUrls.push(b64);
@@ -2024,7 +1647,7 @@ export default function App() {
       accountId: entityToInvoice.id,
       accountName: entityToInvoice.name,
       accountType: entityToInvoice.type,
-      date: data.date,
+      date: data.date ? new Date(data.date) : new Date(),
       operationType: 'invoice',
       purchaseType: purchaseType,
       invoiceNumber: data.invoiceNumber as string,
@@ -2045,14 +1668,36 @@ export default function App() {
       notes: data.notes as string,
       ownerId: appUser?.userId || 'demo-user',
       branchId: (targetBranchId as string) || undefined,
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     } as any;
     
     // Add updatedAt
     (newEntry as any).updatedAt = new Date();
 
+    // Unified Transaction entry
+    const newTx: Omit<Transaction, 'id'> = {
+      type: 'invoice',
+      category: 'invoice',
+      amount: netAmount,
+      date: data.date ? new Date(data.date) : new Date(),
+      description: `فاتورة شراء: ${entityToInvoice.name} - ${data.invoiceNumber || ''}`,
+      entityId: entityToInvoice.id,
+      entityName: entityToInvoice.name,
+      invoiceNumber: data.invoiceNumber as string,
+      branchId: targetBranchId as string | undefined,
+      createdBy: appUser?.userId || 'demo-user',
+      ownerId: appUser?.userId || 'demo-user',
+      userId: appUser?.userId || 'demo-user',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as any;
+
     try {
       const addedId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
+      await firebaseService.addDocument('transactions', newTx as Transaction);
+      console.log("Operations after save:", transactions);
+
       await firebaseService.updateDocument('entities', entityToInvoice.id, {
         balance: entityToInvoice.balance + netAmount,
         totalInvoices: entityToInvoice.totalInvoices + 1,
@@ -2076,7 +1721,6 @@ export default function App() {
         } as any);
       }
 
-      console.log("Saved successfully (Invoice)");
       setIsAddInvoiceOpen(false);
       setInvAmount('');
       setInvDiscount('0');
@@ -2085,7 +1729,16 @@ export default function App() {
       toast.success('تم إضافة الفاتورة بنجاح');
     } catch (err) {
       console.error("Failed to save invoice:", err);
-      toast.error('حدث خطأ أثناء إضافة الفاتورة');
+      // Fallback
+      try {
+        const localOps = JSON.parse(localStorage.getItem('pharma-offline-ops') || '[]');
+        localOps.push({ ...newTx, id: 'local-' + Date.now(), isOffline: true });
+        localStorage.setItem('pharma-offline-ops', JSON.stringify(localOps));
+        toast.info('تم الحفظ محلياً لعدم توفر الاتصال');
+        setIsAddInvoiceOpen(false);
+      } catch (lsErr) {
+        toast.error('حدث خطأ أثناء إضافة الفاتورة');
+      }
     }
   };
 
@@ -2231,14 +1884,32 @@ export default function App() {
       notes: formData.get('notes') as string,
       ownerId: appUser?.userId || 'demo-user',
       branchId: (targetBranchId as string) || undefined,
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     } as any;
     
-    (newEntry as any).updatedAt = new Date();
+    // Unified Transaction entry
+    const newTx: Omit<Transaction, 'id'> = {
+      type: 'payment',
+      category: 'payment',
+      amount: totalEffect,
+      date: new Date(formData.get('date') as string),
+      description: `تسديد دفعى: ${selectedEntity.name} - ${formData.get('linkedInvoice') || ''}`,
+      entityId: selectedEntity.id,
+      entityName: selectedEntity.name,
+      invoiceNumber: formData.get('linkedInvoice') as string,
+      branchId: targetBranchId as string | undefined,
+      createdBy: appUser?.userId || 'demo-user',
+      ownerId: appUser?.userId || 'demo-user',
+      userId: appUser?.userId || 'demo-user',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as any;
 
     try {
       await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
-      console.log("Saved successfully (Payment)");
+      await firebaseService.addDocument('transactions', newTx as Transaction);
+      console.log("Operations after save:", transactions);
       
       // Update linked invoice status if applicable
       if (viewingInvoice?.id) {
@@ -2278,7 +1949,16 @@ export default function App() {
       toast.success('تم إضافة الدفعة بنجاح');
     } catch (err) {
       console.error("Failed to save payment:", err);
-      toast.error('حدث خطأ أثناء إضافة الدفعة');
+      // Fallback
+      try {
+        const localOps = JSON.parse(localStorage.getItem('pharma-offline-ops') || '[]');
+        localOps.push({ ...newTx, id: 'local-' + Date.now(), isOffline: true });
+        localStorage.setItem('pharma-offline-ops', JSON.stringify(localOps));
+        toast.info('تم الحفظ محلياً لعدم توفر الاتصال');
+        setIsAddPaymentOpen(false);
+      } catch (lsErr) {
+        toast.error('حدث خطأ أثناء إضافة الدفعة');
+      }
     }
   };
 
@@ -2436,38 +2116,68 @@ export default function App() {
   };
 
   const handleAddRevenue = async (data: any) => {
-    console.log("[App] Adding revenue...");
+    console.log("Saving operation:", data);
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+
+    let imageUrl = '';
+    const imageUrls: string[] = [];
+    if (revenueImageFiles && revenueImageFiles.length > 0) {
+      try {
+        for (const file of revenueImageFiles) {
+          const b64 = await fileToBase64(file);
+          imageUrls.push(b64);
+        }
+        imageUrl = imageUrls[0];
+      } catch (e) {
+        console.error('Error converting images to base64', e);
+      }
+    }
 
     const newTx: Omit<Transaction, 'id'> = {
       ...data,
-      type: 'income',
+      type: 'revenue',
       category: 'revenue',
       description: `${data.incomeTypeCustom || 'مبيعات'} - ${data.incomeType === 'cash' ? 'نقدي' : 'دين'}`,
+      amount: Number(data.saleAmount || data.amount || 0),
+      saleAmount: Number(data.saleAmount || data.amount || 0),
+      profitAmount: Number(data.profitAmount || data.netProfit || 0),
       branchId: targetBranchId as string | undefined,
       createdBy: appUser?.userId || 'demo-user',
       ownerId: appUser?.userId || 'demo-user',
+      userId: appUser?.userId || 'demo-user',
+      imageUrl,
+      imageUrls,
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      date: data.date ? new Date(data.date) : new Date()
     } as any;
     
     try {
       await firebaseService.addDocument('transactions', newTx as Transaction);
-      console.log("[App] Revenue added successfully");
+      console.log("Operations after save:", transactions);
       setIsAddRevenueOpen(false);
+      setRevenueImageFiles([]);
       
-      // Reset local form states if they exist
       if (typeof setSaleAmount === 'function') setSaleAmount('');
       
       toast.success('تم إضافة الوارد بنجاح');
     } catch (err) {
       console.error("[App] Failed to add revenue:", err);
-      toast.error('حدث خطأ أثناء إضافة الوارد');
+      // Fallback to localStorage
+      try {
+        const localOps = JSON.parse(localStorage.getItem('pharma-offline-ops') || '[]');
+        localOps.push({ ...newTx, id: 'local-' + Date.now(), isOffline: true });
+        localStorage.setItem('pharma-offline-ops', JSON.stringify(localOps));
+        toast.info('تم الحفظ محلياً لعدم توفر الاتصال');
+        setIsAddRevenueOpen(false);
+      } catch (lsErr) {
+        toast.error('حدث خطأ أثناء إضافة الوارد');
+      }
     }
   };
 
   const handleAddExpense = async (data: any) => {
-    console.log("[App] Adding expense...");
+    console.log("Saving operation:", data);
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
 
     let detailedDescription = data.description;
@@ -2483,24 +2193,34 @@ export default function App() {
       type: 'expense',
       category: data.category as string,
       amount: Number(data.amount),
-      date: data.date,
+      date: data.date ? new Date(data.date) : new Date(),
       description: detailedDescription,
       notes: data.notes as string,
       branchId: targetBranchId as string | undefined,
       createdBy: appUser?.userId || 'demo-user',
       ownerId: appUser?.userId || 'demo-user',
+      userId: appUser?.userId || 'demo-user',
       createdAt: new Date(),
       updatedAt: new Date()
     } as any;
     
     try {
       await firebaseService.addDocument('transactions', newTx as Transaction);
-      console.log("[App] Expense added successfully");
+      console.log("Operations after save:", transactions);
       setIsAddExpenseOpen(false);
       toast.success('تم إضافة المصروف بنجاح');
     } catch (err) {
       console.error("[App] Failed to add expense:", err);
-      toast.error('حدث خطأ أثناء إضافة المصروف');
+      // Fallback
+      try {
+        const localOps = JSON.parse(localStorage.getItem('pharma-offline-ops') || '[]');
+        localOps.push({ ...newTx, id: 'local-' + Date.now(), isOffline: true });
+        localStorage.setItem('pharma-offline-ops', JSON.stringify(localOps));
+        toast.info('تم الحفظ محلياً لعدم توفر الاتصال');
+        setIsAddExpenseOpen(false);
+      } catch (lsErr) {
+        toast.error('حدث خطأ أثناء إضافة المصروف');
+      }
     }
   };
 
@@ -2587,32 +2307,43 @@ export default function App() {
     }
   };
 
-  const handleUpdateTransaction = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdateTransaction = async (data: any) => {
     console.log("Updating record... (Transaction)");
     if (!selectedTransaction?.id) return;
     
-    const form = e.target as HTMLFormElement;
-    const formData = new FormData(form);
+    let imageUrl = selectedTransaction.imageUrl || '';
+    const imageUrls: string[] = selectedTransaction.imageUrls || (imageUrl ? [imageUrl] : []);
     
-    const updatedTx: Partial<Transaction> = {
-      category: formData.get('category') as string,
-      incomeClassification: formData.get('incomeClassification') as string,
-      amount: Number(formData.get('amount')),
-      date: new Date(formData.get('date') as string),
-      description: formData.get('description') as string,
-      notes: formData.get('notes') as string,
+    if (revenueImageFiles && revenueImageFiles.length > 0) {
+      try {
+        // Convert all new images to base64
+        for (const file of revenueImageFiles) {
+          const b64 = await fileToBase64(file);
+          imageUrls.push(b64);
+        }
+        // Use first available image for backward compatibility imageUrl field
+        imageUrl = imageUrls[0];
+      } catch (e) {
+        console.error('Error converting images to base64', e);
+      }
+    }
+
+    const updatedTx = {
+      ...selectedTransaction,
+      ...data,
+      imageUrl,
+      imageUrls,
       updatedAt: new Date()
-    } as any;
+    };
     
     try {
       await firebaseService.updateDocument('transactions', selectedTransaction.id, updatedTx);
-      console.log("Updated successfully (Transaction)");
       setIsEditTransactionOpen(false);
-      toast.success('تم تحديث الحركة بنجاح');
+      setRevenueImageFiles([]);
+      toast.success('تم تحديث البيانات بنجاح');
     } catch (err) {
       console.error("Failed to update transaction:", err);
-      toast.error('حدث خطأ أثناء تحديث الحركة');
+      toast.error('حدث خطأ أثناء التحديث');
     }
   };
 
@@ -3052,6 +2783,14 @@ export default function App() {
                     <Receipt className="h-4 w-4 text-blue-500" />
                     <span>فاتورة شراء جديدة</span>
                   </DropdownMenuItem>
+                  <DropdownMenuItem className="p-3 cursor-pointer hover:bg-muted rounded-lg gap-3" onClick={() => setIsMultiEntryOpen(true)}>
+                    <TableIcon className="h-4 w-4 text-primary" />
+                    <span>إدخال متعدد للقوائم</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="p-3 cursor-pointer hover:bg-muted rounded-lg gap-3" onClick={() => setIsExcelImportOpen(true)}>
+                    <FileUp className="h-4 w-4 text-emerald-500" />
+                    <span>استيراد من Excel</span>
+                  </DropdownMenuItem>
                   <DropdownMenuItem className="p-3 cursor-pointer hover:bg-muted rounded-lg gap-3" onClick={() => setIsAddRevenueOpen(true)}>
                     <DollarSign className="h-4 w-4 text-emerald-500" />
                     <span>تسجيل دخل جديد</span>
@@ -3391,8 +3130,8 @@ export default function App() {
                               <div className="font-black text-foreground group-hover:text-primary transition-colors">{tx.description}</div>
                               {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold mt-1">{tx.entityName}</div>}
                             </td>
-                            <td className={`px-8 py-5 text-left font-black font-mono text-base ${tx.type === 'income' ? 'text-primary' : 'text-rose-500'}`}>
-                              {tx.type === 'income' ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
+                            <td className={`px-8 py-5 text-left font-black font-mono text-base ${(tx.type === 'income' || tx.type === 'revenue') ? 'text-primary' : 'text-rose-500'}`}>
+                              {(tx.type === 'income' || tx.type === 'revenue') ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
                             </td>
                           </tr>
                         ))}
@@ -3415,14 +3154,14 @@ export default function App() {
                             <div className="font-black text-sm text-foreground">{tx.description}</div>
                             {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold">{tx.entityName}</div>}
                           </div>
-                          <div className={`font-black font-mono ${tx.type === 'income' ? 'text-primary' : 'text-rose-500'}`}>
-                            {tx.type === 'income' ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
+                          <div className={`font-black font-mono ${(tx.type === 'income' || tx.type === 'revenue') ? 'text-primary' : 'text-rose-500'}`}>
+                            {(tx.type === 'income' || tx.type === 'revenue') ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
                           </div>
                         </div>
                         <div className="flex justify-between items-center text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
                           <span>{safeFormatDate(tx.date, 'yyyy/MM/dd')}</span>
-                          <span className={`px-2 py-0.5 rounded ${tx.type === 'income' ? 'bg-primary/10 text-primary' : 'bg-rose-500/10 text-rose-500'}`}>
-                            {tx.type === 'income' ? 'دخل' : 'مصروف'}
+                          <span className={`px-2 py-0.5 rounded ${(tx.type === 'income' || tx.type === 'revenue') ? 'bg-primary/10 text-primary' : 'bg-rose-500/10 text-rose-500'}`}>
+                            {(tx.type === 'income' || tx.type === 'revenue') ? 'دخل' : 'مصروف'}
                           </span>
                         </div>
                       </div>
@@ -3580,6 +3319,7 @@ export default function App() {
                       setActiveTab('revenues');
                     }} 
                     onClose={() => setActiveTab('finance')} 
+                    onImagesChange={setRevenueImageFiles}
                   />
                 </CardContent>
               </Card>
@@ -3592,8 +3332,8 @@ export default function App() {
                 { 
                   label: 'إجمالي الوارد', 
                   value: transactions
-                    .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId))
-                    .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount), 0), 
+                    .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId))
+                    .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount || 0), 0), 
                   icon: TrendingUp, 
                   color: 'text-primary', 
                   bg: 'bg-primary/10' 
@@ -3601,7 +3341,7 @@ export default function App() {
                 { 
                   label: 'إجمالي الأرباح', 
                   value: transactions
-                    .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId))
+                    .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId))
                     .reduce((acc, tx) => acc + (tx.profitAmount || tx.netProfit || 0), 0), 
                   icon: DollarSign, 
                   color: 'text-emerald-600', 
@@ -3610,7 +3350,7 @@ export default function App() {
                 { 
                   label: 'إجمالي المسدد', 
                   value: transactions
-                    .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId))
+                    .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId))
                     .reduce((acc, tx) => acc + (tx.paidAmount || (tx.incomeType === 'cash' ? tx.amount : 0)), 0), 
                   icon: CheckCircle2, 
                   color: 'text-blue-600', 
@@ -3619,7 +3359,7 @@ export default function App() {
                 { 
                   label: 'الديون (المتبقي)', 
                   value: transactions
-                    .filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId))
+                    .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId))
                     .reduce((acc, tx) => acc + (tx.remainingAmount ?? (tx.incomeType === 'cash' ? 0 : tx.amount)), 0), 
                   icon: AlertCircle, 
                   color: 'text-rose-600', 
@@ -3713,20 +3453,39 @@ export default function App() {
                                 {tx.incomeType === 'cash' ? '0' : formatNumberWithCommas(tx.remainingAmount ?? tx.amount)}
                               </td>
                               <td className="px-8 py-6 text-center">
-                                <div className="flex items-center justify-center gap-2">
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => {
-                                    setSelectedTransaction(tx);
-                                    setIsEditTransactionOpen(true);
-                                  }}>
-                                    <Edit className="h-4 w-4 text-amber-500" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => {
-                                    setDeletingItem({ id: tx.id!, collection: 'transactions', label: 'إيراد' });
-                                    setIsDeleteConfirmOpen(true);
-                                  }}>
-                                    <Trash2 className="h-4 w-4 text-rose-500" />
-                                  </Button>
-                                </div>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted/50 outline-none transition-colors">
+                                    <div className="flex flex-col gap-0.5">
+                                      <div className="w-1 h-1 bg-muted-foreground rounded-full" />
+                                      <div className="w-1 h-1 bg-muted-foreground rounded-full" />
+                                      <div className="w-1 h-1 bg-muted-foreground rounded-full" />
+                                    </div>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-40 bg-card border-border text-foreground rounded-xl shadow-xl" dir="rtl">
+                                    <DropdownMenuItem onClick={() => {
+                                      setViewingRevenue(tx);
+                                      setIsViewRevenueOpen(true);
+                                    }} className="flex items-center gap-2 p-2.5 cursor-pointer hover:bg-muted/50 rounded-lg">
+                                      <Eye className="h-4 w-4 text-blue-500" />
+                                      <span className="font-bold">عرض التفاصيل</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => {
+                                      setSelectedTransaction(tx);
+                                      setIsEditTransactionOpen(true);
+                                    }} className="flex items-center gap-2 p-2.5 cursor-pointer hover:bg-muted/50 rounded-lg text-amber-500">
+                                      <Edit className="h-4 w-4" />
+                                      <span className="font-bold">تعديل</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator className="bg-border/50" />
+                                    <DropdownMenuItem onClick={() => {
+                                      setDeletingItem({ id: tx.id!, collection: 'transactions', label: 'إيراد' });
+                                      setIsDeleteConfirmOpen(true);
+                                    }} className="flex items-center gap-2 p-2.5 cursor-pointer hover:bg-rose-500/10 text-rose-500 rounded-lg">
+                                      <Trash2 className="h-4 w-4" />
+                                      <span className="font-bold">حذف</span>
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </td>
                             </tr>
                           ))}
@@ -3749,15 +3508,44 @@ export default function App() {
                         .map((tx) => (
                           <div key={tx.id} className="p-4 bg-muted/20 border border-border rounded-2xl space-y-3">
                             <div className="flex justify-between items-start">
-                              <div>
-                                <div className="font-black text-foreground">{tx.customerName || tx.description}</div>
+                              <div className="flex-1">
+                                <div className="font-black text-foreground cursor-pointer hover:text-primary transition-colors" onClick={() => {
+                                  setViewingRevenue(tx);
+                                  setIsViewRevenueOpen(true);
+                                }}>{tx.customerName || tx.description}</div>
                                 <div className="text-[10px] text-muted-foreground font-bold">{safeFormatDate(tx.date, 'yyyy/MM/dd')}</div>
                               </div>
-                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
-                                tx.incomeType === 'cash' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
-                              }`}>
-                                {tx.incomeType === 'cash' ? 'نقدي' : 'آجل'}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
+                                  tx.incomeType === 'cash' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
+                                }`}>
+                                  {tx.incomeType === 'cash' ? 'نقدي' : 'آجل'}
+                                </span>
+                                
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger className="h-6 w-6 rounded-lg flex items-center justify-center hover:bg-muted/50 outline-none transition-colors">
+                                    <div className="flex flex-col gap-0.5">
+                                      <div className="w-0.5 h-0.5 bg-muted-foreground rounded-full" />
+                                      <div className="w-0.5 h-0.5 bg-muted-foreground rounded-full" />
+                                      <div className="w-0.5 h-0.5 bg-muted-foreground rounded-full" />
+                                    </div>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-32 bg-card border-border text-foreground rounded-xl" dir="rtl">
+                                    <DropdownMenuItem onClick={() => {
+                                      setViewingRevenue(tx);
+                                      setIsViewRevenueOpen(true);
+                                    }} className="text-[10px] p-2 font-bold cursor-pointer hover:bg-muted font-bold">عرض</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => {
+                                      setSelectedTransaction(tx);
+                                      setIsEditTransactionOpen(true);
+                                    }} className="text-[10px] p-2 font-bold cursor-pointer hover:bg-muted text-amber-500 font-bold">تعديل</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => {
+                                      setDeletingItem({ id: tx.id!, collection: 'transactions', label: 'إيراد' });
+                                      setIsDeleteConfirmOpen(true);
+                                    }} className="text-[10px] p-2 font-bold cursor-pointer hover:bg-rose-500/10 text-rose-500 font-bold">حذف</DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-[10px] font-bold text-muted-foreground">
                                <div className="bg-muted p-2 rounded-lg">الوارد: {formatNumberWithCommas(tx.saleAmount || tx.amount)}</div>
@@ -3787,6 +3575,7 @@ export default function App() {
                 onBack={() => setViewingEntityDetail(null)}
                 ledgerEntries={allLedgerEntries.filter(e => e.accountId === viewingEntityDetail.id)}
                 bonuses={bonuses.filter(b => b.entityId === viewingEntityDetail.id)}
+                activities={entityActivities.filter(a => a.entityId === viewingEntityDetail.id)}
                 onAddInvoice={() => { setSelectedEntity(viewingEntityDetail); setIsAddInvoiceOpen(true); }}
                 onAddPayment={() => { setSelectedEntity(viewingEntityDetail); setViewingInvoice(null); setPaymentMode('normal'); setIsAddPaymentOpen(true); }}
                 onAddBonus={() => setIsAddBonusOpen(true)}
@@ -3830,6 +3619,7 @@ export default function App() {
                   setIsDeleteConfirmOpen(true);
                 }}
                 onImportHistorical={() => setIsHistoricalWizardOpen(true)}
+                onImportExcel={() => setIsExcelImportOpen(true)}
                 appMode={effectiveAppMode}
                 onShowImage={setLightboxImage}
               />
@@ -3981,14 +3771,32 @@ export default function App() {
                       <h2 className="text-2xl font-black text-foreground mb-1">فواتير المشتريات</h2>
                       <p className="text-muted-foreground font-bold">كافة التوريدات والطلبيات المسجلة</p>
                     </div>
-                    <div className="relative w-full md:w-96 group">
-                      <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                      <Input
-                        placeholder="بحث برقم الفاتورة أو المورد..."
-                        className="bg-background border-border pr-12 h-12 rounded-xl text-foreground focus:ring-primary/20 placeholder:font-bold"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                      />
+                    <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                      <div className="relative flex-1 md:w-80 group">
+                        <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                        <Input
+                          placeholder="بحث برقم الفاتورة أو المورد..."
+                          className="bg-background border-border pr-12 h-12 rounded-xl text-foreground focus:ring-primary/20 placeholder:font-bold"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setIsMultiEntryOpen(true)} 
+                        className="bg-primary/10 border-primary/20 text-primary hover:bg-primary/20 gap-2 h-12 px-6 rounded-xl font-black shrink-0"
+                      >
+                        <PlusCircle className="h-4 w-4" />
+                        إدخال متعدد
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setIsExcelImportOpen(true)} 
+                        className="bg-emerald-600 hover:bg-emerald-700 gap-2 h-12 px-6 text-white shadow-lg shadow-emerald-500/20 rounded-xl font-black shrink-0"
+                      >
+                        <FileUp className="h-4 w-4" />
+                        استيراد من Excel
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
@@ -4172,8 +3980,8 @@ export default function App() {
                                 <div className="font-black text-foreground group-hover:text-primary transition-colors">{tx.description}</div>
                                 {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold mt-1 px-2.5 py-0.5 bg-muted rounded-full inline-block">{tx.entityName}</div>}
                               </td>
-                              <td className={`px-8 py-6 font-black font-mono text-lg tracking-tighter ${tx.type === 'income' ? 'text-primary' : 'text-rose-600'}`}>
-                                {tx.type === 'income' ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
+                              <td className={`px-8 py-6 font-black font-mono text-lg tracking-tighter ${(tx.type === 'income' || tx.type === 'revenue') ? 'text-primary' : 'text-rose-600'}`}>
+                                {(tx.type === 'income' || tx.type === 'revenue') ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
                               </td>
                               <td className="px-8 py-6 text-center">
                                 <div className="flex items-center justify-center gap-2">
@@ -4219,8 +4027,8 @@ export default function App() {
                               <div className="font-black text-foreground">{tx.description}</div>
                               {tx.entityName && <div className="text-[9px] text-muted-foreground mt-1">{tx.entityName}</div>}
                             </div>
-                            <div className={`text-xl font-black font-mono tracking-tighter ${tx.type === 'income' ? 'text-primary' : 'text-rose-600'}`}>
-                              {tx.type === 'income' ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
+                            <div className={`text-xl font-black font-mono tracking-tighter ${(tx.type === 'income' || tx.type === 'revenue') ? 'text-primary' : 'text-rose-600'}`}>
+                              {(tx.type === 'income' || tx.type === 'revenue') ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
                               <span className="text-[10px] mr-1 font-sans">د.ع</span>
                             </div>
                           </div>
@@ -4628,7 +4436,12 @@ export default function App() {
             </TabsContent>
 
             <TabsContent value="historical" className="animate-in fade-in zoom-in-95 duration-300 pb-20 md:pb-0">
-               <HistoricalMigrationPage branchId={currentBranchId} ownerId={user?.uid || ''} />
+               <HistoricalMigrationPage 
+                 branchId={currentBranchId} 
+                 ownerId={user?.uid || ''} 
+                 onImportExcel={() => setIsExcelImportOpen(true)}
+                 onMultiEntry={() => setIsMultiEntryOpen(true)}
+               />
             </TabsContent>
 
             <TabsContent value="medicine-requests" className="animate-in fade-in zoom-in-95 duration-300 pb-20 md:pb-0">
@@ -4894,6 +4707,7 @@ export default function App() {
           <EntityForm 
             onSubmit={handleAddEntity} 
             onClose={() => setIsAddEntityOpen(false)} 
+            onImagesChange={setEntityImageFiles}
           />
         </DialogContent>
       </Dialog>
@@ -4909,11 +4723,32 @@ export default function App() {
               entity={editingEntity}
               onSubmit={(data) => handleUpdateEntity(editingEntity.id!, data)} 
               onClose={() => setIsEditEntityOpen(false)} 
+              onImagesChange={setEntityImageFiles}
             />
           )}
         </DialogContent>
       </Dialog>
       {/* Add Invoice Dialog */}
+      <ExcelImportWizard 
+        open={isExcelImportOpen} 
+        onOpenChange={setIsExcelImportOpen} 
+        entities={entities} 
+        currentBranchId={currentBranchId || undefined}
+        appUser={appUser}
+      />
+
+      <MultiInvoiceEntry
+        open={isMultiEntryOpen}
+        onOpenChange={setIsMultiEntryOpen}
+        entities={entities}
+        currentBranchId={currentBranchId || 'main'}
+        appUser={appUser}
+        onImportExcel={() => {
+          setIsMultiEntryOpen(false);
+          setIsExcelImportOpen(true);
+        }}
+      />
+
       <Dialog open={isAddInvoiceOpen} onOpenChange={setIsAddInvoiceOpen}>
         <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-2xl lg:max-w-[85vw] max-h-[95vh] overflow-y-auto">
           <DialogHeader>
@@ -5190,73 +5025,14 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
-      {/* Entity Ledger Dialog (Transactions for specific entity) */}
-      <Dialog open={isLedgerOpen} onOpenChange={setIsLedgerOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col bg-card border-border text-foreground" dir="rtl">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">كشف حساب: {selectedEntity?.name}</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              عرض كافة الفواتير والدفعات المسجلة لهذا الحساب.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="flex-1 overflow-auto py-4">
-            <div className="bg-muted p-4 rounded-lg flex justify-between items-center mb-4 border border-border">
-              <div className="text-sm font-medium text-muted-foreground">الرصيد الكلي:</div>
-              <div className={`text-xl font-bold font-mono ${selectedEntity?.balance! > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
-                {formatIQD(selectedEntity?.balance)}
-              </div>
-            </div>
 
-            <table className="w-full text-right">
-              <thead className="sticky top-0 bg-muted border-b border-border text-xs font-bold text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2">التاريخ</th>
-                  <th className="px-4 py-2">العملية</th>
-                  <th className="px-4 py-2">رقم الفاتورة</th>
-                  <th className="px-4 py-2">المبلغ</th>
-                  <th className="px-4 py-2">الرصيد</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border text-sm">
-                {(ledgerEntries || []).map((entry) => (
-                  <tr key={entry.id} className="hover:bg-muted/50 transition-colors">
-                    <td className="px-4 py-2 font-mono text-muted-foreground">{safeFormatDate(entry.date, 'yyyy/MM/dd')}</td>
-                    <td className="px-4 py-2">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${
-                        entry.operationType === 'invoice' ? 'bg-blue-500/10 text-blue-400' : 'bg-emerald-500/10 text-emerald-400'
-                      }`}>
-                        {entry.operationType === 'invoice' ? 'فاتورة' : 'دفعة'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-muted-foreground font-mono">{entry.invoiceNumber || '-'}</td>
-                    <td className={`px-4 py-2 font-bold font-mono ${entry.operationType === 'invoice' ? 'text-blue-500' : 'text-emerald-500'}`}>
-                      {entry.operationType === 'invoice' ? '+' : '-'}{formatNumberWithCommas(entry.netAmount)}
-                    </td>
-                    <td className="px-4 py-2 font-bold text-foreground font-mono">{formatNumberWithCommas(entry.balanceAfterOperation)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          
-          <DialogFooter className="border-t border-border pt-4 gap-2">
-            <Button variant="outline" className="border-border text-muted-foreground hover:bg-muted" onClick={() => setIsLedgerOpen(false)}>إغلاق</Button>
-            <Button variant="outline" className="gap-2 border-border text-muted-foreground hover:bg-muted">
-              <Printer className="h-4 w-4" />
-              طباعة الكشف
-            </Button>
-            <Button variant="secondary" onClick={() => setIsAddPaymentOpen(true)} className="gap-2 bg-secondary hover:bg-secondary/80 text-emerald-500 border border-border font-bold">
-              <LogOut className="h-4 w-4 rotate-90" />
-              دفعة جديدة
-            </Button>
-            <Button onClick={() => setIsAddInvoiceOpen(true)} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-11 px-6 rounded-xl">
-              <Plus className="h-4 w-4" />
-              فاتورة جديدة
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
+      <ViewRevenueDialog 
+        isOpen={isViewRevenueOpen} 
+        onOpenChange={setIsViewRevenueOpen} 
+        revenue={viewingRevenue}
+        branches={branches}
+      />
 
       {/* Add Revenue Dialog */}
       <Dialog open={isAddRevenueOpen} onOpenChange={setIsAddRevenueOpen}>
@@ -5267,6 +5043,7 @@ export default function App() {
           <RevenueForm 
             onSubmit={handleAddRevenue} 
             onClose={() => setIsAddRevenueOpen(false)} 
+            onImagesChange={setRevenueImageFiles}
           />
         </DialogContent>
       </Dialog>
@@ -5296,6 +5073,7 @@ export default function App() {
                 initialData={selectedTransaction}
                 onSubmit={handleUpdateTransaction}
                 onClose={() => setIsEditTransactionOpen(false)}
+                onImagesChange={setRevenueImageFiles}
               />
             ) : (
               <ExpenseForm 
@@ -5344,10 +5122,34 @@ export default function App() {
 
       <DeleteInvoiceConfirmDialog
         isOpen={isDeleteInvoiceConfirmOpen}
-        onOpenChange={setIsDeleteInvoiceConfirmOpen}
+        onOpenChange={isDeleteInvoiceConfirmOpen ? setIsDeleteInvoiceConfirmOpen : () => {}}
         onConfirm={handleDeleteInvoice}
         invoice={viewingInvoice}
       />
+
+      <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+        <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black text-rose-500">تأكيد الحذف</DialogTitle>
+            <DialogDescription className="text-muted-foreground font-bold">
+              هل أنت متأكد من حذف المورد: {deletingItem?.label}؟
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">سيتم نقل المورد إلى قائمة المحذوفات. يمكنك استعادته لاحقاً أو أرشفته.</p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setIsDeleteConfirmOpen(false)} className="rounded-xl font-bold">إلغاء</Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => deletingItem?.id && handleSoftDeleteEntity(deletingItem.id)} 
+              className="bg-rose-500 hover:bg-rose-600 text-white rounded-xl font-black"
+            >
+              تأكيد الحذف
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Bonus Dialog */}
       <Dialog open={isAddBonusOpen} onOpenChange={setIsAddBonusOpen}>

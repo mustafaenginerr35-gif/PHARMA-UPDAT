@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { BranchForm } from './BranchForm';
 import type { PharmacyBranch } from '../db';
-import { format } from 'date-fns';
+import { safeFormatDate } from '../lib/formatters';
 
 interface BranchesPageProps {
   branches: PharmacyBranch[];
@@ -230,7 +230,7 @@ export const BranchesPage = ({
                              <span className="text-[10px] font-mono text-muted-foreground">{branch.code}</span>
                              <h4 className="font-black text-foreground">{branch.name}</h4>
                          </div>
-                         <p className="text-[10px] font-bold text-muted-foreground">تاريخ الأرشفة: {format(branch.createdAt, 'yyyy/MM/dd')}</p>
+                         <p className="text-[10px] font-bold text-muted-foreground">تاريخ الأرشفة: {safeFormatDate(branch.createdAt, 'yyyy/MM/dd')}</p>
                       </div>
                    </CardContent>
                 </Card>

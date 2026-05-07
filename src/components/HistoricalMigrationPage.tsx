@@ -51,15 +51,17 @@ import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
-import { formatIQD } from '@/src/lib/formatters';
+import { formatIQD, safeFormatDate, toValidDate } from '@/src/lib/formatters';
 import { HistoricalRecord, Entity } from '../db';
 
 interface HistoricalMigrationPageProps {
   branchId: string | null;
   ownerId: string;
+  onImportExcel?: () => void;
+  onMultiEntry?: () => void;
 }
 
-export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = ({ branchId, ownerId }) => {
+export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = ({ branchId, ownerId, onImportExcel, onMultiEntry }) => {
   const [activeTab, setActiveTab] = useState('opening');
   const [editingRecord, setEditingRecord] = useState<HistoricalRecord | null>(null);
   
@@ -71,7 +73,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
   const { data: entities = [] } = useFirebaseQuery<Entity>('entities', constraints);
 
   const historicalRecords = useMemo(() => {
-    const sortedRaw = [...historicalRecordsRaw].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const sortedRaw = [...historicalRecordsRaw].sort((a, b) => toValidDate(b.createdAt).getTime() - toValidDate(a.createdAt).getTime());
     if (!branchId) return sortedRaw;
     return sortedRaw.filter(r => r.branchId === branchId);
   }, [historicalRecordsRaw, branchId]);
@@ -355,17 +357,18 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
         </div>
         
         <div className="flex gap-2">
-            <input 
-              type="file" 
-              id="excel-import" 
-              className="hidden" 
-              accept=".xlsx, .xls"
-              onChange={handleExcelImport}
-            />
+            <Button 
+               variant="outline" 
+               className="rounded-xl border-primary/20 text-primary hover:bg-primary/10 gap-2 font-black"
+               onClick={onMultiEntry}
+            >
+              <TableIcon className="h-4 w-4" />
+              إدخال متعدد للقوائم
+            </Button>
             <Button 
               variant="outline" 
               className="rounded-xl border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/10 gap-2 font-bold"
-              onClick={() => document.getElementById('excel-import')?.click()}
+              onClick={onImportExcel}
             >
               <FileUp className="h-4 w-4" />
               استيراد من Excel
@@ -568,7 +571,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
                        <Label className="font-bold text-muted-foreground">التاريخ القديم</Label>
                        <Input 
                           type="date"
-                          value={singleEntry.date ? format(new Date(singleEntry.date), 'yyyy-MM-dd') : ''}
+                          value={singleEntry.date ? safeFormatDate(singleEntry.date, 'yyyy-MM-dd', { useAr: false }) : ''}
                           onChange={e => setSingleEntry({...singleEntry, date: new Date(e.target.value)})}
                           className="bg-muted border-border h-12 rounded-xl"
                        />
@@ -715,7 +718,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
                           </SelectTrigger>
                           <SelectContent className="bg-card border-border h-64 overflow-y-auto">
                              {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => (
-                                <SelectItem key={m} value={m.toString()}>{format(new Date(2024, m-1, 1), 'MMMM', { locale: ar })}</SelectItem>
+                                <SelectItem key={m} value={m.toString()}>{safeFormatDate(new Date(2024, m-1, 1), 'MMMM')}</SelectItem>
                              ))}
                           </SelectContent>
                        </Select>
@@ -985,11 +988,11 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
                                  record.entryType === 'payment' ? 'تسديد' :
                                  record.entryType === 'customer_debt' ? 'دين زبون' : 'دين مورد'}
                                 {' - '}
-                                {record.date && format(new Date(record.date), 'yyyy/MM/dd')}
+                                {record.date && safeFormatDate(record.date, 'yyyy/MM/dd')}
                              </div>
                            ) : record.type === 'monthly_summary' ? (
                              <div className="text-xs font-bold text-foreground">
-                                {format(new Date(record.year!, record.month!-1, 1), 'MMMM yyyy', { locale: ar })}
+                                {safeFormatDate(new Date(record.year!, record.month!-1, 1), 'MMMM yyyy')}
                              </div>
                            ) : (
                              <div className="text-xs font-bold text-foreground">
@@ -1014,7 +1017,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
                            )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                           <div className="text-xs font-bold text-foreground">{format(record.createdAt, 'yyyy/MM/dd HH:mm')}</div>
+                           <div className="text-xs font-bold text-foreground">{safeFormatDate(record.createdAt, 'yyyy/MM/dd HH:mm')}</div>
                         </td>
                         <td className="px-6 py-4 text-center">
                             <div className="flex items-center justify-center gap-2">
@@ -1077,7 +1080,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs text-muted-foreground font-bold">التاريخ</p>
-                  <p className="font-black text-foreground font-mono">{format(new Date(reviewData.data.date), 'yyyy/MM/dd')}</p>
+                  <p className="font-black text-foreground font-mono">{safeFormatDate(reviewData.data.date, 'yyyy/MM/dd')}</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs text-muted-foreground font-bold">المبلغ</p>
@@ -1095,7 +1098,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
             {reviewData?.type === 'monthly_summary' && (
               <div className="grid grid-cols-2 gap-y-6">
                 <div className="col-span-2 p-3 bg-muted rounded-xl flex justify-between">
-                  <p className="font-black text-primary">موجز شهر: {format(new Date(2024, reviewData.data.month-1, 1), 'MMMM', { locale: ar })}</p>
+                  <p className="font-black text-primary">موجز شهر: {safeFormatDate(new Date(2024, reviewData.data.month-1, 1), 'MMMM')}</p>
                   <p className="font-black text-primary">سنة: {reviewData.data.year}</p>
                 </div>
                 <div className="space-y-1">
@@ -1152,7 +1155,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
                     <tbody className="divide-y divide-border">
                       {reviewData.data.slice(0, 10).map((record: any, idx: number) => (
                         <tr key={idx}>
-                          <td className="p-2">{format(record.date, 'yyyy/MM/dd')}</td>
+                          <td className="p-2">{safeFormatDate(record.date, 'yyyy/MM/dd')}</td>
                           <td className="p-2">{record.entryType === 'revenue' ? 'وارد' : 'مصروف'}</td>
                           <td className="p-2 font-bold">{(record.amount || 0).toLocaleString()}</td>
                         </tr>

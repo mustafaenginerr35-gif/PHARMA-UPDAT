@@ -48,8 +48,7 @@ import { where, orderBy } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MedicineRequest } from '../db';
-import { format } from 'date-fns';
-import { ar } from 'date-fns/locale';
+import { safeFormatDate, toValidDate } from '../lib/formatters';
 import { ImageCapture } from './ImageCapture';
 
 interface MedicineRequestsPageProps {
@@ -102,7 +101,13 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
   const { data: medicineRequestsRaw = [] } = useFirebaseQuery<MedicineRequest>('medicineRequests', constraints);
 
   const medicineRequests = useMemo(() => {
-    const sortedRaw = [...medicineRequestsRaw].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const sortedRaw = [...medicineRequestsRaw].sort((a, b) => {
+      const da = toValidDate(a.createdAt || Date.now());
+      const db = toValidDate(b.createdAt || Date.now());
+      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+      return tb - ta;
+    });
     if (!branchId) return sortedRaw;
     return sortedRaw.filter(r => r.branchId === branchId);
   }, [medicineRequestsRaw, branchId]);
@@ -503,7 +508,7 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
                       </div>
                       <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-black">
                         <CalendarDays className="h-3 w-3" />
-                        {format(req.createdAt, 'yyyy/MM/dd', { locale: ar })}
+                        {safeFormatDate(req.createdAt, 'yyyy/MM/dd')}
                       </div>
                     </div>
 
