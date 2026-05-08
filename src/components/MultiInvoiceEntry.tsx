@@ -29,9 +29,12 @@ import {
   Image as ImageIcon,
   Paperclip,
   Upload,
-  X
+  X,
+  Clock,
+  CalendarDays
 } from 'lucide-react';
 import { toast } from 'sonner';
+import imageCompression from 'browser-image-compression';
 import { Entity, LedgerEntry, Transaction } from '../db';
 import { firebaseService } from '../services/firebaseService';
 import { formatNumberWithCommas, parseFormattedNumber, toValidDate, safeFormatDate } from '../lib/formatters';
@@ -39,7 +42,8 @@ import { formatNumberWithCommas, parseFormattedNumber, toValidDate, safeFormatDa
 interface MultiInvoiceRow {
   id: string;
   invoiceNumber: string;
-  date: string;
+  invoiceDate: string;
+  dueDate: string;
   entityName: string;
   totalAmount: string;
   discount: string;
@@ -51,6 +55,8 @@ interface MultiInvoiceRow {
   entityId?: string;
   imageFiles?: File[];
   uploadProgress?: number;
+  saveStatus?: 'idle' | 'saving' | 'success' | 'error';
+  saveError?: string;
 }
 
 interface MultiInvoiceEntryProps {
@@ -77,10 +83,15 @@ export function MultiInvoiceEntry({
   const tableRef = useRef<HTMLTableElement>(null);
 
   function createEmptyRow(): MultiInvoiceRow {
+    const today = new Date();
+    const nextMonth = new Date();
+    nextMonth.setMonth(today.getMonth() + 1);
+
     return {
       id: Math.random().toString(36).substr(2, 9),
       invoiceNumber: '',
-      date: safeFormatDate(new Date(), 'yyyy-MM-dd'),
+      invoiceDate: safeFormatDate(today, 'yyyy-MM-dd'),
+      dueDate: safeFormatDate(nextMonth, 'yyyy-MM-dd'),
       entityName: '',
       totalAmount: '',
       discount: '0',
@@ -88,7 +99,8 @@ export function MultiInvoiceEntry({
       bonus: '',
       notes: '',
       isValid: false,
-      imageFiles: []
+      imageFiles: [],
+      saveStatus: 'idle'
     };
   }
 
@@ -118,10 +130,10 @@ export function MultiInvoiceEntry({
       const paid = parseFormattedNumber(updatedRow.paidAmount);
       
       updatedRow.isValid = !!updatedRow.invoiceNumber && 
-                           !!updatedRow.date && 
+                           !!updatedRow.invoiceDate && 
                            !!updatedRow.entityId && 
                            total > 0 && 
-                           !isNaN(new Date(updatedRow.date).getTime());
+                           !isNaN(new Date(updatedRow.invoiceDate).getTime());
       
       return updatedRow;
     }));
@@ -138,21 +150,22 @@ export function MultiInvoiceEntry({
       const parts = line.split('\t');
       const row = createEmptyRow();
       
-      // Order usually matches: Invoice#, Date, Entity, Amount, Discount, Paid, Bonus, Notes
+      // Order usually matches: Invoice#, InvoiceDate, DueDate, Entity, Amount, Discount, Paid, Bonus, Notes
       if (parts[0]) row.invoiceNumber = parts[0].trim();
-      if (parts[1]) row.date = safeFormatDate(toValidDate(parts[1]), 'yyyy-MM-dd');
-      if (parts[2]) row.entityName = parts[2].trim();
-      if (parts[3]) row.totalAmount = parts[3].trim();
-      if (parts[4]) row.discount = parts[4].trim();
-      if (parts[5]) row.paidAmount = parts[5].trim();
-      if (parts[6]) row.bonus = parts[6].trim();
-      if (parts[7]) row.notes = parts[7].trim();
+      if (parts[1]) row.invoiceDate = safeFormatDate(toValidDate(parts[1]), 'yyyy-MM-dd');
+      if (parts[2]) row.dueDate = safeFormatDate(toValidDate(parts[2]), 'yyyy-MM-dd');
+      if (parts[3]) row.entityName = parts[3].trim();
+      if (parts[4]) row.totalAmount = parts[4].trim();
+      if (parts[5]) row.discount = parts[5].trim();
+      if (parts[6]) row.paidAmount = parts[6].trim();
+      if (parts[7]) row.bonus = parts[7].trim();
+      if (parts[8]) row.notes = parts[8].trim();
 
       // Recalculate validity
       const entity = entities.find(e => e.name.trim() === row.entityName);
       row.entityId = entity?.id;
       const total = parseFormattedNumber(row.totalAmount);
-      row.isValid = !!row.invoiceNumber && !!row.date && !!row.entityId && total > 0;
+      row.isValid = !!row.invoiceNumber && !!row.invoiceDate && !!row.entityId && total > 0;
       
       return row;
     });
@@ -203,19 +216,27 @@ export function MultiInvoiceEntry({
   }, [rows]);
 
   const handleSaveAll = async () => {
-    const validRows = rows.filter(r => r.isValid);
+    const validRows = rows.filter(r => r.isValid && r.saveStatus !== 'success');
     if (validRows.length === 0) {
-      toast.error('يرجى التأكد من صحة البيانات في الصفوف المدخلة (الرقم، التاريخ، المورد، المبلغ)');
+      toast.error('يرجى التأكد من صحة البيانات أو أن القوائم لم يتم حفظها مسبقاً');
       return;
     }
 
     setIsSaving(true);
-    let successCount = 0;
-    try {
-      const branchId = currentBranchId || 'main';
-      const userId = appUser?.userId || 'system';
+    const branchId = currentBranchId || 'main';
+    const userId = appUser?.userId || 'system';
 
-      for (const row of validRows) {
+    // Compression options
+    const compressionOptions = {
+      maxSizeMB: 0.8,
+      maxWidthOrHeight: 1920,
+      useWebWorker: true
+    };
+
+    const savePromises = validRows.map(async (row) => {
+      try {
+        setRows(prev => prev.map(r => r.id === row.id ? { ...r, saveStatus: 'saving', uploadProgress: 0 } : r));
+
         const entity = entities.find(e => e.id === row.entityId)!;
         const total = parseFormattedNumber(row.totalAmount);
         const discount = parseFormattedNumber(row.discount);
@@ -223,31 +244,42 @@ export function MultiInvoiceEntry({
         const net = total - discount;
         const remaining = net - paid;
 
-        // Upload images first if any
+        // 1. Process and Upload Images with compression
         let uploadedUrls: string[] = [];
         if (row.imageFiles && row.imageFiles.length > 0) {
-           for (let i = 0; i < row.imageFiles.length; i++) {
+          for (let i = 0; i < row.imageFiles.length; i++) {
+            let file = row.imageFiles[i];
+            
+            // Compress if it's an image
+            if (file.type.startsWith('image/')) {
               try {
-                const file = row.imageFiles[i];
-                const url = await firebaseService.uploadFileWithProgress('invoices', file, (percent) => {
-                   // Calculate overall progress for row: (completed_files + current_file_progress) / total_files
-                   const overallPercent = ((i * 100) + percent) / row.imageFiles!.length;
-                   setRows(prev => prev.map(r => r.id === row.id ? { ...r, uploadProgress: overallPercent } : r));
-                });
-                uploadedUrls.push(url);
-              } catch (uploadError) {
-                console.error(`Failed to upload file ${i} for invoice ${row.invoiceNumber}:`, uploadError);
-                // Continue with other files or fail? For now, we continue.
+                file = await imageCompression(file, compressionOptions);
+              } catch (compressError) {
+                console.error('Compression failed, using original file', compressError);
               }
-           }
-           setRows(prev => prev.map(r => r.id === row.id ? { ...r, uploadProgress: 100 } : r));
+            }
+
+            try {
+              const url = await firebaseService.uploadFileWithProgress('invoices', file, (percent) => {
+                const overallPercent = ((i * 100) + percent) / row.imageFiles!.length;
+                setRows(prev => prev.map(r => r.id === row.id ? { ...r, uploadProgress: overallPercent } : r));
+              });
+              uploadedUrls.push(url);
+            } catch (uploadError) {
+              console.error(`Upload failed for file ${i} in invoice ${row.invoiceNumber}`, uploadError);
+              toast.error(`فشل رفع صورة للفاتورة رقم ${row.invoiceNumber}، سيتم الحفظ بدونها`);
+            }
+          }
         }
 
+        // 2. Prepare Ledger Entry
         const newEntry: Omit<LedgerEntry, 'id'> = {
           accountId: entity.id!,
           accountName: entity.name,
           accountType: entity.type,
-          date: new Date(row.date),
+          date: new Date(row.invoiceDate),
+          invoiceDate: new Date(row.invoiceDate),
+          dueDate: new Date(row.dueDate),
           operationType: 'invoice',
           purchaseType: 'credit',
           invoiceNumber: row.invoiceNumber,
@@ -269,6 +301,7 @@ export function MultiInvoiceEntry({
           updatedAt: new Date()
         } as any;
 
+        // 3. Save to Firebase
         const addedId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
         
         if (addedId) {
@@ -277,7 +310,9 @@ export function MultiInvoiceEntry({
             type: 'invoice',
             category: 'invoice',
             amount: net,
-            date: new Date(row.date),
+            date: new Date(row.invoiceDate),
+            invoiceDate: new Date(row.invoiceDate),
+            dueDate: new Date(row.dueDate),
             description: `إدخال متعدد: ${entity.name} - ${row.invoiceNumber}`,
             entityId: entity.id!,
             entityName: entity.name,
@@ -296,20 +331,37 @@ export function MultiInvoiceEntry({
             updatedAt: new Date()
           });
 
-          successCount++;
+          setRows(prev => prev.map(r => r.id === row.id ? { ...r, saveStatus: 'success', uploadProgress: 100 } : r));
+          return { id: row.id, status: 'success' };
+        } else {
+          throw new Error('Failed to add document');
         }
+      } catch (error) {
+        console.error(`Row save failed for ${row.id}:`, error);
+        setRows(prev => prev.map(r => r.id === row.id ? { ...r, saveStatus: 'error', saveError: String(error) } : r));
+        return { id: row.id, status: 'error', error };
       }
+    });
 
+    const results = await Promise.allSettled(savePromises);
+    const successCount = results.filter(r => r.status === 'fulfilled').length;
+    
+    if (successCount > 0) {
       toast.success(`تم حفظ ${successCount} فاتورة بنجاح`);
-      onSuccess?.();
-      onOpenChange(false);
-      setRows([createEmptyRow()]);
-    } catch (error) {
-      console.error('Bulk save failed:', error);
-      toast.error('حدث خطأ أثناء الحفظ بالجملة');
-    } finally {
-      setIsSaving(false);
+      setTimeout(() => {
+        onSuccess?.();
+        // Only close if all succeeded or user manually closes
+        const hasErrors = results.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value.status === 'error'));
+        if (!hasErrors) {
+          onOpenChange(false);
+          setRows([createEmptyRow()]);
+        }
+      }, 1500);
+    } else {
+      toast.error('لم يتم حفظ أي فاتورة، يرجى التحقق من الأخطاء');
     }
+    
+    setIsSaving(false);
   };
 
   return (
@@ -344,8 +396,10 @@ export function MultiInvoiceEntry({
             <Table ref={tableRef}>
               <TableHeader className="bg-muted/50">
                 <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-right font-black w-10 text-center">الحالة</TableHead>
                   <TableHead className="text-right font-black w-32">رقم القائمة</TableHead>
-                  <TableHead className="text-right font-black w-40">التاريخ</TableHead>
+                  <TableHead className="text-right font-black w-32">تاريخ الفاتورة</TableHead>
+                  <TableHead className="text-right font-black w-32">تاريخ الاستحقاق</TableHead>
                   <TableHead className="text-right font-black w-60">المورد / الجهة</TableHead>
                   <TableHead className="text-right font-black w-32">المبلغ الكلي</TableHead>
                   <TableHead className="text-right font-black w-24">الخصم</TableHead>
@@ -364,11 +418,26 @@ export function MultiInvoiceEntry({
                   const paid = parseFormattedNumber(row.paidAmount);
                   const remaining = Math.max(0, total - discount - paid);
                   
-                  return (
-                    <TableRow key={row.id} className={`${!row.isValid && row.invoiceNumber ? 'bg-red-50/50' : ''} transition-colors group`}>
-                      <TableCell className="p-2">
+                   return (
+                    <TableRow key={row.id} className={`${row.saveStatus === 'success' ? 'bg-emerald-50/30' : !row.isValid && row.invoiceNumber ? 'bg-red-50/50' : ''} transition-colors group`}>
+                      <TableCell className="p-2 text-center">
+                        {row.saveStatus === 'saving' ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                            <span className="text-[8px] font-black text-primary">جاري...</span>
+                          </div>
+                        ) : row.saveStatus === 'success' ? (
+                          <CheckCircle2 className="h-5 w-5 text-emerald-500 mx-auto" />
+                        ) : row.saveStatus === 'error' ? (
+                          <AlertCircle className="h-5 w-5 text-rose-500 mx-auto" title={row.saveError} />
+                        ) : (
+                          <div className="w-5 h-5 border-2 border-dashed border-muted rounded-full mx-auto" />
+                        )}
+                      </TableCell>
+                      <TableCell className="p-2 text-right">
                         <Input 
                           value={row.invoiceNumber}
+                          disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
                           onChange={e => updateRow(row.id, 'invoiceNumber', e.target.value)}
                           onKeyDown={e => handleKeyDown(e, row.id, 'invoiceNumber')}
                           className="border-none bg-transparent h-9 text-xs font-mono font-bold focus:ring-1 focus:ring-primary/20"
@@ -376,18 +445,36 @@ export function MultiInvoiceEntry({
                         />
                       </TableCell>
                       <TableCell className="p-2">
-                        <Input 
-                          type="date"
-                          value={row.date}
-                          onChange={e => updateRow(row.id, 'date', e.target.value)}
-                          onKeyDown={e => handleKeyDown(e, row.id, 'date')}
-                          className="border-none bg-transparent h-9 text-[10px] focus:ring-1 focus:ring-primary/20"
-                        />
+                        <div className="relative">
+                          <CalendarDays className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground opacity-50" />
+                          <Input 
+                            type="date"
+                            value={row.invoiceDate}
+                            disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
+                            onChange={e => updateRow(row.id, 'invoiceDate', e.target.value)}
+                            onKeyDown={e => handleKeyDown(e, row.id, 'invoiceDate')}
+                            className="border-none bg-transparent h-9 pr-7 text-[10px] font-bold focus:ring-1 focus:ring-primary/20"
+                          />
+                        </div>
+                      </TableCell>
+                      <TableCell className="p-2">
+                         <div className="relative">
+                          <Clock className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-rose-400 opacity-50" />
+                          <Input 
+                            type="date"
+                            value={row.dueDate}
+                            disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
+                            onChange={e => updateRow(row.id, 'dueDate', e.target.value)}
+                            onKeyDown={e => handleKeyDown(e, row.id, 'dueDate')}
+                            className="border-none bg-transparent h-9 pr-7 text-[10px] font-bold text-rose-600 focus:ring-1 focus:ring-primary/20"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell className="p-2">
                         <div className="relative">
                           <Input 
                             value={row.entityName}
+                            disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
                             onChange={e => updateRow(row.id, 'entityName', e.target.value)}
                             onKeyDown={e => handleKeyDown(e, row.id, 'entityName')}
                             className={`border-none bg-transparent h-9 text-xs font-black focus:ring-1 focus:ring-primary/20 ${!row.entityId && row.entityName ? 'text-red-500' : ''}`}
@@ -401,6 +488,7 @@ export function MultiInvoiceEntry({
                       <TableCell className="p-2">
                         <Input 
                           value={row.totalAmount ? formatNumberWithCommas(parseFormattedNumber(row.totalAmount)) : ''}
+                          disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
                           onChange={e => updateRow(row.id, 'totalAmount', e.target.value)}
                           onKeyDown={e => handleKeyDown(e, row.id, 'totalAmount')}
                           className="border-none bg-transparent h-9 text-xs font-black text-left font-mono focus:ring-1 focus:ring-primary/20"
@@ -410,6 +498,7 @@ export function MultiInvoiceEntry({
                       <TableCell className="p-2">
                         <Input 
                           value={row.discount ? formatNumberWithCommas(parseFormattedNumber(row.discount)) : ''}
+                          disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
                           onChange={e => updateRow(row.id, 'discount', e.target.value)}
                           onKeyDown={e => handleKeyDown(e, row.id, 'discount')}
                           className="border-none bg-transparent h-9 text-xs font-bold text-red-600 text-left font-mono focus:ring-1 focus:ring-primary/20"
@@ -419,6 +508,7 @@ export function MultiInvoiceEntry({
                       <TableCell className="p-2">
                         <Input 
                           value={row.paidAmount ? formatNumberWithCommas(parseFormattedNumber(row.paidAmount)) : ''}
+                          disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
                           onChange={e => updateRow(row.id, 'paidAmount', e.target.value)}
                           onKeyDown={e => handleKeyDown(e, row.id, 'paidAmount')}
                           className="border-none bg-transparent h-9 text-xs font-black text-emerald-600 text-left font-mono focus:ring-1 focus:ring-primary/20"
@@ -481,6 +571,7 @@ export function MultiInvoiceEntry({
                       <TableCell className="p-2">
                         <Input 
                           value={row.bonus}
+                          disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
                           onChange={e => updateRow(row.id, 'bonus', e.target.value)}
                           onKeyDown={e => handleKeyDown(e, row.id, 'bonus')}
                           className="border-none bg-transparent h-9 text-[10px] font-bold focus:ring-1 focus:ring-primary/20"
@@ -490,6 +581,7 @@ export function MultiInvoiceEntry({
                       <TableCell className="p-2">
                         <Input 
                           value={row.notes}
+                          disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
                           onChange={e => updateRow(row.id, 'notes', e.target.value)}
                           onKeyDown={e => handleKeyDown(e, row.id, 'notes')}
                           className="border-none bg-transparent h-9 text-[10px] focus:ring-1 focus:ring-primary/20"
@@ -500,6 +592,7 @@ export function MultiInvoiceEntry({
                         <Button 
                           variant="ghost" 
                           size="icon" 
+                          disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
                           onClick={() => removeRow(row.id)}
                           className="h-8 w-8 text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                         >

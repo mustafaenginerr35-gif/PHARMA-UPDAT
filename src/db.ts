@@ -31,6 +31,7 @@ export interface Transaction {
   reason?: string;
   discount?: number;
   refundAmount?: number;
+  invoiceDate?: Date;
   dueDate?: Date;
   imageUrl?: string;
   imageUrls?: string[];
@@ -84,6 +85,7 @@ export interface LedgerEntry {
   purchaseType?: 'cash' | 'credit';
   invoiceNumber?: string;
   linkedInvoiceNumber?: string;
+  invoiceDate?: Date;
   amount: number;
   discount: number;
   bonus?: number;
