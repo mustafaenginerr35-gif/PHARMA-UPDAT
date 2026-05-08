@@ -28,7 +28,8 @@ import {
   ChevronRight,
   Download,
   FileSpreadsheet,
-  FileDown
+  FileDown,
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -37,6 +38,8 @@ import { safeFormatDate, formatIQD } from '../lib/formatters';
 import { LedgerEntry, Entity } from '../db';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { firebaseService } from '../services/firebaseService';
+import { toast } from 'sonner';
 
 interface InvoiceDetailsPageProps {
   invoice: LedgerEntry;
@@ -66,6 +69,8 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
   onUpdateImageUrls,
 }) => {
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
+  const [isUploading, setIsUploading] = React.useState(false);
+  const [uploadProgress, setUploadProgress] = React.useState(0);
 
   const images = React.useMemo(() => {
     const list = Array.isArray(invoice.imageUrls) ? invoice.imageUrls : [];
@@ -108,46 +113,106 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
     }
   };
 
-  const handleImageDelete = (index: number) => {
+  const handleImageDelete = async (index: number) => {
     if (onUpdateImageUrls && window.confirm('هل أنت متأكد من حذف هذه الصورة؟')) {
+      const urlToDelete = images[index];
+      if (urlToDelete.startsWith('http')) {
+        await firebaseService.deleteImage(urlToDelete);
+      }
       const updated = images.filter((_, i) => i !== index);
       onUpdateImageUrls(invoice, updated);
     }
   };
 
   const handleImageAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+    const files = Array.from(e.target.files || []) as File[];
     if (files.length > 0 && onUpdateImageUrls) {
-      const newBase64s: string[] = [];
-      for (const file of files) {
-        const reader = new FileReader();
-        const b64 = await new Promise<string>((resolve) => {
-          reader.onload = (event) => resolve(event.target?.result as string);
-          reader.readAsDataURL(file as any);
-        });
-        newBase64s.push(b64);
+      setIsUploading(true);
+      setUploadProgress(0);
+      try {
+        const newUrls: string[] = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const url = await firebaseService.uploadFileWithProgress('invoices', file, (percent) => {
+            const overall = ((i * 100) + percent) / files.length;
+            setUploadProgress(overall);
+          });
+          newUrls.push(url);
+        }
+        onUpdateImageUrls(invoice, [...images, ...newUrls]);
+        toast.success(`تم اختيار ورفع ${files.length} صور بنجاح`);
+      } catch (err) {
+        console.error('Upload failed:', err);
+        toast.error('فشل في رفع الصور');
+      } finally {
+        setIsUploading(false);
+        setUploadProgress(0);
       }
-      onUpdateImageUrls(invoice, [...images, ...newBase64s]);
     }
   };
 
   const handleImageReplace = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && onUpdateImageUrls) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
+      setIsUploading(true);
+      setUploadProgress(0);
+      try {
+        const oldUrl = images[index];
+        if (oldUrl.startsWith('http')) {
+          await firebaseService.deleteImage(oldUrl);
+        }
+        const url = await firebaseService.uploadFileWithProgress('invoices', file, setUploadProgress);
         const updated = [...images];
-        updated[index] = event.target?.result as string;
+        updated[index] = url;
         onUpdateImageUrls(invoice, updated);
-      };
-      reader.readAsDataURL(file);
+        toast.success('تم استبدال الصورة بنجاح');
+      } catch (err) {
+        console.error('Replace failed:', err);
+        toast.error('فشل في استبدال الصورة');
+      } finally {
+        setIsUploading(false);
+      }
+    }
+  };
+
+  const isPdf = (url: string) => {
+    return (url || '').toLowerCase().includes('.pdf') || (url || '').toLowerCase().includes('application%2fpdf');
+  };
+
+  const renderImageContent = (url: string, alt: string) => {
+    if (isPdf(url)) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full w-full bg-slate-100 gap-2">
+          <FileText className="h-10 w-10 text-rose-500" />
+          <span className="text-[10px] font-bold text-slate-500">ملف PDF</span>
+        </div>
+      );
+    }
+    return (
+      <img 
+        src={url} 
+        alt={alt} 
+        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" 
+        referrerPolicy="no-referrer" 
+      />
+    );
+  };
+
+  const handleFullView = (index: number) => {
+    const url = allImagesForLightbox[index];
+    if (isPdf(url)) {
+      window.open(url, '_blank');
+    } else {
+      setLightboxIndex(index);
     }
   };
 
   const downloadImage = (url: string, index: number) => {
     const link = document.createElement('a');
     link.href = url;
-    link.download = `invoice_${invoice.invoiceNumber}_image_${index + 1}.jpg`;
+    const extension = isPdf(url) ? 'pdf' : 'jpg';
+    link.download = `attachment-${invoice.invoiceNumber || 'file'}-${index + 1}.${extension}`;
+    link.target = "_blank";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -653,18 +718,13 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
                             <div key={index} className="space-y-2 border-b border-border/50 pb-4 last:border-0 last:pb-0">
                               <div 
                                 className="group relative rounded-xl overflow-hidden border border-border bg-muted cursor-pointer aspect-video" 
-                                onClick={() => setLightboxIndex(images.length + index)}
+                                onClick={() => handleFullView(images.length + index)}
                               >
-                                <img 
-                                  src={url} 
-                                  alt={`Receipt ${index + 1}`} 
-                                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" 
-                                  referrerPolicy="no-referrer" 
-                                />
+                                {renderImageContent(url, `Receipt ${index + 1}`)}
                                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                   <span className="text-white text-[10px] font-bold bg-black/50 px-3 py-1.5 rounded-full flex items-center gap-2 backdrop-blur-sm">
                                     <Maximize2 className="h-3 w-3" />
-                                    عرض بالحجم الكامل
+                                    {isPdf(url) ? 'فتح ملف PDF' : 'عرض بالحجم الكامل'}
                                   </span>
                                 </div>
                               </div>
@@ -704,11 +764,21 @@ export const InvoiceDetailsPage: React.FC<InvoiceDetailsPageProps> = ({
                     />
                     <Button 
                       variant="outline" 
-                      className="w-full h-11 border-dashed border-2 border-primary/20 text-primary font-black hover:bg-primary/5 gap-3 rounded-xl"
+                      className="w-full h-11 border-dashed border-2 border-primary/20 text-primary font-black hover:bg-primary/5 gap-3 rounded-xl disabled:opacity-50"
                       onClick={() => document.getElementById('add-images-input-detail')?.click()}
+                      disabled={isUploading}
                     >
-                      <Upload className="h-4 w-4" />
-                      إضافة المزيد من الصور
+                      {isUploading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          جاري الرفع... ({uploadProgress.toFixed(0)}%)
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4" />
+                          إضافة المزيد من الصور
+                        </>
+                      )}
                     </Button>
                   </div>
                </div>

@@ -20,6 +20,8 @@ export interface Transaction {
   profitPercentage?: number;
   date: Date;
   description: string;
+  statement?: string;
+  partyName?: string;
   notes?: string;
   entityId?: string;
   entityName?: string;

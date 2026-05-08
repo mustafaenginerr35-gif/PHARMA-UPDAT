@@ -51,6 +51,7 @@ import {
   Moon,
   Monitor,
   Gift,
+  ShoppingCart,
   Building2,
   Clock3,
   ScrollText,
@@ -180,6 +181,7 @@ import { EntityForm } from './components/EntityForm';
 import { SupplierAccountPage } from './components/SupplierAccountPage';
 import { BonusForm } from './components/BonusForm';
 import { InvoiceDetailsPage } from './components/InvoiceDetailsPage';
+import { FinancialPeriodReport } from './components/FinancialPeriodReport';
 import { EmployeesPage } from './components/EmployeesPage';
 import { EmployeeForm } from './components/EmployeeForm';
 import { AttendanceForm } from './components/AttendanceForm';
@@ -189,6 +191,7 @@ import { HistoricalMigrationPage } from './components/HistoricalMigrationPage';
 import { MedicineRequestsPage } from './components/MedicineRequestsPage';
 import { ExcelImportWizard } from './components/ExcelImportWizard';
 import { MultiInvoiceEntry } from './components/MultiInvoiceEntry';
+import { MultiPaymentEntry } from './components/MultiPaymentEntry';
 import { DataPersistenceService } from './services/dataPersistenceService';
 import { formatIQD, formatNumberWithCommas, parseFormattedNumber, safeFormatDate, toValidDate } from './lib/formatters';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
@@ -411,6 +414,8 @@ const EditInvoiceDialog = ({
 
 export default function App() {
   const { user: googleUser, isDriveLinked, loading: googleAuthLoading, linkDrive, unlinkDrive } = useGoogleAuth();
+  const [user, setUser] = useState(auth.currentUser);
+  const [appUser, setAppUser] = useState<AppUser | null>(null);
   
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('theme') as Theme) || 'dark');
 
@@ -489,6 +494,35 @@ export default function App() {
 
   const [currentBranchId, setCurrentBranchId] = useState<string | null>(localStorage.getItem('pharma-current-branch-id'));
 
+  const [deleteConfirmState, setDeleteConfirmState] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void;
+    isLoading?: boolean;
+    confirmText?: string;
+    cancelText?: string;
+  }>({
+    isOpen: false,
+    title: '',
+    description: '',
+    onConfirm: () => {},
+    isLoading: false
+  });
+
+  const triggerDelete = (title: string, description: string, onConfirm: () => void, confirmText = 'نعم، حذف', cancelText = 'إلغاء') => {
+    console.log("Delete triggered:", title);
+    setDeleteConfirmState({
+      isOpen: true,
+      title,
+      description,
+      onConfirm,
+      confirmText,
+      cancelText,
+      isLoading: false
+    });
+  };
+
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [reportTypeFilter, setReportTypeFilter] = useState<'all' | 'current' | 'historical'>(() => 
     (localStorage.getItem('pharma-report-filter') as 'all' | 'current' | 'historical') || 'all'
@@ -550,6 +584,7 @@ export default function App() {
   const entityActivitiesQuery = useMemo(() => [], []);
 
   // Firebase Real-time Queries
+  const { data: expiredDamagedLosses = [] } = useFirebaseQuery<ExpiredDamagedLoss>('expiredDamagedLosses');
   const { data: rawBranches = [] } = useFirebaseQuery<PharmacyBranch>('branches', branchesQuery);
   const { data: rawTransactions = [] } = useFirebaseQuery<Transaction>('transactions', transactionsQuery);
   const { data: rawEntities = [] } = useFirebaseQuery<Entity>('entities', entitiesQuery);
@@ -561,6 +596,16 @@ export default function App() {
   const { data: rawAllLedgerEntries = [] } = useFirebaseQuery<LedgerEntry>('ledgerEntries', ledgerEntriesQuery);
   const { data: rawHistoricalRecords = [] } = useFirebaseQuery<HistoricalRecord>('historicalRecords', historicalQuery);
   const { data: rawEntityActivities = [] } = useFirebaseQuery<EntityActivity>('entityActivities', entityActivitiesQuery);
+  const { data: deadlines = [] } = useFirebaseQuery<Deadline>('deadlines');
+  const { data: activationCodes = [] } = useFirebaseQuery<ActivationCode>('activationCodes');
+  const { data: activationRequests = [] } = useFirebaseQuery<ActivationRequest>('activationRequests');
+  const { data: recoveryRequests = [] } = useFirebaseQuery<RecoveryRequest>('recoveryRequests');
+  
+  const announcementsConstraints = useMemo(() => [where('isActive', '==', 1)], []);
+  const readAnnouncementsConstraints = useMemo(() => [where('userId', '==', user?.uid || 'none')], [user?.uid]);
+
+  const { data: announcements = [] } = useFirebaseQuery<Announcement>('announcements', announcementsConstraints);
+  const { data: readAnnouncementsData = [] } = useFirebaseQuery<AnnouncementRead>('announcementReads', readAnnouncementsConstraints);
 
   // Client-side sorting to avoid Firestore Index requirements
   const branches = useMemo(() => {
@@ -574,13 +619,15 @@ export default function App() {
   }, [rawBranches]);
 
   const transactions = useMemo(() => {
-    return [...rawTransactions].sort((a, b) => {
-      const da = toValidDate(a.date || a.createdAt || Date.now());
-      const db = toValidDate(b.date || b.createdAt || Date.now());
-      const ta = isNaN(da.getTime()) ? 0 : da.getTime();
-      const tb = isNaN(db.getTime()) ? 0 : db.getTime();
-      return tb - ta;
-    });
+    return [...rawTransactions]
+      .filter(tx => !tx.isDeleted && !tx.deletedAt)
+      .sort((a, b) => {
+        const da = toValidDate(a.date || a.createdAt || Date.now());
+        const db = toValidDate(b.date || b.createdAt || Date.now());
+        const ta = isNaN(da.getTime()) ? 0 : da.getTime();
+        const tb = isNaN(db.getTime()) ? 0 : db.getTime();
+        return tb - ta;
+      });
   }, [rawTransactions]);
   const entities = useMemo(() => [...rawEntities].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')), [rawEntities]);
   const entityActivities = useMemo(() => {
@@ -673,9 +720,6 @@ export default function App() {
     });
   }, [rawHistoricalRecords]);
 
-  const [user, setUser] = useState(auth.currentUser);
-  const [appUser, setAppUser] = useState<AppUser | null>(null);
-
   useEffect(() => {
     // Check local auth for demo mode first
     const isDocAuth = localStorage.getItem('pharma-is-authenticated') === 'true';
@@ -730,6 +774,29 @@ export default function App() {
     // We rely on Firestore source of truth now. 
     // Orphaned records from local storage are ignored for now to ensure data integrity in the cloud.
   }, [currentBranchId, branches.length]);
+  // Debug logs for collections
+  useEffect(() => {
+    const collections = {
+      transactions: transactions.length,
+      entities: entities.length,
+      ledgerEntries: allLedgerEntries.length,
+      historicalRecords: historicalRecords.length,
+      customerDebts: customerDebts.length,
+      employees: employees.length,
+      attendance: employeeAttendance.length,
+      expiredLosses: expiredDamagedLosses.length,
+      branches: branches.length
+    };
+    
+    console.log("[DataSync] Collection counts:", collections);
+    
+    Object.entries(collections).forEach(([name, count]) => {
+      if (count === 0) {
+        console.warn(`[DataSync] Collection '${name}' is empty. Check if Firestore has data or if rules allow reading.`);
+      }
+    });
+  }, [transactions.length, entities.length, allLedgerEntries.length, historicalRecords.length, customerDebts.length, employees.length, employeeAttendance.length, expiredDamagedLosses.length, branches.length]);
+
   const userPermissions = useMemo(() => {
     if (!appUser) return { canManageBranches: false, canViewReports: false, canEditTransactions: false };
     const isAdmin = appUser.role === 'admin';
@@ -776,6 +843,7 @@ export default function App() {
   const [isAddInvoiceOpen, setIsAddInvoiceOpen] = useState(false);
   const [isExcelImportOpen, setIsExcelImportOpen] = useState(false);
   const [isMultiEntryOpen, setIsMultiEntryOpen] = useState(false);
+  const [isMultiPaymentOpen, setIsMultiPaymentOpen] = useState(false);
   const [isAddPaymentOpen, setIsAddPaymentOpen] = useState(false);
   const [isEditEntityOpen, setIsEditEntityOpen] = useState(false);
   const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
@@ -861,12 +929,6 @@ export default function App() {
   const [authAccessCode, setAuthAccessCode] = useState('');
   const [authStep, setAuthStep] = useState<'register' | 'waiting' | 'setup-password' | 'login-password' | 'forgot-password' | 'security-reset' | 'recovery-request' | 'access-code' | 'authenticated'>('access-code');
 
-  const { data: deadlines = [] } = useFirebaseQuery<Deadline>('deadlines');
-  const { data: activationCodes = [] } = useFirebaseQuery<ActivationCode>('activationCodes');
-  const { data: activationRequests = [] } = useFirebaseQuery<ActivationRequest>('activationRequests');
-  const { data: recoveryRequests = [] } = useFirebaseQuery<RecoveryRequest>('recoveryRequests');
-  const { data: expiredDamagedLosses = [] } = useFirebaseQuery<ExpiredDamagedLoss>('expiredDamagedLosses');
-
   const [isEditInvoiceOpen, setIsEditInvoiceOpen] = useState(false);
   const [isDeleteInvoiceConfirmOpen, setIsDeleteInvoiceConfirmOpen] = useState(false);
   const [isRefundInvoiceOpen, setIsRefundInvoiceOpen] = useState(false);
@@ -876,12 +938,6 @@ export default function App() {
   const [isAddCodeOpen, setIsAddCodeOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   
-  const announcementsConstraints = useMemo(() => [where('isActive', '==', 1)], []);
-  const readAnnouncementsConstraints = useMemo(() => [where('userId', '==', user?.uid || 'none')], [user?.uid]);
-
-  const { data: announcements = [] } = useFirebaseQuery<Announcement>('announcements', announcementsConstraints);
-  const { data: readAnnouncementsData = [] } = useFirebaseQuery<AnnouncementRead>('announcementReads', readAnnouncementsConstraints);
-
   const [isPublishingAnnouncement, setIsPublishingAnnouncement] = useState(false);
   const [activeAnnouncement, setActiveAnnouncement] = useState<Announcement | null>(null);
   const [isAnnouncementOpen, setIsAnnouncementOpen] = useState(false);
@@ -998,29 +1054,32 @@ export default function App() {
     const today = startOfDay(new Date());
     const monthStart = startOfMonth(new Date());
     
+    // Helper to safely get date
+    const getDate = (d: any) => toValidDate(d);
+
     // Daily revenue (Income today)
     const dailyRevenue = transactions
-      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && startOfDay(new Date(tx.date)).getTime() === today.getTime())
-      .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount || 0), 0);
+      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && startOfDay(getDate(tx.date)).getTime() === today.getTime())
+      .reduce((acc, tx) => acc + Number(tx.saleAmount || tx.amount || 0), 0);
 
     // Monthly stats
     const monthlyRevenue = transactions
-      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount || 0), 0);
+      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && getDate(tx.date) >= monthStart)
+      .reduce((acc, tx) => acc + Number(tx.saleAmount || tx.amount || 0), 0);
 
     // GROSS Profit from sales this month
     const monthlyGrossProfit = transactions
-      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + (tx.profitAmount || tx.netProfit || 0), 0);
+      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && getDate(tx.date) >= monthStart)
+      .reduce((acc, tx) => acc + Number(tx.profitAmount || tx.netProfit || 0), 0);
 
     const monthlySalary = employeeAttendance
-      .filter(record => (!currentBranchId || record.branchId === currentBranchId) && new Date(record.date) >= monthStart)
-      .reduce((acc, record) => acc + record.dailyWage, 0);
+      .filter(record => (!currentBranchId || record.branchId === currentBranchId) && getDate(record.date) >= monthStart)
+      .reduce((acc, record) => acc + Number(record.dailyWage || 0), 0);
 
     // Monthly Expense
     const monthlyExpense = transactions
-      .filter(tx => (tx.type === 'expense' || tx.type === 'invoice' || tx.type === 'payment') && (!currentBranchId || tx.branchId === currentBranchId) && new Date(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + (tx.amount || 0), 0) + monthlySalary;
+      .filter(tx => tx.type === 'expense' && (!currentBranchId || tx.branchId === currentBranchId) && getDate(tx.date) >= monthStart)
+      .reduce((acc, tx) => acc + Number(tx.amount || 0), 0) + monthlySalary;
 
     // Net Profit (Monthly) = Gross Profit from Sales - Expenses
     const netProfit = monthlyGrossProfit - monthlyExpense;
@@ -1029,7 +1088,7 @@ export default function App() {
     // Supplier Dues
     const supplierDues = entities
       .filter(e => !currentBranchId || e.branchId === currentBranchId)
-      .reduce((acc, e) => acc + (e.balance || 0), 0);
+      .reduce((acc, e) => acc + Number(e.balance || 0), 0);
 
     // Due InvoicesCount
     const dueInvoicesCount = (allLedgerEntries || [])
@@ -1042,26 +1101,26 @@ export default function App() {
     const showHistorical = reportTypeFilter === 'all' || reportTypeFilter === 'historical';
     const showCurrent = reportTypeFilter === 'all' || reportTypeFilter === 'current';
 
-    const histSales = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalSales || 0), 0) : 0;
-    const histProfits = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalProfits || 0) + (r.retainedEarnings || 0), 0) : 0;
-    const histExpenses = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalExpenses || 0) + (r.accumulatedExpenses || 0), 0) : 0;
-    const histDues = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + (r.totalDebtOwed || 0) + (r.officeDebts || 0) + (r.warehouseDebts || 0), 0) : 0;
+    const histSales = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalSales || 0), 0) : 0;
+    const histProfits = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalProfits || 0) + Number(r.retainedEarnings || 0), 0) : 0;
+    const histExpenses = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalExpenses || 0) + Number(r.accumulatedExpenses || 0), 0) : 0;
+    const histDues = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalDebtOwed || 0) + Number(r.officeDebts || 0) + Number(r.warehouseDebts || 0), 0) : 0;
 
-    const currentRevenue = showCurrent ? bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + (t.saleAmount || t.amount || 0), 0) : 0;
+    const currentRevenue = showCurrent ? bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.saleAmount || t.amount || 0), 0) : 0;
     const totalRevenue = currentRevenue + histSales;
     
     // Calculate total losses from expired/damaged items
     const totalLossesAmount = showCurrent ? expiredDamagedLosses
       .filter(l => !currentBranchId || l.branchId === currentBranchId)
-      .reduce((acc, l) => acc + (l.totalLoss || 0), 0) : 0;
+      .reduce((acc, l) => acc + Number(l.totalLoss || 0), 0) : 0;
 
-    const currentExpense = showCurrent ? (bTx.filter(t => t.type === 'expense' || t.type === 'invoice' || t.type === 'payment').reduce((acc, t) => acc + (t.amount || 0), 0) + 
-      employeeAttendance.filter(record => !currentBranchId || record.branchId === currentBranchId).reduce((acc, record) => acc + record.dailyWage, 0) + totalLossesAmount) : 0;
+    const currentExpense = showCurrent ? (bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + Number(t.amount || 0), 0) + 
+      employeeAttendance.filter(record => !currentBranchId || record.branchId === currentBranchId).reduce((acc, record) => acc + Number(record.dailyWage || 0), 0) + totalLossesAmount) : 0;
     
     const totalExpense = currentExpense + histExpenses;
     
     // Total Gross Profit from transactions
-    const currentGrossProfit = showCurrent ? bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0) : 0;
+    const currentGrossProfit = showCurrent ? bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.profitAmount || t.netProfit || 0), 0) : 0;
     const totalGrossProfit = currentGrossProfit + histProfits;
     
     // TOTAL Net Profit = Total Gross Profit - Total Expenses
@@ -1087,6 +1146,9 @@ export default function App() {
 
   const [reportsMonth, setReportsMonth] = useState(new Date().getMonth());
   const [reportsYear, setReportsYear] = useState(new Date().getFullYear());
+  const [reportsSupplierId, setReportsSupplierId] = useState<string>('all');
+  const [reportsSupplierType, setReportsSupplierType] = useState<'all' | 'office' | 'warehouse'>('all');
+  const [reportSubTab, setReportSubTab] = useState<'monthly' | 'period'>('monthly');
 
   // Aggregate stats for ALL months in the selected year for the table and charts
   const monthlyTimelineData = useMemo(() => {
@@ -1099,11 +1161,23 @@ export default function App() {
       const mEnd = endOfMonth(mStart);
       
       // Current data
-      const mTx = showCurrent ? transactions.filter(t => (!currentBranchId || t.branchId === currentBranchId) && new Date(t.date) >= mStart && new Date(t.date) <= mEnd) : [];
-      const mLosses = showCurrent ? expiredDamagedLosses.filter(l => (!currentBranchId || l.branchId === currentBranchId) && new Date(l.date) >= mStart && new Date(l.date) <= mEnd) : [];
-      const mInvoices = showCurrent ? (allLedgerEntries?.filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'invoice' && new Date(e.date) >= mStart && new Date(e.date) <= mEnd) || []) : [];
-      const mPayments = showCurrent ? (allLedgerEntries?.filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'payment' && new Date(e.date) >= mStart && new Date(e.date) <= mEnd) || []) : [];
-      const mSalaries = showCurrent ? (employeeAttendance.filter(r => (!currentBranchId || r.branchId === currentBranchId) && new Date(r.date) >= mStart && new Date(r.date) <= mEnd).reduce((acc, r) => acc + r.dailyWage, 0)) : 0;
+      const mTx = showCurrent ? transactions.filter(t => (!currentBranchId || t.branchId === currentBranchId) && toValidDate(t.date) >= mStart && toValidDate(t.date) <= mEnd) : [];
+      const mLosses = showCurrent ? expiredDamagedLosses.filter(l => (!currentBranchId || l.branchId === currentBranchId) && toValidDate(l.date) >= mStart && toValidDate(l.date) <= mEnd) : [];
+      const mInvoices = showCurrent ? (allLedgerEntries?.filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'invoice' && toValidDate(e.date) >= mStart && toValidDate(e.date) <= mEnd) || []) : [];
+      
+      // Filter invoices by supplier type and supplier ID if needed
+      const filteredMInvoices = mInvoices.filter(inv => {
+        if (reportsSupplierId !== 'all' && inv.accountId !== reportsSupplierId) return false;
+        if (reportsSupplierType !== 'all') {
+            const entity = entities.find(e => e.id === inv.accountId);
+            if (reportsSupplierType === 'office' && entity?.type !== 'office') return false;
+            if (reportsSupplierType === 'warehouse' && entity?.type !== 'warehouse') return false;
+        }
+        return true;
+      });
+
+      const mPayments = showCurrent ? (allLedgerEntries?.filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'payment' && toValidDate(e.date) >= mStart && toValidDate(e.date) <= mEnd) || []) : [];
+      const mSalaries = showCurrent ? (employeeAttendance.filter(r => (!currentBranchId || r.branchId === currentBranchId) && toValidDate(r.date) >= mStart && toValidDate(r.date) <= mEnd).reduce((acc, r) => acc + Number(r.dailyWage || 0), 0)) : 0;
 
       // Historical data (Monthly summaries matching this year and month)
       const hSummaries = showHistorical ? historicalRecords.filter(r => 
@@ -1117,25 +1191,25 @@ export default function App() {
       const hSingleEntries = showHistorical ? historicalRecords.filter(r => 
         (!currentBranchId || r.branchId === currentBranchId) && 
         r.type === 'single_entry' && 
-        r.date && new Date(r.date) >= mStart && new Date(r.date) <= mEnd
+        r.date && toValidDate(r.date) >= mStart && toValidDate(r.date) <= mEnd
       ) : [];
 
-      const currentRevenue = mTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.saleAmount || t.amount), 0);
-      const histMonthlyRevenue = hSummaries.reduce((acc, h) => acc + (h.totalRevenueCash || 0) + (h.totalRevenueCredit || 0), 0);
-      const histSingleRevenue = hSingleEntries.filter(e => e.entryType === 'revenue').reduce((acc, e) => acc + (e.amount || 0), 0);
+      const currentRevenue = mTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.saleAmount || t.amount || 0), 0);
+      const histMonthlyRevenue = hSummaries.reduce((acc, h) => acc + Number(h.totalRevenueCash || 0) + Number(h.totalRevenueCredit || 0), 0);
+      const histSingleRevenue = hSingleEntries.filter(e => e.entryType === 'revenue').reduce((acc, e) => acc + Number(e.amount || 0), 0);
 
-      const currentProfit = mTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0);
-      const histMonthlyProfit = hSummaries.reduce((acc, h) => acc + (h.totalProfits || 0), 0);
-      const histSingleProfit = histSingleRevenue; // Simplified assuming single revenue is pure profit for summary? Or maybe we don't have cost for historical singles.
+      const currentProfit = mTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.profitAmount || t.netProfit || 0), 0);
+      const histMonthlyProfit = hSummaries.reduce((acc, h) => acc + Number(h.totalProfits || 0), 0);
+      const histSingleProfit = histSingleRevenue; // Simplified
 
-      const currentLossAmount = mLosses.reduce((acc, l) => acc + l.totalLoss, 0);
-      const currentExpenses = mTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0) + mSalaries + currentLossAmount;
-      const histMonthlyExpenses = hSummaries.reduce((acc, h) => acc + (h.totalExpenses || 0), 0);
-      const histSingleExpenses = hSingleEntries.filter(e => e.entryType === 'expense').reduce((acc, e) => acc + (e.amount || 0), 0);
+      const currentLossAmount = mLosses.reduce((acc, l) => acc + Number(l.totalLoss || 0), 0);
+      const currentExpenses = mTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + Number(t.amount || 0), 0) + mSalaries + currentLossAmount;
+      const histMonthlyExpenses = hSummaries.reduce((acc, h) => acc + Number(h.totalExpenses || 0), 0);
+      const histSingleExpenses = hSingleEntries.filter(e => e.entryType === 'expense').reduce((acc, e) => acc + Number(e.amount || 0), 0);
 
-      const invoiceTotal = mInvoices.reduce((acc, i) => acc + i.amount, 0) + hSummaries.reduce((acc, h) => acc + (h.totalPurchases || 0), 0);
-      const paymentTotal = mPayments.reduce((acc, p) => acc + p.amount, 0) + hSummaries.reduce((acc, h) => acc + (h.totalPaidDebt || 0), 0);
-      const remainingDebt = mTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.remainingAmount || 0), 0) + hSummaries.reduce((acc, h) => acc + (h.totalRevenueCredit || 0), 0);
+      const invoiceTotal = filteredMInvoices.reduce((acc, i) => acc + Number(i.amount || 0), 0) + hSummaries.reduce((acc, h) => acc + Number(h.totalPurchases || 0), 0);
+      const paymentTotal = mPayments.reduce((acc, p) => acc + Number(p.amount || 0), 0) + hSummaries.reduce((acc, h) => acc + Number(h.totalPaidDebt || 0), 0);
+      const remainingDebt = mTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.remainingAmount || 0), 0) + hSummaries.reduce((acc, h) => acc + Number(h.totalRevenueCredit || 0), 0);
 
       data.push({
         month: m + 1,
@@ -1152,7 +1226,7 @@ export default function App() {
       });
     }
     return data;
-  }, [transactions, allLedgerEntries, employeeAttendance, historicalRecords, reportTypeFilter, reportsYear, currentBranchId]);
+  }, [transactions, entities, allLedgerEntries, employeeAttendance, historicalRecords, expiredDamagedLosses, reportTypeFilter, reportsYear, reportsSupplierId, reportsSupplierType, currentBranchId]);
 
   // Selected month vs Previous month comparison
   const monthlyComparison = useMemo(() => {
@@ -1183,6 +1257,48 @@ export default function App() {
       }
     };
   }, [monthlyTimelineData, reportsMonth, reportsYear]);
+  
+  const supplierPurchaseStats = useMemo(() => {
+    if (reportsSupplierId === 'all') return null;
+    
+    const mStart = startOfMonth(new Date(reportsYear, reportsMonth));
+    const mEnd = endOfMonth(mStart);
+    
+    const mInvoices = allLedgerEntries?.filter(e => 
+      e.accountId === reportsSupplierId && 
+      e.operationType === 'invoice' && 
+      toValidDate(e.date) >= mStart && 
+      toValidDate(e.date) <= mEnd
+    ) || [];
+    
+    // For payments, we might want to check payments linked to these invoices or just payments to this supplier in this month
+    const mPayments = allLedgerEntries?.filter(e => 
+      e.accountId === reportsSupplierId && 
+      e.operationType === 'payment' && 
+      toValidDate(e.date) >= mStart && 
+      toValidDate(e.date) <= mEnd
+    ) || [];
+
+    const totalPurchases = mInvoices.reduce((acc, i) => acc + Number(i.amount || 0), 0);
+    const totalPaid = mPayments.reduce((acc, p) => acc + Number(p.amount || 0), 0);
+    const count = mInvoices.length;
+    
+    const highestInvoice = mInvoices.length > 0 ? Math.max(...mInvoices.map(i => Number(i.amount || 0))) : 0;
+    const lastInvoice = mInvoices.length > 0 ? mInvoices.sort((a,b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime())[0] : null;
+    
+    const entity = entities.find(e => e.id === reportsSupplierId);
+    
+    return {
+      totalPurchases,
+      totalPaid,
+      totalRemaining: totalPurchases - totalPaid,
+      count,
+      highestInvoice,
+      lastInvoice,
+      entity,
+      invoices: mInvoices
+    };
+  }, [allLedgerEntries, reportsSupplierId, reportsMonth, reportsYear, entities]);
 
   const branchComparison = useMemo(() => {
     if (branches.length === 0) return [];
@@ -1191,10 +1307,10 @@ export default function App() {
       const bTx = transactions.filter(t => t.branchId === branch.id);
       const bEntities = entities.filter(e => e.branchId === branch.id);
       
-      const revenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.saleAmount || t.amount), 0);
-      const grossProfit = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0);
-      const expense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-      const dues = bEntities.reduce((acc, e) => acc + e.balance, 0);
+      const revenue = bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.saleAmount || t.amount || 0), 0);
+      const grossProfit = bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.profitAmount || t.netProfit || 0), 0);
+      const expense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + Number(t.amount || 0), 0);
+      const dues = bEntities.reduce((acc, e) => acc + Number(e.balance || 0), 0);
       
       return {
         id: branch.id,
@@ -1215,20 +1331,20 @@ export default function App() {
 
     return last7Days.map(dateStr => {
       const dayIncome = transactions
-        .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
-        .reduce((acc, tx) => acc + (tx.saleAmount || tx.amount || 0), 0);
+        .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(toValidDate(tx.date), 'yyyy-MM-dd') === dateStr)
+        .reduce((acc, tx) => acc + Number(tx.saleAmount || tx.amount || 0), 0);
       
       const dayGrossProfit = transactions
-        .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
-        .reduce((acc, tx) => acc + (tx.profitAmount || tx.netProfit || 0), 0);
+        .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(toValidDate(tx.date), 'yyyy-MM-dd') === dateStr)
+        .reduce((acc, tx) => acc + Number(tx.profitAmount || tx.netProfit || 0), 0);
       
       const daySalary = employeeAttendance
-        .filter(record => (!currentBranchId || record.branchId === currentBranchId) && safeFormatDate(new Date(record.date), 'yyyy-MM-dd') === dateStr)
-        .reduce((acc, record) => acc + record.dailyWage, 0);
+        .filter(record => (!currentBranchId || record.branchId === currentBranchId) && safeFormatDate(toValidDate(record.date), 'yyyy-MM-dd') === dateStr)
+        .reduce((acc, record) => acc + Number(record.dailyWage || 0), 0);
       
       const dayExpense = transactions
-        .filter(tx => (tx.type === 'expense' || tx.type === 'invoice' || tx.type === 'payment') && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(new Date(tx.date), 'yyyy-MM-dd') === dateStr)
-        .reduce((acc, tx) => acc + (tx.amount || 0), 0) + daySalary;
+        .filter(tx => tx.type === 'expense' && (!currentBranchId || tx.branchId === currentBranchId) && safeFormatDate(toValidDate(tx.date), 'yyyy-MM-dd') === dateStr)
+        .reduce((acc, tx) => acc + Number(tx.amount || 0), 0) + daySalary;
 
       return {
         name: safeFormatDate(new Date(dateStr), 'EEE'),
@@ -1499,12 +1615,51 @@ export default function App() {
   };
 
   const handleDeleteEmployee = async (id: string) => {
-    try {
-      await firebaseService.deleteDocument('employees', id);
-      toast.success('تم حذف الموظف');
-    } catch (error) {
-      console.error(error);
-      toast.error('فشل في الحذف');
+    const employee = employees.find(e => e.id === id);
+    const attendanceCount = rawEmployeeAttendance.filter(a => a.employeeId === id).length;
+    
+    if (attendanceCount > 0) {
+      triggerDelete(
+        `حذف موظف: ${employee?.name}`,
+        `هذا الموظف لديه ${attendanceCount} سجل حضور. هل تريد حذفه نهائياً مع كافة سجلاته؟ لا يمكن التراجع.`,
+        async () => {
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+          try {
+            console.log("Deleting employee and attendance:", id);
+            await firebaseService.deleteDocument('employees', id);
+            const attendance = rawEmployeeAttendance.filter(a => a.employeeId === id);
+            for (const att of attendance) {
+              if (att.id) await firebaseService.deleteDocument('employeeAttendance', att.id);
+            }
+            console.log("Deleted successfully: employee", id);
+            setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+            toast.success('تم حذف الموظف وسجلاته بنجاح');
+          } catch (error) {
+            console.error(error);
+            setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+            toast.error('فشل في الحذف');
+          }
+        }
+      );
+    } else {
+      triggerDelete(
+        'تأكيد الحذف',
+        `هل أنت متأكد من حذف الموظف ${employee?.name}؟`,
+        async () => {
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+          try {
+            console.log("Deleting employee:", id);
+            await firebaseService.deleteDocument('employees', id);
+            console.log("Deleted successfully: employee", id);
+            setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+            toast.success('تم حذف الموظف');
+          } catch (error) {
+            console.error(error);
+            setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+            toast.error('فشل في الحذف');
+          }
+        }
+      );
     }
   };
 
@@ -1540,13 +1695,24 @@ export default function App() {
   };
 
   const handleDeleteAttendance = async (id: string) => {
-    try {
-      await firebaseService.deleteDocument('employeeAttendance', id);
-      toast.success('تم حذف سجل الحضور');
-    } catch (error) {
-      console.error(error);
-      toast.error('فشل في الحذف');
-    }
+    triggerDelete(
+      'حذف سجل الحضور',
+      'هل أنت متأكد من حذف هذا السجل؟ لا يمكن التراجع عن هذه العملية.',
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting attendance:", id);
+          await firebaseService.deleteDocument('employeeAttendance', id);
+          console.log("Deleted successfully: attendance", id);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف سجل الحضور');
+        } catch (error) {
+          console.error(error);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('فشل في الحذف');
+        }
+      }
+    );
   };
 
   const handleAddBranch = async (data: Partial<PharmacyBranch>) => {
@@ -1605,15 +1771,26 @@ export default function App() {
   };
 
   const handleDeleteBranch = async (id: string) => {
-    try {
-      await firebaseService.deleteDocument('branches', id);
-      // Optional: Cascade delete or leave orphaned (local DB usually safe to leave but better to clean)
-      if (currentBranchId === id) setCurrentBranchId(null);
-      toast.success('تم حذف الفرع نهائياً');
-    } catch (error) {
-      console.error(error);
-      toast.error('فشل في الحذف');
-    }
+    const branch = rawBranches.find(b => b.id === id);
+    triggerDelete(
+      'حذف فرع',
+      `هل أنت متأكد من حذف فرع ${branch?.name || id}؟ سيتم حذف كافة البيانات المرتبطة به نهائياً.`,
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting branch:", id);
+          await firebaseService.deleteDocument('branches', id);
+          if (currentBranchId === id) setCurrentBranchId(null);
+          console.log("Deleted successfully: branch", id);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف الفرع نهائياً');
+        } catch (error) {
+          console.error("Error deleting branch:", error);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('فشل في الحذف');
+        }
+      }
+    );
   };
 
   const handleAddInvoice = async (data: any) => {
@@ -2024,24 +2201,187 @@ export default function App() {
     }
   };
 
-  const handleDeleteInvoice = async () => {
-    if (!viewingInvoice?.id || !selectedEntity?.id) return;
+  const handleDeleteInvoice = async (invoiceToDel?: LedgerEntry) => {
+    const inv = invoiceToDel || viewingInvoice;
+    if (!inv?.id || !selectedEntity?.id) return;
     
-    try {
-      const netAmount = viewingInvoice.netAmount;
-      await firebaseService.deleteDocument('ledgerEntries', viewingInvoice.id);
-      await firebaseService.updateDocument('entities', selectedEntity.id, {
-        balance: selectedEntity.balance - netAmount,
-        totalInvoices: Math.max(0, selectedEntity.totalInvoices - 1)
-      });
-      
-      setIsDeleteInvoiceConfirmOpen(false);
-      setViewingInvoice(null);
-      toast.success('تم حذف الفاتورة بنجاح');
-    } catch (err) {
-      console.error(err);
-      toast.error('حدث خطأ أثناء حذف الفاتورة');
-    }
+    const isInvoice = inv.operationType === 'invoice';
+    const amountLabel = isInvoice ? inv.netAmount : inv.paidAmount;
+
+    triggerDelete(
+      `حذف ${isInvoice ? 'الفاتورة' : 'العملية'}`,
+      `هل أنت متأكد من حذف ${isInvoice ? 'الفاتورة رقم ' + inv.invoiceNumber : 'هذا الوصل'}؟ بمبلغ ${formatIQD(amountLabel)}. سيتم تعديل رصيد المورد تلقائياً.`,
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting ledger entry:", inv.id);
+          const netAmount = inv.netAmount;
+          const paidAmount = inv.paidAmount;
+          const remaining = inv.remainingAmount;
+
+          await firebaseService.deleteDocument('ledgerEntries', inv.id!);
+          
+          // Also delete associated images from storage
+          if (inv.imageUrls && Array.isArray(inv.imageUrls)) {
+            for (const url of inv.imageUrls) {
+              if (url.startsWith('http')) {
+                try {
+                  await firebaseService.deleteImage(url);
+                } catch (e) {
+                  console.warn('Failed to delete image from storage:', url, e);
+                }
+              }
+            }
+          }
+          if (inv.imageUrl && typeof inv.imageUrl === 'string' && inv.imageUrl.startsWith('http')) {
+            try {
+              await firebaseService.deleteImage(inv.imageUrl);
+            } catch (e) {
+              console.warn('Failed to delete single image from storage:', inv.imageUrl, e);
+            }
+          }
+          
+          // Update entity balance logic
+          // If invoice deleted: balance decreases by remaining amount (debt removed)
+          // If payment deleted: balance increases by paid amount (payment reversed)
+          const balanceAdjustment = isInvoice ? -remaining : paidAmount;
+          
+          await firebaseService.updateDocument('entities', selectedEntity.id!, {
+            balance: (selectedEntity.balance || 0) + balanceAdjustment,
+            totalInvoices: isInvoice ? Math.max(0, (selectedEntity.totalInvoices || 0) - 1) : (selectedEntity.totalInvoices || 0)
+          });
+          
+          // Add activity
+          await firebaseService.addDocument('entityActivities', {
+            entityId: selectedEntity.id!,
+            type: isInvoice ? 'delete_invoice' : 'delete_payment',
+            action: `حذف ${isInvoice ? 'فاتورة' : 'وصل تسديد'}`,
+            details: `المبلغ: ${formatIQD(isInvoice ? netAmount : paidAmount)}`,
+            performedBy: appUser?.username || 'user',
+            createdAt: new Date(),
+            ownerId: appUser?.userId || 'demo-user',
+            branchId: currentBranchId || undefined
+          });
+
+          console.log("Deleted successfully: ledgerEntry", inv.id);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          setIsDeleteInvoiceConfirmOpen(false);
+          setViewingInvoice(null);
+          toast.success('تم الحذف وتحديث الرصيد بنجاح');
+        } catch (err) {
+          console.error("Error deleting ledger entry:", err);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('حدث خطأ أثناء الحذف');
+        }
+      }
+    );
+  };
+
+  const handleDeleteTransaction = async (tx: Transaction) => {
+    const isExpense = tx.type === 'expense';
+    const label = tx.type === 'income' ? (tx.customerName || tx.description || 'إيراد') : (tx.description || tx.category || 'مصروف');
+    
+    console.log(`[DeleteAudit] Attempting to delete ${isExpense ? 'expense' : 'income'}:`, tx.id);
+    
+    triggerDelete(
+      `حذف ${isExpense ? 'المصروف' : 'الإيراد'}`,
+      `هل أنت متأكد من حذف العملية: ${label}؟ بمبلغ ${formatIQD(tx.amount)}`,
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log(`[DeleteAudit] Confirming deletion of ID: ${tx.id}`);
+          if (!tx.id) throw new Error("ID السجل غير موجود");
+          
+          await firebaseService.deleteDocument('transactions', tx.id);
+          
+          console.log(`[DeleteAudit] Deleted successfully: ${tx.id}`);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          setIsEditTransactionOpen(false);
+          toast.success(`تم حذف ${isExpense ? 'المصروف' : 'الإيراد'} بنجاح`);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : 'خطأ غير معروف';
+          console.error(`[DeleteAudit] Delete failed for ID ${tx.id}:`, errMsg);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error(`فشل حذف ${isExpense ? 'المصروف' : 'الإيراد'}: ${errMsg}`);
+        }
+      }
+    );
+  };
+
+  const handleDeleteHistoricalRecord = async (id: string) => {
+    const record = rawHistoricalRecords.find(r => r.id === id);
+    triggerDelete(
+      'حذف سجل تاريخي',
+      `هل أنت متأكد من حذف السجل التاريخي: ${record?.title || id}؟ لا يمكن التراجع.`,
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting historical record:", id);
+          await firebaseService.deleteDocument('historicalRecords', id);
+          console.log("Deleted successfully: historicalRecord", id);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف السجل التاريخي بنجاح');
+        } catch (err) {
+          console.error("Error deleting historical record:", err);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('حدث خطأ أثناء الحذف');
+        }
+      }
+    );
+  };
+
+  const handleDeleteBonus = async (id: string | undefined) => {
+    if (!id) return;
+    const b = bonuses.find(item => item.id === id);
+    triggerDelete(
+      'حذف البونص',
+      `هل أنت متأكد من حذف البونص بقيمة ${formatIQD(b?.amount || 0)}؟ لا يمكن التراجع.`,
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting bonus:", id);
+          await firebaseService.deleteDocument('bonuses', id);
+          console.log("Deleted successfully: bonus", id);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف البونص بنجاح');
+        } catch (err) {
+          console.error("Error deleting bonus:", err);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('حدث خطأ أثناء الحذف');
+        }
+      }
+    );
+  };
+
+  const handleDeleteAttachment = async (ledgerId: string, url: string) => {
+    const entry = ledgerEntries.find(e => e.id === ledgerId);
+    if (!entry) return;
+
+    triggerDelete(
+      'حذف المرفق',
+      'هل أنت متأكد من حذف هذه الصورة؟ سيتم حذفها من سجلات النظام نهائياً.',
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting attachment:", url, "from entry:", ledgerId);
+          let updateData: any = {};
+          if (entry.imageUrl === url) updateData.imageUrl = null;
+          if (entry.receiptImageUrl === url) updateData.receiptImageUrl = null;
+          if (entry.imageUrls?.includes(url)) {
+            updateData.imageUrls = entry.imageUrls.filter(u => u !== url);
+          }
+          
+          await firebaseService.updateDocument('ledgerEntries', ledgerId, updateData);
+          console.log("Deleted successfully: attachment from", ledgerId);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف الصورة بنجاح');
+        } catch (err) {
+          console.error("Error deleting attachment:", err);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('فشل في حذف الصورة');
+        }
+      }
+    );
   };
 
   const handleAddRefund = async (e: React.FormEvent) => {
@@ -2153,8 +2493,9 @@ export default function App() {
     } as any;
     
     try {
-      await firebaseService.addDocument('transactions', newTx as Transaction);
-      console.log("Operations after save:", transactions);
+      const savedDoc = await firebaseService.addDocument('transactions', newTx as Transaction);
+      console.log("Revenue saved:", { ...newTx, id: (savedDoc as any).id });
+      console.log("Revenue records loaded:", transactions);
       setIsAddRevenueOpen(false);
       setRevenueImageFiles([]);
       
@@ -2176,25 +2517,74 @@ export default function App() {
     }
   };
 
+  const getExpenseStatement = (tx: Transaction) => {
+    if (!tx) return "غير معروف";
+    if (tx.type !== 'expense') return tx.customerName || (tx as any).accountName || tx.description || "عملية مالية";
+
+    const categoryLabels: Record<string, string> = {
+      'rent_pharmacy': 'إيجار صيدلية',
+      'rent': 'إيجار',
+      'electricity': 'كهرباء / مولد',
+      'rent_license': 'إيجار إجازة',
+      'internet': 'إنترنت واشتراكات',
+      'service_worker': 'عامل خدمة',
+      'salaries': 'رواتب ومكافآت',
+      'transport': 'نقل وتوصيل أدوية',
+      'marketing': 'تسويق وإعلان',
+      'repairs': 'صيانة معدات أو مكان',
+      'materials': 'مواد تشغيلية',
+      'damaged_expired': 'تلف واكسباير',
+      'other': 'مصاريف أخرى'
+    };
+
+    const category = tx.category ? (categoryLabels[tx.category] || tx.category) : "مصروف عام";
+    const statement = tx.statement || category || "مصروف عام";
+    
+    const partyDisplay = tx.partyName || tx.entityName || "";
+    if (partyDisplay) return `${statement} - ${partyDisplay}`;
+    return statement;
+  };
+
   const handleAddExpense = async (data: any) => {
-    console.log("Saving operation:", data);
+    console.log("Saving expense operation:", data);
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
 
     let detailedDescription = data.description;
-    if (data.category === 'rent') {
-      detailedDescription = `إيجار (${data.rentType}) - ${data.period}: ${data.description}`;
+    if (data.category === 'rent' || data.category === 'rent_pharmacy') {
+      detailedDescription = `إيجار (${data.rentType || 'عام'}) - ${data.period || ''}: ${data.description || ''}`;
     } else if (data.category === 'salaries') {
-      detailedDescription = `راتب الموظف ${data.employeeName} (${data.jobTitle}) - ${data.period} - ${data.salaryPaymentType === 'full' ? 'كامل' : data.salaryPaymentType === 'advance' ? 'سلفة' : 'مكافأة'}`;
+      detailedDescription = `راتب الموظف ${data.employeeName || ''} (${data.jobTitle || ''}) - ${data.period || ''} - ${data.salaryPaymentType === 'full' ? 'كامل' : data.salaryPaymentType === 'advance' ? 'سلفة' : 'مكافأة'}`;
     } else if (data.category === 'electricity') {
-      detailedDescription = `${data.serviceType === 'national' ? 'كهرباء وطنية' : data.serviceType === 'generator' ? 'مولدة' : 'اشتراك'} - ${data.reading}: ${data.description}`;
+      detailedDescription = `${data.serviceType === 'national' ? 'كهرباء وطنية' : data.serviceType === 'generator' ? 'مولدة' : 'اشتراك'} - ${data.reading || ''}: ${data.description || ''}`;
     }
+
+    // Auto statement from category if empty as per requirements
+    const categoryLabels: Record<string, string> = {
+      'rent_pharmacy': 'إيجار صيدلية',
+      'rent': 'إيجار',
+      'electricity': 'كهرباء / مولد',
+      'rent_license': 'إيجار إجازة',
+      'internet': 'إنترنت واشتراكات',
+      'service_worker': 'عامل خدمة',
+      'salaries': 'رواتب ومكافآت',
+      'transport': 'نقل وتوصيل أدوية',
+      'marketing': 'تسويق وإعلان',
+      'repairs': 'صيانة معدات أو مكان',
+      'materials': 'مواد تشغيلية',
+      'damaged_expired': 'تلف واكسباير',
+      'other': 'مصاريف أخرى'
+    };
+    
+    const categoryLabel = data.category ? (categoryLabels[data.category] || data.category) : "مصروف عام";
 
     const newTx: Omit<Transaction, 'id'> = {
       type: 'expense',
       category: data.category as string,
       amount: Number(data.amount),
       date: data.date ? new Date(data.date) : new Date(),
-      description: detailedDescription,
+      description: detailedDescription || categoryLabel,
+      statement: data.statement || categoryLabel,
+      partyName: data.partyName || "",
       notes: data.notes as string,
       branchId: targetBranchId as string | undefined,
       createdBy: appUser?.userId || 'demo-user',
@@ -2206,12 +2596,10 @@ export default function App() {
     
     try {
       await firebaseService.addDocument('transactions', newTx as Transaction);
-      console.log("Operations after save:", transactions);
       setIsAddExpenseOpen(false);
       toast.success('تم إضافة المصروف بنجاح');
     } catch (err) {
       console.error("[App] Failed to add expense:", err);
-      // Fallback
       try {
         const localOps = JSON.parse(localStorage.getItem('pharma-offline-ops') || '[]');
         localOps.push({ ...newTx, id: 'local-' + Date.now(), isOffline: true });
@@ -2237,20 +2625,22 @@ export default function App() {
       if (data.invoiceId && data.invoiceId !== 'none') {
          const invoice = (allLedgerEntries || []).find(i => i.id === data.invoiceId);
          if (invoice) {
-            const currentRemaining = invoice.remainingAmount || 0;
-            const newRemaining = Math.max(0, currentRemaining - data.totalLoss);
+            const currentRemaining = Number(invoice.remainingAmount || 0);
+            const lossAmount = Number(data.totalLoss || 0);
+            const newRemaining = Math.max(0, currentRemaining - lossAmount);
             
             await firebaseService.updateDocument('ledgerEntries', data.invoiceId, {
               remainingAmount: newRemaining,
-              notes: `${invoice.notes || ''}\n[خسارة تالف/اكسباير مرتبطة: -${formatIQD(data.totalLoss)}]`,
+              notes: `${invoice.notes || ''}\n[خسارة تالف/اكسباير مرتبطة: -${formatIQD(lossAmount)}]`,
               updatedAt: new Date()
             } as any);
 
             // Also update entity balance
             const entity = entities.find(e => e.id === invoice.accountId);
             if (entity) {
+               const currentBalance = Number(entity.balance || 0);
                await firebaseService.updateDocument('entities', entity.id!, {
-                 balance: entity.balance - data.totalLoss,
+                 balance: currentBalance - lossAmount,
                  updatedAt: new Date()
                } as any);
             }
@@ -2347,31 +2737,70 @@ export default function App() {
     }
   };
 
-  const handleDeleteTransaction = async () => {
-    if (!selectedTransaction?.id && !transactionToDelete?.id) return;
-    const id = transactionToDelete?.id || selectedTransaction?.id;
-    try {
-      await firebaseService.deleteDocument('transactions', id!);
-      setIsEditTransactionOpen(false);
-      setIsDeleteTransactionConfirmOpen(false);
-      setTransactionToDelete(null);
-      toast.success('تم حذف الحركة بنجاح');
-    } catch (err) {
-      toast.error('حدث خطأ أثناء حذف الحركة');
-    }
-  };
-
   const handleDeleteLoss = async (loss: ExpiredDamagedLoss) => {
-    try {
-      await firebaseService.deleteDocument('expiredDamagedLosses', loss.id!);
-      toast.success('تم حذف السجل بنجاح');
-    } catch (err) {
-      console.error("Failed to delete loss:", err);
-      toast.error('حدث خطأ أثناء الحذف');
-    }
+    triggerDelete(
+      'حذف سجل التالف/المنتهي',
+      `هل أنت متأكد من حذف السجل الخاص بـ: ${loss.itemName}؟ لا يمكن التراجع عن هذه العملية.`,
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting loss record:", loss.id);
+          await firebaseService.deleteDocument('expiredDamagedLosses', loss.id!);
+          console.log("Deleted successfully: loss record", loss.id);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف السجل بنجاح');
+        } catch (err) {
+          console.error("Failed to delete loss:", err);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('حدث خطأ أثناء الحذف');
+        }
+      }
+    );
   };
 
   // Auth UI logic handled by onAuthStateChanged
+
+  const handleDeleteMedicineRequest = async (id: string) => {
+    triggerDelete(
+      'حذف طلب توفير دواء',
+      'هل أنت متأكد من حذف هذا الطلب؟ لا يمكن التراجع عن هذه العملية.',
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting medicine request:", id);
+          await firebaseService.deleteDocument('medicineRequests', id);
+          console.log("Deleted successfully: medicineRequest", id);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف الطلب بنجاح');
+        } catch (err) {
+          console.error("Error deleting medicine request:", err);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('حدث خطأ أثناء الحذف');
+        }
+      }
+    );
+  };
+
+  const handleDeleteRequestImage = async (id: string) => {
+    triggerDelete(
+      'حذف صورة الطلب',
+      'هل أنت متأكد من حذف الصورة المرفقة؟',
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting medicine request image:", id);
+          await firebaseService.updateDocument('medicineRequests', id, { imageUrl: null });
+          console.log("Deleted successfully: image from medicineRequest", id);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف الصورة');
+        } catch (err) {
+          console.error("Error deleting image:", err);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('فشل في الحدث');
+        }
+      }
+    );
+  };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3125,13 +3554,32 @@ export default function App() {
                             setSelectedTransaction(tx);
                             setIsEditTransactionOpen(true);
                           }}>
-                            <td className="px-8 py-5 text-xs text-muted-foreground font-mono font-bold">{safeFormatDate(tx.date, 'yyyy/MM/dd')}</td>
+                            <td className="px-8 py-5 text-xs text-muted-foreground font-mono font-bold tracking-tight">{safeFormatDate(tx.date, 'yyyy/MM/dd')}</td>
                             <td className="px-8 py-5">
-                              <div className="font-black text-foreground group-hover:text-primary transition-colors">{tx.description}</div>
-                              {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold mt-1">{tx.entityName}</div>}
+                              <div className="font-black text-foreground group-hover:text-primary transition-colors">
+                                {getExpenseStatement(tx)}
+                              </div>
+                              {tx.type === 'expense' && tx.description && tx.description !== tx.statement && (
+                                <div className="text-[10px] text-muted-foreground font-bold mt-1 px-2 py-0.5 bg-muted rounded-md inline-block">
+                                  {tx.description}
+                                </div>
+                              )}
                             </td>
                             <td className={`px-8 py-5 text-left font-black font-mono text-base ${(tx.type === 'income' || tx.type === 'revenue') ? 'text-primary' : 'text-rose-500'}`}>
                               {(tx.type === 'income' || tx.type === 'revenue') ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
+                            </td>
+                            <td className="px-8 py-5 text-left">
+                               <Button 
+                                 variant="ghost" 
+                                 size="icon" 
+                                 className="opacity-0 group-hover:opacity-100 h-8 w-8 text-rose-500 hover:bg-rose-500/10 transition-all rounded-lg" 
+                                 onClick={(e) => {
+                                   e.stopPropagation();
+                                   handleDeleteTransaction(tx);
+                                 }}
+                               >
+                                 <Trash2 className="h-4 w-4" />
+                               </Button>
                             </td>
                           </tr>
                         ))}
@@ -3143,25 +3591,48 @@ export default function App() {
                     {transactions.slice(0, 8).map((tx) => (
                       <div 
                         key={tx.id} 
-                        className="p-4 flex flex-col gap-2 hover:bg-muted/50 transition-colors cursor-pointer"
+                        className="p-5 flex flex-col gap-3 hover:bg-muted/50 transition-colors cursor-pointer border-b border-border last:border-0"
                         onClick={() => {
                           setSelectedTransaction(tx);
                           setIsEditTransactionOpen(true);
                         }}
                       >
                         <div className="flex justify-between items-start">
-                          <div>
-                            <div className="font-black text-sm text-foreground">{tx.description}</div>
-                            {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold">{tx.entityName}</div>}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-black text-sm text-foreground truncate">
+                              {getExpenseStatement(tx)}
+                            </div>
+                            {tx.type === 'expense' && tx.description && tx.description !== tx.statement && (
+                              <div className="text-[9px] text-muted-foreground mt-1 truncate">{tx.description}</div>
+                            )}
                           </div>
-                          <div className={`font-black font-mono ${(tx.type === 'income' || tx.type === 'revenue') ? 'text-primary' : 'text-rose-500'}`}>
-                            {(tx.type === 'income' || tx.type === 'revenue') ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
+                          <div className="flex items-center gap-3">
+                            <div className={`font-black font-mono text-lg ${(tx.type === 'income' || tx.type === 'revenue') ? 'text-primary' : 'text-rose-500'}`}>
+                              {(tx.type === 'income' || tx.type === 'revenue') ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
+                            </div>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 text-rose-500 hover:bg-rose-500/10 rounded-xl" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteTransaction(tx);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </div>
                         <div className="flex justify-between items-center text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
-                          <span>{safeFormatDate(tx.date, 'yyyy/MM/dd')}</span>
-                          <span className={`px-2 py-0.5 rounded ${(tx.type === 'income' || tx.type === 'revenue') ? 'bg-primary/10 text-primary' : 'bg-rose-500/10 text-rose-500'}`}>
-                            {(tx.type === 'income' || tx.type === 'revenue') ? 'دخل' : 'مصروف'}
+                          <div className="flex items-center gap-2 font-mono">
+                             <span>{safeFormatDate(tx.date, 'yyyy/MM/dd')}</span>
+                          </div>
+                          <span className={`px-2.5 py-1 rounded-lg font-black ${
+                            (tx.type === 'income' || tx.type === 'revenue') 
+                              ? 'bg-emerald-500/10 text-emerald-600' 
+                              : 'bg-rose-500/10 text-rose-500'
+                          }`}>
+                            {(tx.type === 'income' || tx.type === 'revenue') ? 'دخل / وارد' : 'مصروفات'}
                           </span>
                         </div>
                       </div>
@@ -3215,14 +3686,24 @@ export default function App() {
                       <h2 className="text-2xl font-black text-foreground mb-1">سجل المدفوعات</h2>
                       <p className="text-muted-foreground font-bold">كافة التسديدات والمصاريف الصادرة</p>
                     </div>
-                    <div className="relative w-full md:w-96 group">
-                      <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                      <Input 
-                        placeholder="ابحث عن وصل أو مورد..." 
-                        className="bg-background border-border pr-12 h-12 rounded-xl text-foreground focus:ring-primary/20 placeholder:font-bold"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                      />
+                    <div className="flex items-center gap-3 w-full md:w-auto">
+                      <div className="relative flex-1 md:w-96 group">
+                        <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                        <Input 
+                          placeholder="ابحث عن وصل أو مورد..." 
+                          className="bg-background border-border pr-12 h-12 rounded-xl text-foreground focus:ring-primary/20 placeholder:font-bold"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                      </div>
+                      <Button 
+                        onClick={() => setIsMultiPaymentOpen(true)} 
+                        variant="outline"
+                        className="gap-2 border-primary/20 text-primary font-black h-12 px-6 rounded-xl hover:bg-primary/10"
+                      >
+                        <Plus className="h-4 w-4" />
+                        إدخال متعدد
+                      </Button>
                     </div>
                   </div>
                </CardHeader>
@@ -3348,15 +3829,6 @@ export default function App() {
                   bg: 'bg-emerald-500/10' 
                 },
                 { 
-                  label: 'إجمالي المسدد', 
-                  value: transactions
-                    .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId))
-                    .reduce((acc, tx) => acc + (tx.paidAmount || (tx.incomeType === 'cash' ? tx.amount : 0)), 0), 
-                  icon: CheckCircle2, 
-                  color: 'text-blue-600', 
-                  bg: 'bg-blue-500/10' 
-                },
-                { 
                   label: 'الديون (المتبقي)', 
                   value: transactions
                     .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId))
@@ -3420,22 +3892,33 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {transactions
-                          .filter(tx => 
-                            tx.type === 'income' &&
-                            (!currentBranchId || tx.branchId === currentBranchId) &&
-                            (tx.description.includes(searchTerm) || (tx.customerName && tx.customerName.includes(searchTerm)))
-                          )
-                          .map((tx) => (
-                            <tr key={tx.id} className="group hover:bg-primary/5 transition-colors">
-                              <td className="px-8 py-6 text-right">
-                                <div className="font-black text-foreground group-hover:text-primary transition-colors">{tx.customerName || tx.description}</div>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <span className="text-[10px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                    {branches.find(b => b.id === tx.branchId)?.name || 'فرع غير معروف'}
-                                  </span>
-                                </div>
-                              </td>
+                        {(() => {
+                           const visibleRevenues = transactions.filter(tx => {
+                             const isRevenue = tx.type === 'income' || tx.type === 'revenue' || tx.category === 'revenue';
+                             const mainBranchId = branches.length > 0 ? branches[0].id : 'main';
+                             const txBranchId = tx.branchId || mainBranchId;
+                             
+                             const matchesBranch = !currentBranchId || txBranchId === currentBranchId;
+                             const matchesSearch = (tx.description || '').includes(searchTerm) || 
+                                                 (tx.customerName && tx.customerName.includes(searchTerm));
+                             
+                             return isRevenue && matchesBranch && matchesSearch;
+                           });
+                           
+                           if (visibleRevenues.length > 0) {
+                             console.log("Visible revenue records:", visibleRevenues);
+                           }
+                           
+                           return visibleRevenues.map((tx) => (
+                             <tr key={tx.id} className="group hover:bg-primary/5 transition-colors">
+                               <td className="px-8 py-6 text-right">
+                                 <div className="font-black text-foreground group-hover:text-primary transition-colors">{tx.customerName || tx.description}</div>
+                                 <div className="flex items-center gap-2 mt-1">
+                                   <span className="text-[10px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                                     {branches.find(b => b.id === (tx.branchId || (branches.length > 0 ? branches[0].id : 'main')))?.name || 'الفرع الرئيسي'}
+                                   </span>
+                                 </div>
+                               </td>
                               <td className="px-8 py-6 font-mono font-bold text-muted-foreground text-lg">{formatNumberWithCommas(tx.saleAmount || tx.amount)}</td>
                               <td className="px-8 py-6 font-mono font-bold text-slate-500 text-center">%{tx.profitPercent || 0}</td>
                               <td className="px-8 py-6 font-mono font-bold text-emerald-600 text-lg">{formatNumberWithCommas(tx.profitAmount || tx.netProfit || 0)}</td>
@@ -3478,9 +3961,8 @@ export default function App() {
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator className="bg-border/50" />
                                     <DropdownMenuItem onClick={() => {
-                                      setDeletingItem({ id: tx.id!, collection: 'transactions', label: 'إيراد' });
-                                      setIsDeleteConfirmOpen(true);
-                                    }} className="flex items-center gap-2 p-2.5 cursor-pointer hover:bg-rose-500/10 text-rose-500 rounded-lg">
+                                      handleDeleteTransaction(tx);
+                                    }} className="flex items-center gap-2 p-2.5 cursor-pointer hover:bg-rose-500/10 text-rose-500 rounded-lg text-rose-500">
                                       <Trash2 className="h-4 w-4" />
                                       <span className="font-bold">حذف</span>
                                     </DropdownMenuItem>
@@ -3488,24 +3970,35 @@ export default function App() {
                                 </DropdownMenu>
                               </td>
                             </tr>
-                          ))}
-                        {transactions.filter(tx => tx.type === 'income' && (!currentBranchId || tx.branchId === currentBranchId)).length === 0 && (
-                          <tr>
-                            <td colSpan={8} className="py-20 text-center text-muted-foreground italic font-bold">لا توجد سجلات إيرادات حالياً</td>
-                          </tr>
-                        )}
+                          ))
+                        })()}
+                        {(() => {
+                           const visibleCount = transactions.filter(tx => {
+                             const isRevenue = tx.type === 'income' || tx.type === 'revenue' || tx.category === 'revenue';
+                             const mainBranchId = branches.length > 0 ? branches[0].id : 'main';
+                             const txBranchId = tx.branchId || mainBranchId;
+                             return isRevenue && (!currentBranchId || txBranchId === currentBranchId);
+                           }).length;
+                           return visibleCount === 0 && (
+                             <tr>
+                               <td colSpan={8} className="py-20 text-center text-muted-foreground italic font-bold">لا توجد سجلات إيرادات حالياً</td>
+                             </tr>
+                           )
+                        })()}
                       </tbody>
                     </table>
                   </div>
                   ) : (
-                    <div className="p-4 space-y-4">
-                      {transactions
-                        .filter(tx => 
-                          tx.type === 'income' &&
-                          (!currentBranchId || tx.branchId === currentBranchId) &&
-                          (tx.description.includes(searchTerm) || (tx.customerName && tx.customerName.includes(searchTerm)))
-                        )
-                        .map((tx) => (
+                     <div className="p-4 space-y-4">
+                       {(() => {
+                          const visibleRevenues = transactions.filter(tx => {
+                            const isRevenue = tx.type === 'income' || tx.type === 'revenue' || tx.category === 'revenue';
+                            const mainBranchId = branches.length > 0 ? branches[0].id : 'main';
+                            const txBranchId = tx.branchId || mainBranchId;
+                            return isRevenue && (!currentBranchId || txBranchId === currentBranchId) && 
+                                   ((tx.description || '').includes(searchTerm) || (tx.customerName && tx.customerName.includes(searchTerm)));
+                          });
+                          return visibleRevenues.map((tx) => (
                           <div key={tx.id} className="p-4 bg-muted/20 border border-border rounded-2xl space-y-3">
                             <div className="flex justify-between items-start">
                               <div className="flex-1">
@@ -3540,8 +4033,7 @@ export default function App() {
                                       setIsEditTransactionOpen(true);
                                     }} className="text-[10px] p-2 font-bold cursor-pointer hover:bg-muted text-amber-500 font-bold">تعديل</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => {
-                                      setDeletingItem({ id: tx.id!, collection: 'transactions', label: 'إيراد' });
-                                      setIsDeleteConfirmOpen(true);
+                                      handleDeleteTransaction(tx);
                                     }} className="text-[10px] p-2 font-bold cursor-pointer hover:bg-rose-500/10 text-rose-500 font-bold">حذف</DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
@@ -3561,7 +4053,20 @@ export default function App() {
                               </div>
                             )}
                           </div>
-                        ))}
+                        ))
+                      })()}
+                      {(() => {
+                         const visibleCount = transactions.filter(tx => {
+                            const isRevenue = tx.type === 'income' || tx.type === 'revenue' || tx.category === 'revenue';
+                            const mainBranchId = branches.length > 0 ? branches[0].id : 'main';
+                            const txBranchId = tx.branchId || mainBranchId;
+                            return isRevenue && (!currentBranchId || txBranchId === currentBranchId) && 
+                                   ((tx.description || '').includes(searchTerm) || (tx.customerName && tx.customerName.includes(searchTerm)));
+                         }).length;
+                         return visibleCount === 0 && (
+                            <div className="py-20 text-center text-muted-foreground italic font-bold">لا توجد سجلات إيرادات حالياً</div>
+                         )
+                      })()}
                     </div>
                   )}
                </CardContent>
@@ -3582,7 +4087,10 @@ export default function App() {
                 onEditEntity={() => { setSelectedEntity(viewingEntityDetail); setIsEditEntityOpen(true); }}
                 onViewInvoice={handleViewInvoice}
                 onEditInvoice={(invoice) => { setViewingInvoice(invoice); setIsEditInvoiceOpen(true); }}
-                onDeleteInvoice={(invoice) => { setViewingInvoice(invoice); setIsDeleteInvoiceConfirmOpen(true); }}
+                onDeleteInvoice={(invoice) => { 
+                  setSelectedEntity(viewingEntityDetail);
+                  handleDeleteInvoice(invoice); 
+                }}
                 onRefundInvoice={(invoice) => { setViewingInvoice(invoice); setIsRefundInvoiceOpen(true); }}
                 onPartialPayment={(invoice) => { 
                   setViewingInvoice(invoice); 
@@ -3603,25 +4111,23 @@ export default function App() {
                   setPaymentMode('normal');
                   setPayAmount(payment.amount);
                   setSelectedEntity(viewingEntityDetail);
-                  // We might need an isEditPaymentOpen but for now we can reuse isAddPaymentOpen with viewingInvoice if it has partial amount
                   setIsAddPaymentOpen(true);
                 }}
                 onDeletePayment={(id) => {
-                  setDeletingItem({ id, collection: 'ledgerEntries', label: 'عملية تسديد' });
-                  setIsDeleteConfirmOpen(true);
+                  const payment = allLedgerEntries.find(e => e.id === id);
+                  setSelectedEntity(viewingEntityDetail);
+                  if (payment) handleDeleteInvoice(payment);
                 }}
                 onEditBonus={(bonus) => {
                   setEditingBonus(bonus);
                   setIsEditBonusOpen(true);
                 }}
-                onDeleteBonus={(id) => {
-                  setDeletingItem({ id, collection: 'bonuses', label: 'بونص' });
-                  setIsDeleteConfirmOpen(true);
-                }}
+                onDeleteBonus={handleDeleteBonus}
+                onDeleteAttachment={handleDeleteAttachment}
+                onShowImage={setLightboxImage}
                 onImportHistorical={() => setIsHistoricalWizardOpen(true)}
                 onImportExcel={() => setIsExcelImportOpen(true)}
                 appMode={effectiveAppMode}
-                onShowImage={setLightboxImage}
               />
             ) : (
               <>
@@ -3966,9 +4472,13 @@ export default function App() {
                       </thead>
                       <tbody>
                         {transactions
+                          .filter(tx => tx.type === 'expense')
                           .filter(tx => 
-                            tx.description.includes(searchTerm) || 
-                            (tx.entityName && tx.entityName.includes(searchTerm))
+                            (tx.description || "").includes(searchTerm) || 
+                            (tx.entityName && tx.entityName.includes(searchTerm)) ||
+                            (tx.category && tx.category.includes(searchTerm)) ||
+                            (tx.statement && tx.statement.includes(searchTerm)) ||
+                            (tx.partyName && tx.partyName.includes(searchTerm))
                           )
                           .slice(0, 50)
                           .map((tx) => (
@@ -3977,8 +4487,14 @@ export default function App() {
                                 {safeFormatDate(tx.date, 'yyyy/MM/dd HH:mm')}
                               </td>
                               <td className="px-8 py-6">
-                                <div className="font-black text-foreground group-hover:text-primary transition-colors">{tx.description}</div>
-                                {tx.entityName && <div className="text-[10px] text-muted-foreground font-bold mt-1 px-2.5 py-0.5 bg-muted rounded-full inline-block">{tx.entityName}</div>}
+                                <div className="font-black text-foreground group-hover:text-primary transition-colors">
+                                  {getExpenseStatement(tx)}
+                                </div>
+                                {tx.type === 'expense' && tx.description && tx.description !== tx.statement && (
+                                  <div className="text-[10px] text-muted-foreground font-bold mt-1 px-2 py-0.5 bg-muted rounded-md inline-block">
+                                    {tx.description}
+                                  </div>
+                                )}
                               </td>
                               <td className={`px-8 py-6 font-black font-mono text-lg tracking-tighter ${(tx.type === 'income' || tx.type === 'revenue') ? 'text-primary' : 'text-rose-600'}`}>
                                 {(tx.type === 'income' || tx.type === 'revenue') ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
@@ -3991,10 +4507,7 @@ export default function App() {
                                   }}>
                                     <Pencil className="h-4 w-4" />
                                   </Button>
-                                  <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-rose-500 hover:bg-rose-500/10 transition-all" onClick={() => {
-                                    setTransactionToDelete(tx);
-                                    setIsDeleteTransactionConfirmOpen(true);
-                                  }}>
+                                  <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-rose-500 hover:bg-rose-500/10 transition-all" onClick={() => handleDeleteTransaction(tx)}>
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </div>
@@ -4007,25 +4520,36 @@ export default function App() {
                   ) : (
                     <div className="p-4 space-y-4">
                       {transactions
+                        .filter(tx => tx.type === 'expense')
                         .filter(tx => 
-                          tx.description.includes(searchTerm) || 
-                          (tx.entityName && tx.entityName.includes(searchTerm))
+                          (tx.description || "").includes(searchTerm) || 
+                          (tx.entityName && tx.entityName.includes(searchTerm)) ||
+                          (tx.category && tx.category.includes(searchTerm)) ||
+                          (tx.statement && tx.statement.includes(searchTerm)) ||
+                          (tx.partyName && tx.partyName.includes(searchTerm))
                         )
                         .slice(0, 50)
                         .map((tx) => (
                           <div key={tx.id} className="p-4 bg-muted/30 border border-border rounded-2xl space-y-3">
                             <div className="flex justify-between items-start">
                               <div className="text-[10px] text-muted-foreground font-mono">{safeFormatDate(tx.date, 'yyyy/MM/dd HH:mm')}</div>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" onClick={() => {
-                                setSelectedTransaction(tx);
-                                setIsEditTransactionOpen(true);
-                              }}>
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
+                              <div className="flex items-center gap-1">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-muted-foreground hover:text-primary transition-all" onClick={() => {
+                                  setSelectedTransaction(tx);
+                                  setIsEditTransactionOpen(true);
+                                }}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-all" onClick={() => handleDeleteTransaction(tx)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </div>
                             <div>
-                              <div className="font-black text-foreground">{tx.description}</div>
-                              {tx.entityName && <div className="text-[9px] text-muted-foreground mt-1">{tx.entityName}</div>}
+                              <div className="font-black text-foreground">{getExpenseStatement(tx)}</div>
+                              {tx.type === 'expense' && tx.description && tx.description !== tx.statement && (
+                                <div className="text-[9px] text-muted-foreground mt-1">{tx.description}</div>
+                              )}
                             </div>
                             <div className={`text-xl font-black font-mono tracking-tighter ${(tx.type === 'income' || tx.type === 'revenue') ? 'text-primary' : 'text-rose-600'}`}>
                               {(tx.type === 'income' || tx.type === 'revenue') ? '+' : '-'}{formatNumberWithCommas(tx.amount)}
@@ -4149,13 +4673,29 @@ export default function App() {
                  <h2 className="text-2xl font-black text-foreground">التقارير المالية والتحليلية</h2>
                  <p className="text-muted-foreground text-sm font-bold">مقارنة الأداء الشهري وتتبع التدفق النقدي</p>
                </div>
+
+               <div className="flex bg-muted/30 p-1.5 rounded-2xl border border-border">
+                  <button 
+                    onClick={() => setReportSubTab('monthly')}
+                    className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${reportSubTab === 'monthly' ? 'bg-card text-primary shadow-sm border border-border' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    التحليل الشهري
+                  </button>
+                  <button 
+                    onClick={() => setReportSubTab('period')}
+                    className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${reportSubTab === 'period' ? 'bg-card text-primary shadow-sm border border-border' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    تقرير الفترة المالية
+                  </button>
+               </div>
                
-               <div className="flex flex-wrap items-center gap-3 bg-muted/20 p-2 rounded-2xl border border-border">
-                  <div className="flex items-center gap-2 px-3">
-                    <CalendarDays className="h-4 w-4 text-primary" />
-                    <span className="text-xs font-black text-muted-foreground uppercase">الفترة:</span>
-                  </div>
-                  <Select value={reportsMonth.toString()} onValueChange={(v) => setReportsMonth(parseInt(v))}>
+               {reportSubTab === 'monthly' && (
+                 <div className="flex flex-wrap items-center gap-3 bg-muted/20 p-2 rounded-2xl border border-border">
+                    <div className="flex items-center gap-2 px-3">
+                      <CalendarDays className="h-4 w-4 text-primary" />
+                      <span className="text-xs font-black text-muted-foreground uppercase">الفترة:</span>
+                    </div>
+                    <Select value={reportsMonth.toString()} onValueChange={(v) => setReportsMonth(parseInt(v))}>
                     <SelectTrigger className="w-[140px] h-10 bg-card border-border rounded-xl font-bold">
                       <SelectValue placeholder="الشهر" />
                     </SelectTrigger>
@@ -4179,6 +4719,31 @@ export default function App() {
 
                   <div className="h-6 w-px bg-border mx-1" />
 
+                  <Select value={reportsSupplierType} onValueChange={(v: any) => setReportsSupplierType(v)}>
+                    <SelectTrigger className="w-[120px] h-10 bg-card border-border rounded-xl font-bold text-xs">
+                      <SelectValue placeholder="نوع المورد" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border">
+                       <SelectItem value="all">كل الموردين</SelectItem>
+                       <SelectItem value="office">مكاتب</SelectItem>
+                       <SelectItem value="warehouse">مذاخر</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={reportsSupplierId} onValueChange={setReportsSupplierId}>
+                    <SelectTrigger className="w-[200px] h-10 bg-card border-border rounded-xl font-bold text-xs">
+                      <SelectValue placeholder="اختيار المورد" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border">
+                       <SelectItem value="all">كل الموردين (إجمالي)</SelectItem>
+                       {entities.filter(e => e.type === 'office' || e.type === 'warehouse').map(e => (
+                         <SelectItem key={e.id} value={e.id!}>{e.name}</SelectItem>
+                       ))}
+                    </SelectContent>
+                  </Select>
+
+                  <div className="h-6 w-px bg-border mx-1" />
+
                   <Select value={reportTypeFilter} onValueChange={(v: any) => setReportTypeFilter(v)}>
                     <SelectTrigger className="w-[160px] h-10 bg-card border-border rounded-xl font-bold text-xs">
                       <SelectValue />
@@ -4197,20 +4762,56 @@ export default function App() {
                     طباعة التقرير
                   </Button>
                </div>
+               )}
              </div>
+
+             {reportSubTab === 'monthly' ? (
+               <>
+                 {/* Supplier Specific Detailed Report */}
+             {supplierPurchaseStats && (
+               <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 animate-in slide-in-from-top duration-500">
+                  <Card className="bg-primary/5 border-primary/20 p-5 rounded-2xl flex flex-col justify-center">
+                     <span className="text-[9px] font-black text-primary/60 uppercase mb-1">المورد المختار</span>
+                     <span className="text-sm font-black text-foreground truncate">{supplierPurchaseStats.entity?.name}</span>
+                     <span className="text-[10px] font-bold text-muted-foreground">{supplierPurchaseStats.entity?.type === 'office' ? 'مكتب' : 'مذخر'}</span>
+                  </Card>
+                  <Card className="bg-card border-border p-5 rounded-2xl">
+                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">إجمالي المشتريات</span>
+                     <div className="text-xl font-black text-foreground font-mono">{formatNumberWithCommas(supplierPurchaseStats.totalPurchases)}</div>
+                     <span className="text-[10px] font-bold text-muted-foreground">{supplierPurchaseStats.count} فاتورة</span>
+                  </Card>
+                  <Card className="bg-card border-border p-5 rounded-2xl">
+                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">المسدد</span>
+                     <div className="text-xl font-black text-emerald-600 font-mono">{formatNumberWithCommas(supplierPurchaseStats.totalPaid)}</div>
+                  </Card>
+                  <Card className="bg-card border-border p-5 rounded-2xl">
+                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">المتبقي</span>
+                     <div className="text-xl font-black text-rose-500 font-mono">{formatNumberWithCommas(supplierPurchaseStats.totalRemaining)}</div>
+                  </Card>
+                  <Card className="bg-card border-border p-5 rounded-2xl">
+                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">أعلى فاتورة</span>
+                     <div className="text-xl font-black text-indigo-600 font-mono">{formatNumberWithCommas(supplierPurchaseStats.highestInvoice)}</div>
+                  </Card>
+                  <Card className="bg-card border-border p-5 rounded-2xl">
+                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">حالة الدين</span>
+                     <div className={`text-xs font-black p-1 rounded text-center mt-2 ${Number(supplierPurchaseStats.entity?.balance || 0) > 0 ? 'bg-rose-500/10 text-rose-600' : 'bg-emerald-500/10 text-emerald-600'}`}>
+                        {Number(supplierPurchaseStats.entity?.balance || 0) > 0 ? 'يوجد ديون مستحقة' : 'لا يوجد ديون'}
+                     </div>
+                  </Card>
+               </div>
+             )}
 
              {/* Comparative Stats Cards */}
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {[
                   { label: 'إجمالي الوارد', value: monthlyComparison.current.revenue, change: monthlyComparison.changes.revenue, icon: BarChart3, color: 'blue' },
                   { label: 'صافي الربح', value: monthlyComparison.current.profit, change: monthlyComparison.changes.profit, icon: TrendingUp, color: 'emerald' },
-                  { label: 'فواتير مشتريات', value: monthlyComparison.current.invoices, change: monthlyComparison.changes.invoices, icon: FileText, color: 'indigo' },
-                  { label: 'إجمالي التسديدات', value: monthlyComparison.current.payments, change: monthlyComparison.changes.payments, icon: CheckCircle2, color: 'blue' },
+                  { label: 'إجمالي المشتريات للشهر', value: monthlyComparison.current.invoices, change: monthlyComparison.changes.invoices, icon: ShoppingCart, color: 'indigo' },
+                  { label: 'إجمالي المسدد', value: monthlyComparison.current.payments, change: monthlyComparison.changes.payments, icon: CheckCircle2, color: 'blue' },
                   { label: 'الديون المتبقية', value: monthlyComparison.current.remaining, change: monthlyComparison.changes.remaining, icon: AlertCircle, color: 'rose' },
                   { label: 'المصروفات العامة', value: monthlyComparison.current.expenses - monthlyComparison.current.losses, change: 0, icon: ArrowUpCircle, color: 'rose' },
                   { label: 'خسائر (تالف/اكسباير)', value: monthlyComparison.current.losses, change: 0, icon: AlertTriangle, color: 'rose' },
                   { label: 'صافي النتيجة', value: monthlyComparison.current.net, change: monthlyComparison.changes.net, icon: DollarSign, color: 'emerald' },
-                  { label: 'فرق الوارد الشهري', value: monthlyComparison.current.revenue - monthlyComparison.previous.revenue, icon: BarChart3, color: 'slate', isDiff: true },
                 ].map((stat, i) => (
                   <Card key={i} className="bg-card border-border p-6 rounded-2xl shadow-sm relative group overflow-hidden border-t-2 border-t-primary/20">
                     <div className="flex items-center gap-3 mb-4">
@@ -4220,9 +4821,9 @@ export default function App() {
                       <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none">{stat.label}</span>
                     </div>
                     <div className="text-2xl font-black text-foreground font-mono tracking-tighter mb-2">
-                       {stat.isDiff ? (stat.value >= 0 ? '+' : '') : ''}{formatNumberWithCommas(stat.value)}
+                       {formatNumberWithCommas(stat.value)}
                     </div>
-                    {!stat.isDiff && stat.label !== 'المصروفات العامة' && (
+                    {stat.label !== 'المصروفات العامة' && (
                       <div className={`text-[10px] font-black flex items-center gap-1 ${stat.change >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                         {stat.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                         {Math.abs(stat.change).toFixed(1)}% {stat.change >= 0 ? 'زيادة' : 'انخفاض'}
@@ -4234,6 +4835,31 @@ export default function App() {
 
              {/* Charts Section */}
              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <Card className="bg-card border-border p-8 rounded-3xl overflow-hidden shadow-sm">
+                   <div className="flex justify-between items-center mb-8">
+                      <div>
+                        <h3 className="text-lg font-black text-foreground">مشتريات الأشهر</h3>
+                        <p className="text-xs text-muted-foreground font-bold">تحليل المشتريات خلال السنة</p>
+                      </div>
+                   </div>
+                   <div className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                         <AreaChart data={monthlyTimelineData}>
+                            <defs>
+                               <linearGradient id="colorPurch" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
+                                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                               </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.5} />
+                            <XAxis dataKey="monthName" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
+                            <YAxis fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
+                            <Tooltip contentStyle={{backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', textAlign: 'right'}} itemStyle={{fontWeight: '900', fontSize: '11px'}} />
+                            <Area type="monotone" dataKey="invoices" name="إجمالي المشتريات" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorPurch)" />
+                         </AreaChart>
+                      </ResponsiveContainer>
+                   </div>
+                </Card>
                 <Card className="bg-card border-border p-8 rounded-3xl overflow-hidden shadow-sm">
                    <div className="flex justify-between items-center mb-8">
                       <div>
@@ -4287,6 +4913,62 @@ export default function App() {
                    </div>
                 </Card>
              </div>
+
+             {supplierPurchaseStats && supplierPurchaseStats.invoices.length > 0 && (
+               <Card className="bg-card border-border rounded-3xl overflow-hidden shadow-sm mt-8 mb-8">
+                  <div className="p-8 border-b border-border bg-indigo-500/5 flex items-center justify-between">
+                     <div className="flex items-center gap-3">
+                        <FileText className="h-6 w-6 text-indigo-600" />
+                        <h3 className="text-xl font-black text-foreground">تفاصيل مشتريات الشهر ({supplierPurchaseStats.entity?.name})</h3>
+                     </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                     <table className="w-full text-right border-collapse">
+                        <thead className="bg-muted/30 text-[10px] font-black text-muted-foreground uppercase border-b border-border">
+                           <tr>
+                              <th className="px-8 py-6">رقم الفاتورة</th>
+                              <th className="px-8 py-6">التاريخ</th>
+                              <th className="px-8 py-6">المبلغ</th>
+                              <th className="px-8 py-6">المسدد</th>
+                              <th className="px-8 py-6">المتبقي</th>
+                              <th className="px-8 py-6">الحالة</th>
+                              <th className="px-8 py-6 text-left">الإجراء</th>
+                           </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/30">
+                           {supplierPurchaseStats.invoices.sort((a,b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime()).map((inv, idx) => (
+                             <tr key={idx} className="group hover:bg-indigo-50/30 transition-colors">
+                               <td className="px-8 py-6 font-bold text-foreground">#{inv.invoiceNumber || idx + 1}</td>
+                               <td className="px-8 py-6 text-sm text-muted-foreground font-bold">{safeFormatDate(toValidDate(inv.date), 'yyyy/MM/dd')}</td>
+                               <td className="px-8 py-6 font-mono font-black text-foreground">{formatNumberWithCommas(inv.amount)}</td>
+                               <td className="px-8 py-6 font-mono font-bold text-emerald-600">{formatNumberWithCommas(inv.paidAmount || 0)}</td>
+                               <td className="px-8 py-6 font-mono font-bold text-rose-500">{formatNumberWithCommas(inv.remainingAmount || 0)}</td>
+                               <td className="px-8 py-6">
+                                  <span className={`text-[10px] font-black px-2 py-1 rounded-full ${Number(inv.remainingAmount || 0) <= 0 ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>
+                                     {Number(inv.remainingAmount || 0) <= 0 ? 'مسدد بالكامل' : 'يوجد متبقي'}
+                                  </span>
+                               </td>
+                               <td className="px-8 py-6 text-left">
+                                  <Button 
+                                     variant="ghost" 
+                                     size="sm" 
+                                     className="h-8 px-3 gap-2 text-primary font-black hover:bg-primary/10 rounded-lg"
+                                     onClick={() => {
+                                       setViewingInvoice(inv);
+                                       setActiveTab('invoice-details');
+                                     }}
+                                  >
+                                     <Eye className="h-4 w-4" />
+                                     عرض
+                                  </Button>
+                               </td>
+                             </tr>
+                           ))}
+                        </tbody>
+                     </table>
+                  </div>
+               </Card>
+             )}
 
              <Card className="bg-card border-border rounded-3xl overflow-hidden shadow-sm">
                 <div className="p-8 border-b border-border bg-muted/10 flex items-center justify-between">
@@ -4375,6 +5057,19 @@ export default function App() {
                   </div>
                 </Card>
              )}
+               </>
+             ) : (
+               <FinancialPeriodReport 
+                  transactions={transactions}
+                  allLedgerEntries={allLedgerEntries}
+                  expiredDamagedLosses={expiredDamagedLosses}
+                  historicalRecords={historicalRecords}
+                  entities={entities}
+                  branches={branches}
+                  employeeAttendance={employeeAttendance}
+                  customerDebts={customerDebts}
+               />
+             )}
           </TabsContent>
 
           <TabsContent value="notifications" className="space-y-6 animate-in fade-in duration-500 pb-20 md:pb-0">
@@ -4445,30 +5140,31 @@ export default function App() {
             </TabsContent>
 
             <TabsContent value="medicine-requests" className="animate-in fade-in zoom-in-95 duration-300 pb-20 md:pb-0">
-               <MedicineRequestsPage branchId={currentBranchId} ownerId={user?.uid || ''} />
+               <MedicineRequestsPage 
+                 branchId={currentBranchId} 
+                 ownerId={user?.uid || ''} 
+                 onDeleteRequest={handleDeleteMedicineRequest}
+                 onDeleteImage={handleDeleteRequestImage}
+               />
             </TabsContent>
 
             <TabsContent value="losses" className="animate-in fade-in slide-in-from-left-4 duration-500 pb-20 md:pb-0">
-               <LossesPage 
-                 losses={expiredDamagedLosses.filter(l => !currentBranchId || l.branchId === currentBranchId)} 
-                 onAdd={() => setIsAddLossOpen(true)}
-                 onEdit={(loss) => {
-                   setSelectedLoss(loss);
-                   setIsEditLossOpen(true);
-                 }}
-                 onDelete={(loss) => {
-                   if (window.confirm('هل أنت متأكد من حذف هذا السجل؟')) {
-                     handleDeleteLoss(loss);
-                   }
-                 }}
-                 onViewInvoice={(invoiceId) => {
-                    const invoice = (allLedgerEntries || []).find(i => i.id === invoiceId);
-                    if (invoice) {
-                       setViewingInvoice(invoice);
-                       setActiveTab('invoice-details');
-                    }
-                 }}
-               />
+                <LossesPage 
+                  losses={expiredDamagedLosses.filter(l => !currentBranchId || l.branchId === currentBranchId)} 
+                  onAdd={() => setIsAddLossOpen(true)}
+                  onEdit={(loss) => {
+                    setSelectedLoss(loss);
+                    setIsEditLossOpen(true);
+                  }}
+                  onDelete={handleDeleteLoss}
+                  onViewInvoice={(invoiceId) => {
+                     const invoice = (allLedgerEntries || []).find(i => i.id === invoiceId);
+                     if (invoice) {
+                        setViewingInvoice(invoice);
+                        setActiveTab('invoice-details');
+                     }
+                  }}
+                />
             </TabsContent>
 
             <TabsContent value="settings" className="space-y-8 animate-in fade-in duration-500 pb-20 md:pb-0">
@@ -4748,6 +5444,16 @@ export default function App() {
           setIsExcelImportOpen(true);
         }}
       />
+
+      {isMultiPaymentOpen && (
+        <MultiPaymentEntry 
+          entities={entities}
+          userId={appUser?.userId || 'guest'}
+          branchId={currentBranchId}
+          onRefresh={() => {}}
+          onClose={() => setIsMultiPaymentOpen(false)}
+        />
+      )}
 
       <Dialog open={isAddInvoiceOpen} onOpenChange={setIsAddInvoiceOpen}>
         <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-2xl lg:max-w-[85vw] max-h-[95vh] overflow-y-auto">
@@ -5072,6 +5778,7 @@ export default function App() {
               <RevenueForm 
                 initialData={selectedTransaction}
                 onSubmit={handleUpdateTransaction}
+                onDelete={() => handleDeleteTransaction(selectedTransaction)}
                 onClose={() => setIsEditTransactionOpen(false)}
                 onImagesChange={setRevenueImageFiles}
               />
@@ -5079,6 +5786,7 @@ export default function App() {
               <ExpenseForm 
                 initialData={selectedTransaction}
                 onSubmit={handleUpdateTransaction}
+                onDelete={() => handleDeleteTransaction(selectedTransaction)}
                 onClose={() => setIsEditTransactionOpen(false)}
               />
             )}
@@ -5120,12 +5828,32 @@ export default function App() {
         onImagesChange={setInvImageFiles}
       />
 
-      <DeleteInvoiceConfirmDialog
-        isOpen={isDeleteInvoiceConfirmOpen}
-        onOpenChange={isDeleteInvoiceConfirmOpen ? setIsDeleteInvoiceConfirmOpen : () => {}}
-        onConfirm={handleDeleteInvoice}
-        invoice={viewingInvoice}
-      />
+      <Dialog open={deleteConfirmState.isOpen} onOpenChange={(open) => setDeleteConfirmState(prev => ({ ...prev, isOpen: open }))}>
+        <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black text-rose-500">{deleteConfirmState.title}</DialogTitle>
+            <DialogDescription className="text-muted-foreground font-bold">
+              {deleteConfirmState.description}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">لا يمكن التراجع عن هذه العملية بعد تأكيد الحذف.</p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setDeleteConfirmState(prev => ({ ...prev, isOpen: false }))} className="rounded-xl font-bold h-12 flex-1">
+              {deleteConfirmState.cancelText || 'إلغاء'}
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={deleteConfirmState.onConfirm} 
+              disabled={deleteConfirmState.isLoading}
+              className="bg-rose-500 hover:bg-rose-600 text-white rounded-xl font-black h-12 flex-1"
+            >
+              {deleteConfirmState.isLoading ? 'جاري الحذف...' : (deleteConfirmState.confirmText || 'تأكيد الحذف')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
         <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-md rounded-3xl">

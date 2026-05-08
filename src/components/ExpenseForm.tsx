@@ -12,7 +12,10 @@ import {
   Wrench, 
   Target,
   Wifi,
-  UserCheck
+  UserCheck,
+  Trash2,
+  Package,
+  AlertTriangle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,10 +34,11 @@ import { CurrencyInput } from '@/components/ui/CurrencyInput';
 interface ExpenseFormProps {
   onSubmit: (data: any) => void;
   onClose: () => void;
+  onDelete?: () => void;
   initialData?: any;
 }
 
-export const ExpenseForm = ({ onSubmit, onClose, initialData }: ExpenseFormProps) => {
+export const ExpenseForm = ({ onSubmit, onClose, onDelete, initialData }: ExpenseFormProps) => {
   const [category, setCategory] = useState<string>(initialData?.category || 'rent_pharmacy');
   const [expenseType, setExpenseType] = useState<'fixed' | 'variable'>(initialData?.expenseType || 'fixed');
   const [amount, setAmount] = useState<number>(initialData?.amount || 0);
@@ -50,9 +54,47 @@ export const ExpenseForm = ({ onSubmit, onClose, initialData }: ExpenseFormProps
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData.entries());
+    
+    // Extract partyName based on category
+    let partyName = "";
+    switch(category) {
+      case 'internet': partyName = data.provider as string; break;
+      case 'service_worker': partyName = data.workerName as string; break;
+      case 'salaries': partyName = data.employeeName as string; break;
+      case 'transport': partyName = data.handler as string; break;
+      case 'marketing': partyName = data.channel as string; break;
+      case 'repairs': partyName = data.target as string; break;
+      case 'materials': partyName = data.supplier as string; break;
+      case 'damaged_expired': partyName = data.itemName as string; break;
+      case 'other': partyName = data.expenseName as string; break;
+      case 'electricity': partyName = (data.serviceType === 'national' ? 'وطنية' : 'مولدة'); break;
+    }
+
+    const description = (data.description as string) || "";
+    // If description is empty, statement = category (human readable)
+    const categoryLabels: Record<string, string> = {
+      rent_pharmacy: 'إيجار صيدلية',
+      electricity: 'كهرباء / مولد',
+      rent_license: 'إيجار إجازة',
+      internet: 'إنترنت واشتراكات',
+      service_worker: 'عامل خدمة',
+      salaries: 'رواتب ومكافآت',
+      transport: 'نقل وتوصيل أدوية',
+      marketing: 'تسويق وإعلان',
+      repairs: 'صيانة معدات أو مكان',
+      materials: 'مواد تشغيلية',
+      damaged_expired: 'تلف واكسباير',
+      other: 'مصروف عام'
+    };
+
+    const catLabel = categoryLabels[category] || category;
+    const statement = description || catLabel;
+
     onSubmit({
       ...data,
       category,
+      partyName,
+      statement,
       expenseType,
       amount: amount,
       date: (data.date && !isNaN(new Date(data.date as string).getTime())) ? new Date(data.date as string) : new Date(),
@@ -207,6 +249,18 @@ export const ExpenseForm = ({ onSubmit, onClose, initialData }: ExpenseFormProps
                           <span className="font-bold">صيانة معدات أو مكان</span>
                         </div>
                       </SelectItem>
+                      <SelectItem value="materials" className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-amber-500/10 rounded-lg"><Package className="h-5 w-5 text-amber-500" /></div>
+                          <span className="font-bold">مواد تشغيلية</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="damaged_expired" className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-rose-500/10 rounded-lg"><AlertTriangle className="h-5 w-5 text-rose-500" /></div>
+                          <span className="font-bold">تلف واكسباير</span>
+                        </div>
+                      </SelectItem>
                       <SelectItem value="other" className="py-3 px-4">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-muted rounded-lg"><HelpCircle className="h-5 w-5 text-muted-foreground" /></div>
@@ -235,6 +289,20 @@ export const ExpenseForm = ({ onSubmit, onClose, initialData }: ExpenseFormProps
                     <FileText className="h-10 w-10 text-blue-500 mx-auto" />
                     <h4 className="font-black text-foreground">معلومات الإيجار</h4>
                     <p className="text-xs text-muted-foreground font-bold">لا توجد حقول إضافية مطلوبة، سيتم تسجيل الإيجار الشهري للصيدلية.</p>
+                  </div>
+                )}
+
+                {category === 'materials' && (
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-black text-muted-foreground uppercase">المجهز أو المحل</Label>
+                    <Input name="supplier" defaultValue={initialData?.partyName || ''} placeholder="اسم المجهز للفواتير التشغيلية" className="bg-background border-border text-foreground h-12 rounded-xl font-bold" />
+                  </div>
+                )}
+
+                {category === 'damaged_expired' && (
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-black text-muted-foreground uppercase">اسم المادة التالفة</Label>
+                    <Input name="itemName" defaultValue={initialData?.partyName || ''} placeholder="اسم المادة أو المنتج" className="bg-background border-border text-foreground h-12 rounded-xl font-bold" />
                   </div>
                 )}
 
@@ -378,6 +446,17 @@ export const ExpenseForm = ({ onSubmit, onClose, initialData }: ExpenseFormProps
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-border">
+        {initialData && onDelete && (
+          <Button 
+            type="button" 
+            variant="destructive"
+            onClick={onDelete}
+            className="flex-1 font-black h-16 rounded-3xl bg-rose-500 hover:bg-rose-600 text-white text-lg"
+          >
+            <Trash2 className="h-5 w-5 mr-2" />
+            حذف المصروف
+          </Button>
+        )}
         <Button 
           type="submit" 
           className="flex-3 font-black text-2xl h-16 rounded-3xl shadow-2xl transition-all scale-100 hover:scale-[1.02] active:scale-[0.98] bg-rose-600 hover:bg-rose-700 shadow-rose-500/30"

@@ -331,11 +331,7 @@ export const EmployeesPage = ({
                                 }}>
                                   <Edit className="h-4 w-4 text-blue-500" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-muted" onClick={() => {
-                                  if (window.confirm(`هل أنت متأكد من حذف الموظف ${emp.name}؟ سيتم حذف جميع سجلات حضوره أيضاً.`)) {
-                                    onDeleteEmployee(emp.id!);
-                                  }
-                                }}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-muted" onClick={() => onDeleteEmployee(emp.id!)}>
                                   <Trash2 className="h-4 w-4 text-rose-500" />
                                 </Button>
                               </div>
@@ -371,11 +367,7 @@ export const EmployeesPage = ({
                                 <Edit className="h-4 w-4" />
                                 تعديل
                               </DropdownMenuItem>
-                              <DropdownMenuItem className="gap-2 font-bold text-rose-500" onClick={() => {
-                                if (window.confirm(`هل أنت متأكد من حذف الموظف ${emp.name}؟`)) {
-                                  onDeleteEmployee(emp.id!);
-                                }
-                              }}>
+                              <DropdownMenuItem className="gap-2 font-bold text-rose-500" onClick={() => onDeleteEmployee(emp.id!)}>
                                 <Trash2 className="h-4 w-4" />
                                 حذف الموظف
                               </DropdownMenuItem>
@@ -448,11 +440,7 @@ export const EmployeesPage = ({
                                 }}>
                                   <Edit className="h-4 w-4 text-blue-500" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-muted" onClick={() => {
-                                  if (window.confirm('حذف سجل الحضور؟')) {
-                                    onDeleteAttendance(record.id!);
-                                  }
-                                }}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-muted" onClick={() => onDeleteAttendance(record.id!)}>
                                   <Trash2 className="h-4 w-4 text-rose-500" />
                                 </Button>
                               </div>
@@ -491,11 +479,7 @@ export const EmployeesPage = ({
                             <Edit className="h-3 w-3" />
                             تعديل
                           </Button>
-                          <Button variant="ghost" size="sm" className="h-8 gap-2 font-bold text-rose-500" onClick={() => {
-                            if (window.confirm('حذف؟')) {
-                              onDeleteAttendance(record.id!);
-                            }
-                          }}>
+                          <Button variant="ghost" size="sm" className="h-8 gap-2 font-bold text-rose-500" onClick={() => onDeleteAttendance(record.id!)}>
                             <Trash2 className="h-3 w-3" />
                             حذف
                           </Button>

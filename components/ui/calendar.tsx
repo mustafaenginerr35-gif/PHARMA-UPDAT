@@ -1,10 +1,10 @@
 "use client"
 
-import * as React from "react"
+import React, { useRef, useEffect } from "react"
 import {
   DayPicker,
   getDefaultClassNames,
-  type DayButton,
+  DayButton,
   type Locale,
 } from "react-day-picker"
 
@@ -189,8 +189,8 @@ function CalendarDayButton({
 }: React.ComponentProps<typeof DayButton> & { locale?: Partial<Locale> }) {
   const defaultClassNames = getDefaultClassNames()
 
-  const ref = React.useRef<HTMLButtonElement>(null)
-  React.useEffect(() => {
+  const ref = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
     if (modifiers.focused) ref.current?.focus()
   }, [modifiers.focused])
 

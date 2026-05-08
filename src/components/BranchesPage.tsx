@@ -135,11 +135,7 @@ export const BranchesPage = ({
                       setEditingBranch(branch);
                       setIsAddOpen(true);
                     }}
-                    onDelete={() => {
-                      if (window.confirm(`هل أنت متأكد من حذف ${branch.name}؟ سيتم حذف جميع البيانات المرتبطة بها.`)) {
-                        onDeleteBranch(branch.id!);
-                      }
-                    }}
+                    onDelete={() => onDeleteBranch(branch.id!)}
                     onArchive={() => onArchiveBranch(branch.id!)}
                     onToggleStatus={() => {
                         if (branch.status === 'pending') {

@@ -9,7 +9,8 @@ import {
   Phone,
   CalendarDays,
   Upload,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,11 +23,12 @@ import { CurrencyInput } from '@/components/ui/CurrencyInput';
 interface RevenueFormProps {
   onSubmit: (data: any) => void;
   onClose: () => void;
+  onDelete?: () => void;
   onImagesChange: (files: File[]) => void;
   initialData?: any;
 }
 
-export const RevenueForm = ({ onSubmit, onClose, onImagesChange, initialData }: RevenueFormProps) => {
+export const RevenueForm = ({ onSubmit, onClose, onDelete, onImagesChange, initialData }: RevenueFormProps) => {
   const [incomeType, setIncomeType] = useState<'cash' | 'credit'>(initialData?.incomeType || 'cash');
   const [saleAmount, setSaleAmount] = useState<string>(initialData?.saleAmount ? formatNumberWithCommas(initialData.saleAmount) : '');
   const [profitPercent, setProfitPercent] = useState<string>(initialData?.profitPercent?.toString() || '15');
@@ -269,6 +271,17 @@ export const RevenueForm = ({ onSubmit, onClose, onImagesChange, initialData }: 
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-border">
+        {initialData && onDelete && (
+          <Button 
+            type="button" 
+            variant="destructive"
+            onClick={onDelete}
+            className="flex-1 font-black h-16 rounded-3xl bg-rose-500 hover:bg-rose-600 text-white text-lg"
+          >
+            <Trash2 className="h-5 w-5 mr-2" />
+            حذف السجل
+          </Button>
+        )}
         <Button 
           type="submit" 
           className="flex-3 font-black text-xl h-16 rounded-3xl shadow-2xl transition-all scale-100 hover:scale-[1.02] active:scale-[0.98] bg-emerald-600 hover:bg-emerald-700"

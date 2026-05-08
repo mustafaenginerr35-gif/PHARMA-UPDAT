@@ -14,7 +14,7 @@ import {
   type DocumentData,
   type QueryConstraint
 } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadString, getDownloadURL, deleteObject, uploadBytesResumable } from 'firebase/storage';
 import { db, auth, storage } from '../lib/firebase';
 
 enum OperationType {
@@ -247,6 +247,31 @@ export const firebaseService = {
       console.error('[Firebase] Error uploading image:', error);
       throw error;
     }
+  },
+
+  async uploadFileWithProgress(path: string, file: File, onProgress?: (percent: number) => void) {
+    const { uid, authenticated } = getEffectiveUserInfo();
+    if (!authenticated) throw new Error('يرجى تسجيل الدخول أولاً');
+
+    const storageRef = ref(storage, `${path}/${uid}_${Date.now()}_${file.name}`);
+    const uploadTask = uploadBytesResumable(storageRef, file);
+
+    return new Promise<string>((resolve, reject) => {
+      uploadTask.on('state_changed', 
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          onProgress?.(progress);
+        }, 
+        (error) => {
+          console.error('[Firebase] Upload failed:', error);
+          reject(error);
+        }, 
+        async () => {
+          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+          resolve(downloadURL);
+        }
+      );
+    });
   },
 
   async deleteImage(url: string) {

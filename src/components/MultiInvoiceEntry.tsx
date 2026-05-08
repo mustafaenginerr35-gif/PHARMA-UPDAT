@@ -25,7 +25,11 @@ import {
   Loader2, 
   AlertCircle, 
   CheckCircle2,
-  Table as TableIcon
+  Table as TableIcon,
+  Image as ImageIcon,
+  Paperclip,
+  Upload,
+  X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Entity, LedgerEntry, Transaction } from '../db';
@@ -45,6 +49,8 @@ interface MultiInvoiceRow {
   isValid: boolean;
   error?: string;
   entityId?: string;
+  imageFiles?: File[];
+  uploadProgress?: number;
 }
 
 interface MultiInvoiceEntryProps {
@@ -81,7 +87,8 @@ export function MultiInvoiceEntry({
       paidAmount: '0',
       bonus: '',
       notes: '',
-      isValid: false
+      isValid: false,
+      imageFiles: []
     };
   }
 
@@ -216,6 +223,26 @@ export function MultiInvoiceEntry({
         const net = total - discount;
         const remaining = net - paid;
 
+        // Upload images first if any
+        let uploadedUrls: string[] = [];
+        if (row.imageFiles && row.imageFiles.length > 0) {
+           for (let i = 0; i < row.imageFiles.length; i++) {
+              try {
+                const file = row.imageFiles[i];
+                const url = await firebaseService.uploadFileWithProgress('invoices', file, (percent) => {
+                   // Calculate overall progress for row: (completed_files + current_file_progress) / total_files
+                   const overallPercent = ((i * 100) + percent) / row.imageFiles!.length;
+                   setRows(prev => prev.map(r => r.id === row.id ? { ...r, uploadProgress: overallPercent } : r));
+                });
+                uploadedUrls.push(url);
+              } catch (uploadError) {
+                console.error(`Failed to upload file ${i} for invoice ${row.invoiceNumber}:`, uploadError);
+                // Continue with other files or fail? For now, we continue.
+              }
+           }
+           setRows(prev => prev.map(r => r.id === row.id ? { ...r, uploadProgress: 100 } : r));
+        }
+
         const newEntry: Omit<LedgerEntry, 'id'> = {
           accountId: entity.id!,
           accountName: entity.name,
@@ -235,6 +262,7 @@ export function MultiInvoiceEntry({
           balanceAfterOperation: (entity.balance || 0) + remaining,
           ownerId: userId,
           branchId: branchId as any,
+          imageUrls: uploadedUrls,
           notes: row.notes,
           source: 'multi_entry',
           createdAt: new Date(),
@@ -323,6 +351,7 @@ export function MultiInvoiceEntry({
                   <TableHead className="text-right font-black w-24">الخصم</TableHead>
                   <TableHead className="text-right font-black w-32">المسدد</TableHead>
                   <TableHead className="text-right font-black w-32 bg-primary/5">المتبقي</TableHead>
+                  <TableHead className="text-right font-black w-20">الصور</TableHead>
                   <TableHead className="text-right font-black w-24">البونص</TableHead>
                   <TableHead className="text-right font-black">ملاحظات</TableHead>
                   <TableHead className="w-12"></TableHead>
@@ -399,6 +428,54 @@ export function MultiInvoiceEntry({
                       <TableCell className="p-2 bg-primary/5">
                         <div className="h-9 flex items-center justify-end px-3 text-xs font-black text-amber-700 font-mono">
                           {formatNumberWithCommas(remaining)}
+                        </div>
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <div className="flex flex-col items-center justify-center gap-1">
+                          <div className="relative group/img">
+                            <input 
+                              type="file" 
+                              multiple 
+                              id={`file-upload-${row.id}`} 
+                              className="hidden" 
+                              accept="image/*,application/pdf"
+                              onChange={e => {
+                                const files = Array.from(e.target.files || []);
+                                if (files.length > 0) {
+                                  setRows(prev => prev.map(r => r.id === row.id ? { ...r, imageFiles: [...(r.imageFiles || []), ...files] } : r));
+                                }
+                              }}
+                            />
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 text-primary hover:bg-primary/10 rounded-lg relative"
+                              onClick={() => document.getElementById(`file-upload-${row.id}`)?.click()}
+                              title="إرفاق صور أو PDF"
+                            >
+                              <Paperclip className="h-4 w-4" />
+                              {(row.imageFiles?.length || 0) > 0 && (
+                                <span className="absolute -top-1 -right-1 bg-primary text-white text-[9px] h-4 w-4 rounded-full flex items-center justify-center font-black">
+                                  {row.imageFiles?.length}
+                                </span>
+                              )}
+                            </Button>
+                            
+                            {(row.imageFiles?.length || 0) > 0 && (
+                              <button 
+                                onClick={() => setRows(prev => prev.map(r => r.id === row.id ? { ...r, imageFiles: [] } : r))}
+                                className="absolute -bottom-1 -left-1 bg-rose-500 text-white rounded-full p-0.5 opacity-0 group-hover/img:opacity-100 transition-opacity"
+                                title="مسح المرفقات"
+                              >
+                                <X className="h-2.5 w-2.5" />
+                              </button>
+                            )}
+                          </div>
+                          {row.uploadProgress !== undefined && row.uploadProgress > 0 && row.uploadProgress < 100 && (
+                             <div className="w-full max-w-[40px] h-1 bg-muted rounded-full overflow-hidden">
+                               <div className="bg-primary h-full transition-all duration-300" style={{ width: `${row.uploadProgress}%` }} />
+                             </div>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="p-2">

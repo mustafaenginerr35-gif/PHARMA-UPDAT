@@ -21,7 +21,8 @@ import {
   Settings, 
   MoreHorizontal,
   CheckCircle,
-  Users
+  Users,
+  BarChart3
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -62,6 +63,7 @@ interface SupplierAccountPageProps {
   onPartialPayment: (invoice: LedgerEntry) => void;
   onFullPayment: (invoice: LedgerEntry) => void;
   onShowImage?: (url: string) => void;
+  onDeleteAttachment?: (ledgerId: string, url: string) => void;
   onEditPayment?: (payment: LedgerEntry) => void;
   onDeletePayment?: (paymentId: string) => void;
   onEditBonus?: (bonus: Bonus) => void;
@@ -88,6 +90,7 @@ export const SupplierAccountPage = ({
   onPartialPayment,
   onFullPayment,
   onShowImage,
+  onDeleteAttachment,
   onEditPayment,
   onDeletePayment,
   onEditBonus,
@@ -145,6 +148,36 @@ export const SupplierAccountPage = ({
         return toValidDate(dateB).getTime() - toValidDate(dateA).getTime();
       });
   }, [activities, ledgerEntries, bonuses]);
+
+  const monthlyPurchases = useMemo(() => {
+    const invoices = ledgerEntries.filter(e => e.operationType === 'invoice');
+    const months: Record<string, any> = {};
+    
+    invoices.forEach(inv => {
+      const date = toValidDate(inv.date);
+      const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+      if (!months[key]) {
+        months[key] = {
+          year: date.getFullYear(),
+          month: date.getMonth() + 1,
+          monthName: safeFormatDate(date, 'MMMM'),
+          total: 0,
+          count: 0,
+          paid: 0,
+          remaining: 0
+        };
+      }
+      months[key].total += Number(inv.amount || 0);
+      months[key].count += 1;
+      months[key].paid += Number(inv.paidAmount || 0);
+      months[key].remaining += Number(inv.remainingAmount || 0);
+    });
+    
+    return Object.values(months).sort((a: any, b: any) => {
+      if (a.year !== b.year) return b.year - a.year;
+      return b.month - a.month;
+    });
+  }, [ledgerEntries]);
 
   return (
     <div className="space-y-6 animate-in slide-in-from-left duration-300">
@@ -239,6 +272,10 @@ export const SupplierAccountPage = ({
           <TabsTrigger value="payments" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
             <Receipt className="h-4 w-4" />
             التسديدات
+          </TabsTrigger>
+          <TabsTrigger value="monthly" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
+            <BarChart3 className="h-4 w-4" />
+            المشتريات الشهرية
           </TabsTrigger>
           <TabsTrigger value="bonuses" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
             <Gift className="h-4 w-4" />
@@ -537,6 +574,49 @@ export const SupplierAccountPage = ({
              </div>
           </TabsContent>
 
+          <TabsContent value="monthly" className="animate-in fade-in zoom-in-95 duration-300">
+             <Card className="bg-card border-border overflow-hidden rounded-2xl">
+                <div className="overflow-x-auto">
+                   <table className="w-full text-right">
+                      <thead className="bg-muted/50 border-b border-border text-[10px] font-bold text-muted-foreground uppercase">
+                         <tr>
+                            <th className="px-6 py-4">الشهر والسنة</th>
+                            <th className="px-6 py-4 text-center">عدد الفواتير</th>
+                            <th className="px-6 py-4">إجمالي المشتريات</th>
+                            <th className="px-6 py-4">المسدد</th>
+                            <th className="px-6 py-4">المتبقي</th>
+                            <th className="px-6 py-4 text-center">النسبة</th>
+                         </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                         {monthlyPurchases.map((m: any, idx: number) => {
+                            const percent = m.total > 0 ? (m.paid / m.total) * 100 : 0;
+                            return (
+                               <tr key={idx} className="hover:bg-muted/30 transition-colors">
+                                  <td className="px-6 py-4 font-bold text-foreground">
+                                     {m.monthName} {m.year}
+                                  </td>
+                                  <td className="px-6 py-4 text-center font-bold text-muted-foreground">{m.count}</td>
+                                  <td className="px-6 py-4 font-black font-mono text-foreground">{formatNumberWithCommas(m.total)}</td>
+                                  <td className="px-6 py-4 font-bold font-mono text-emerald-600">{formatNumberWithCommas(m.paid)}</td>
+                                  <td className="px-6 py-4 font-bold font-mono text-rose-500">{formatNumberWithCommas(m.remaining)}</td>
+                                  <td className="px-6 py-4 text-center">
+                                     <div className="flex items-center gap-2 justify-center">
+                                        <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                                           <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, percent)}%` }} />
+                                        </div>
+                                        <span className="text-[10px] font-bold text-muted-foreground">{percent.toFixed(0)}%</span>
+                                     </div>
+                                  </td>
+                               </tr>
+                            );
+                         })}
+                      </tbody>
+                   </table>
+                </div>
+             </Card>
+          </TabsContent>
+
           <TabsContent value="bonuses" className="animate-in fade-in zoom-in-95 duration-300">
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {bonuses.reverse().map((bonus) => (
@@ -722,11 +802,9 @@ export const SupplierAccountPage = ({
                           size="icon" 
                           variant="destructive" 
                           className="h-7 w-7 rounded-lg"
-                          onClick={(e_stop) => {
-                            e_stop.stopPropagation();
-                            if (window.confirm('هل تريد حذف هذا المرفق؟')) {
-                              toast.info('حذف الصور يتطلب تعديل السجل المالي المرتبط بها');
-                            }
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            onDeleteAttachment?.(e.id!, url);
                           }}
                         >
                           <Trash2 className="h-4 w-4" />

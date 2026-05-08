@@ -54,9 +54,11 @@ import { ImageCapture } from './ImageCapture';
 interface MedicineRequestsPageProps {
   branchId: string | null;
   ownerId: string;
+  onDeleteRequest: (id: string) => void;
+  onDeleteImage: (id: string) => void;
 }
 
-export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ branchId, ownerId }) => {
+export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ branchId, ownerId, onDeleteRequest, onDeleteImage }) => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingRequest, setEditingRequest] = useState<MedicineRequest | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -201,28 +203,6 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
       toast.success('تم تحديث حالة الطلب');
     } catch (err) {
       toast.error('حدث خطأ أثناء تحديث الحالة');
-    }
-  };
-
-  const handleDeleteRequest = async (id: string) => {
-    if (window.confirm('هل أنت متأكد من حذف هذا الطلب؟')) {
-      try {
-        await firebaseService.deleteDocument('medicineRequests', id);
-        toast.success('تم حذف الطلب');
-      } catch (err) {
-        toast.error('حدث خطأ أثناء الحذف');
-      }
-    }
-  };
-
-  const handleDeleteImage = async (id: string) => {
-    if (window.confirm('هل أنت متأكد من حذف صورة العلاج؟')) {
-      try {
-        await firebaseService.updateDocument('medicineRequests', id, { imageUrl: null });
-        toast.success('تم حذف الصورة');
-      } catch (err) {
-        toast.error('حدث خطأ أثناء حذف الصورة');
-      }
     }
   };
 
@@ -480,7 +460,7 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
                   <div className={`absolute top-0 left-0 w-1.5 h-full ${status.color.split(' ')[0]}`}></div>
                   
                   {/* Card Thumbnail */}
-                  {req.imageUrl && (
+                      {req.imageUrl && (
                     <div className="relative aspect-video w-full overflow-hidden bg-muted group/img">
                       <img 
                         src={req.imageUrl} 
@@ -492,7 +472,7 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
                         <Maximize2 className="h-8 w-8 text-white drop-shadow-lg" />
                       </div>
                       <button 
-                         onClick={() => handleDeleteImage(req.id!)}
+                         onClick={() => onDeleteImage(req.id!)}
                          className="absolute top-2 left-2 bg-destructive/80 text-white p-1.5 rounded-lg opacity-0 group-hover/img:opacity-100 transition-opacity z-10"
                       >
                          <Trash2 className="h-3.5 w-3.5" />
@@ -579,7 +559,7 @@ export const MedicineRequestsPage: React.FC<MedicineRequestsPageProps> = ({ bran
                           variant="outline" 
                           size="sm" 
                           className={`text-[10px] font-black h-9 border-rose-500/20 text-rose-500 hover:bg-rose-500/10 gap-1.5 ${req.status === 'waiting' ? 'col-span-1' : ''}`}
-                          onClick={() => handleDeleteRequest(req.id!)}
+                          onClick={() => onDeleteRequest(req.id!)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           حذف الطلب

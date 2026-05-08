@@ -59,9 +59,10 @@ interface HistoricalMigrationPageProps {
   ownerId: string;
   onImportExcel?: () => void;
   onMultiEntry?: () => void;
+  onDeleteHistoricalRecord: (id: string) => void;
 }
 
-export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = ({ branchId, ownerId, onImportExcel, onMultiEntry }) => {
+export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = ({ branchId, ownerId, onImportExcel, onMultiEntry, onDeleteHistoricalRecord }) => {
   const [activeTab, setActiveTab] = useState('opening');
   const [editingRecord, setEditingRecord] = useState<HistoricalRecord | null>(null);
   
@@ -319,10 +320,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
   };
 
   const handleDeleteRecord = async (id: string) => {
-    if (window.confirm('هل أنت متأكد من حذف هذا السجل التاريخي؟')) {
-      await firebaseService.deleteDocument('historicalRecords', id);
-      toast.success('تم حذف السجل');
-    }
+    onDeleteHistoricalRecord(id);
   };
 
   const totals = historicalRecords?.reduce((acc, rec) => {
