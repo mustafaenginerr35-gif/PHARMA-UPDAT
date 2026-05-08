@@ -82,6 +82,18 @@ export function MultiInvoiceEntry({
   const [isSaving, setIsSaving] = useState(false);
   const tableRef = useRef<HTMLTableElement>(null);
 
+  // Reset states when dialog opens
+  useEffect(() => {
+    if (open) {
+      setIsSaving(false);
+      setRows(prev => prev.map(r => ({
+        ...r,
+        saveStatus: r.saveStatus === 'success' ? 'success' : 'idle',
+        uploadProgress: r.saveStatus === 'success' ? 100 : 0
+      })));
+    }
+  }, [open]);
+
   function createEmptyRow(): MultiInvoiceRow {
     const today = new Date();
     const nextMonth = new Date();
@@ -222,6 +234,7 @@ export function MultiInvoiceEntry({
       return;
     }
 
+    console.log("Save all started. Total valid rows:", validRows.length);
     setIsSaving(true);
     const branchId = currentBranchId || 'main';
     const userId = appUser?.userId || 'system';
@@ -234,6 +247,7 @@ export function MultiInvoiceEntry({
     };
 
     const savePromises = validRows.map(async (row) => {
+      let docId: string | null = null;
       try {
         setRows(prev => prev.map(r => r.id === row.id ? { ...r, saveStatus: 'saving', uploadProgress: 0 } : r));
 
@@ -244,35 +258,7 @@ export function MultiInvoiceEntry({
         const net = total - discount;
         const remaining = net - paid;
 
-        // 1. Process and Upload Images with compression
-        let uploadedUrls: string[] = [];
-        if (row.imageFiles && row.imageFiles.length > 0) {
-          for (let i = 0; i < row.imageFiles.length; i++) {
-            let file = row.imageFiles[i];
-            
-            // Compress if it's an image
-            if (file.type.startsWith('image/')) {
-              try {
-                file = await imageCompression(file, compressionOptions);
-              } catch (compressError) {
-                console.error('Compression failed, using original file', compressError);
-              }
-            }
-
-            try {
-              const url = await firebaseService.uploadFileWithProgress('invoices', file, (percent) => {
-                const overallPercent = ((i * 100) + percent) / row.imageFiles!.length;
-                setRows(prev => prev.map(r => r.id === row.id ? { ...r, uploadProgress: overallPercent } : r));
-              });
-              uploadedUrls.push(url);
-            } catch (uploadError) {
-              console.error(`Upload failed for file ${i} in invoice ${row.invoiceNumber}`, uploadError);
-              toast.error(`فشل رفع صورة للفاتورة رقم ${row.invoiceNumber}، سيتم الحفظ بدونها`);
-            }
-          }
-        }
-
-        // 2. Prepare Ledger Entry
+        // 1. Prepare Ledger Entry (initially without imageUrls)
         const newEntry: Omit<LedgerEntry, 'id'> = {
           accountId: entity.id!,
           accountName: entity.name,
@@ -294,18 +280,20 @@ export function MultiInvoiceEntry({
           balanceAfterOperation: (entity.balance || 0) + remaining,
           ownerId: userId,
           branchId: branchId as any,
-          imageUrls: uploadedUrls,
+          imageUrls: [], // Empty initially
           notes: row.notes,
           source: 'multi_entry',
           createdAt: new Date(),
           updatedAt: new Date()
         } as any;
 
-        // 3. Save to Firebase
-        const addedId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
+        console.log(`[SaveAll] Saving invoice data first: ${row.invoiceNumber}`);
+
+        // 2. Save to Firebase (Ledger)
+        docId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry) || null;
         
-        if (addedId) {
-          // Add transaction
+        if (docId) {
+          // 3. Add transaction
           await firebaseService.addDocument('transactions', {
             type: 'invoice',
             category: 'invoice',
@@ -324,44 +312,107 @@ export function MultiInvoiceEntry({
             updatedAt: new Date()
           } as Transaction);
 
-          // Update entity balance
+          // 4. Update entity balance
           await firebaseService.updateDocument('entities', entity.id!, {
             balance: (entity.balance || 0) + remaining,
             totalInvoices: (entity.totalInvoices || 0) + 1,
             updatedAt: new Date()
           });
 
-          setRows(prev => prev.map(r => r.id === row.id ? { ...r, saveStatus: 'success', uploadProgress: 100 } : r));
+          // Mark as success in UI (the invoice is saved!)
+          setRows(prev => prev.map(r => r.id === row.id ? { ...r, saveStatus: 'success' } : r));
+          console.log(`[SaveAll] Invoice ${row.invoiceNumber} saved successfully with ID: ${docId}`);
+
+          // 5. Handle Image Uploads Background (non-blocking for the loop)
+          if (row.imageFiles && row.imageFiles.length > 0) {
+            console.log(`[SaveAll] Processing ${row.imageFiles.length} images for saved invoice ID: ${docId}`);
+            
+            const uploadedUrls: string[] = [];
+            let someFailed = false;
+
+            for (let i = 0; i < row.imageFiles.length; i++) {
+              let file = row.imageFiles[i];
+              
+              if (file.type.startsWith('image/')) {
+                try {
+                  file = await imageCompression(file, compressionOptions);
+                } catch (ce) { console.error('Compression failed', ce); }
+              }
+
+              try {
+                // Modified path: invoices/{branchId}/{invoiceId}/{timestamp}_{index}.jpg
+                const storagePath = `invoices/${branchId}/${docId}`;
+                const uploadTask = firebaseService.uploadFileWithProgress(storagePath, file, (percent) => {
+                  const overallPercent = ((i * 100) + percent) / row.imageFiles!.length;
+                  setRows(prev => prev.map(r => r.id === row.id ? { ...r, uploadProgress: overallPercent } : r));
+                });
+
+                const timeoutPromise = new Promise<never>((_, reject) => 
+                  setTimeout(() => reject(new Error('TIMEOUT')), 20000)
+                );
+
+                const url = await Promise.race([uploadTask, timeoutPromise]) as string;
+                uploadedUrls.push(url);
+              } catch (ue: any) {
+                someFailed = true;
+                console.error(`[SaveAll] Image ${i} failed for ${row.invoiceNumber}:`, ue);
+              }
+            }
+
+            if (uploadedUrls.length > 0) {
+              console.log(`[SaveAll] Updating invoice ${docId} with ${uploadedUrls.length} image URLs`);
+              await firebaseService.updateDocument('ledgerEntries', docId, {
+                imageUrls: uploadedUrls,
+                notes: row.notes + (someFailed ? " [فشل رفع بعض المرفقات]" : "")
+              });
+              setRows(prev => prev.map(r => r.id === row.id ? { ...r, uploadProgress: 100 } : r));
+              
+              if (someFailed) {
+                toast.warning(`تم حفظ القائمة رقم ${row.invoiceNumber} مع فشل رفع بعض المرفقات`);
+              }
+            } else if (someFailed) {
+                toast.error(`تم حفظ القائمة رقم ${row.invoiceNumber} ولكن فشل رفع المرفقات`);
+            }
+          } else {
+            setRows(prev => prev.map(r => r.id === row.id ? { ...r, uploadProgress: 100 } : r));
+          }
+
           return { id: row.id, status: 'success' };
         } else {
           throw new Error('Failed to add document');
         }
-      } catch (error) {
-        console.error(`Row save failed for ${row.id}:`, error);
+      } catch (error: any) {
+        console.error(`Row save failed for ${row.invoiceNumber}:`, error);
         setRows(prev => prev.map(r => r.id === row.id ? { ...r, saveStatus: 'error', saveError: String(error) } : r));
         return { id: row.id, status: 'error', error };
       }
     });
 
-    const results = await Promise.allSettled(savePromises);
-    const successCount = results.filter(r => r.status === 'fulfilled').length;
-    
-    if (successCount > 0) {
-      toast.success(`تم حفظ ${successCount} فاتورة بنجاح`);
-      setTimeout(() => {
-        onSuccess?.();
-        // Only close if all succeeded or user manually closes
-        const hasErrors = results.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value.status === 'error'));
-        if (!hasErrors) {
-          onOpenChange(false);
-          setRows([createEmptyRow()]);
-        }
-      }, 1500);
-    } else {
-      toast.error('لم يتم حفظ أي فاتورة، يرجى التحقق من الأخطاء');
+    try {
+      const results = await Promise.allSettled(savePromises);
+      const successCount = results.filter(r => r.status === 'fulfilled' && (r.value as any).status === 'success').length;
+      
+      console.log(`Save all finished. Success: ${successCount} / ${validRows.length}`);
+
+      if (successCount > 0) {
+        toast.success(`تم حفظ ${successCount} فاتورة بنجاح`);
+        setTimeout(() => {
+          onSuccess?.();
+          const hasErrors = results.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && (r.value as any).status === 'error'));
+          if (!hasErrors) {
+            onOpenChange(false);
+            setRows([createEmptyRow()]);
+          }
+        }, 1500);
+      } else {
+        toast.error('لم يتم حفظ أي فاتورة، يرجى التحقق من الأخطاء');
+      }
+    } catch (criticalError) {
+      console.error("Critical error in save all:", criticalError);
+      toast.error("حدث خطأ غير متوقع أثناء الحفظ");
+    } finally {
+      setIsSaving(false);
     }
-    
-    setIsSaving(false);
   };
 
   return (

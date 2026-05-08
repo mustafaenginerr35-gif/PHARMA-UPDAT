@@ -250,28 +250,49 @@ export const firebaseService = {
   },
 
   async uploadFileWithProgress(path: string, file: File, onProgress?: (percent: number) => void) {
+    console.log(`[Firebase Storage] Starting upload to ${path}/${file.name}`);
+    console.log(`[Firebase Storage] File type: ${file.type}, size: ${file.size} bytes`);
+    
     const { uid, authenticated } = getEffectiveUserInfo();
-    if (!authenticated) throw new Error('يرجى تسجيل الدخول أولاً');
+    if (!authenticated) {
+      console.error('[Firebase Storage] Upload failed: User not authenticated');
+      throw new Error('يرجى تسجيل الدخول أولاً');
+    }
 
-    const storageRef = ref(storage, `${path}/${uid}_${Date.now()}_${file.name}`);
-    const uploadTask = uploadBytesResumable(storageRef, file);
+    try {
+      const fullPath = `${path}/${uid}_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      console.log(`[Firebase Storage] Full storage path: ${fullPath}`);
+      
+      const storageRef = ref(storage, fullPath);
+      const uploadTask = uploadBytesResumable(storageRef, file);
 
-    return new Promise<string>((resolve, reject) => {
-      uploadTask.on('state_changed', 
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          onProgress?.(progress);
-        }, 
-        (error) => {
-          console.error('[Firebase] Upload failed:', error);
-          reject(error);
-        }, 
-        async () => {
-          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-          resolve(downloadURL);
-        }
-      );
-    });
+      return new Promise<string>((resolve, reject) => {
+        uploadTask.on('state_changed', 
+          (snapshot) => {
+            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            console.log(`[Firebase Storage] Upload progress: ${progress.toFixed(2)}%`);
+            onProgress?.(progress);
+          }, 
+          (error) => {
+            console.error('[Firebase Storage] Upload task error:', error);
+            reject(error);
+          }, 
+          async () => {
+            try {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+              console.log(`[Firebase Storage] Upload complete. Download URL: ${downloadURL}`);
+              resolve(downloadURL);
+            } catch (urlError) {
+              console.error('[Firebase Storage] Error getting download URL:', urlError);
+              reject(urlError);
+            }
+          }
+        );
+      });
+    } catch (err) {
+      console.error('[Firebase Storage] Error initializing upload:', err);
+      throw err;
+    }
   },
 
   async deleteImage(url: string) {

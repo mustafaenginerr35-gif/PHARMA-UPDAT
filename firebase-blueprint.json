@@ -61,6 +61,7 @@
     "announcementReads": { "schema": "object", "description": "Announcements read status" },
     "activationCodes": { "schema": "object", "description": "App activation codes" },
     "activationRequests": { "schema": "object", "description": "Activation requests" },
-    "recoveryRequests": { "schema": "object", "description": "Account recovery" }
+    "recoveryRequests": { "schema": "object", "description": "Account recovery" },
+    "entityActivities": { "schema": "object", "description": "Tracking entity actions" }
   }
 }

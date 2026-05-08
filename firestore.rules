@@ -136,5 +136,17 @@ service cloud.firestore {
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
+
+    match /entityActivities/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /recoveryRequests/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
   }
 }
