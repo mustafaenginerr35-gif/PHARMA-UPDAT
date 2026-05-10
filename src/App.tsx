@@ -3497,6 +3497,114 @@ export default function App() {
     }
   };
 
+  const handleViewRecordFromReport = (type: string, id: string) => {
+    console.log("Viewing record from report:", type, id);
+    if (type === 'invoice' || type === 'purchase' || type === 'payment' || type === 'expense' || type === 'salary' || type === 'debt' || type === 'supplier_debt') {
+      const entry = allLedgerEntries.find(e => e.id === id);
+      if (entry) {
+        setViewingInvoice(entry);
+        setActiveTab('invoice-details');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        toast.info('جاري عرض التفاصيل');
+      } else {
+        toast.error('لم يتم العثور على السجل في سجلات الأستاذ');
+      }
+    } else if (type === 'revenue' || type === 'damaged' || type === 'expired') {
+      const tx = transactions.find(t => t.id === id) || (expiredDamagedLosses as any[]).find(l => l.id === id);
+      if (tx) {
+        if (type === 'revenue') {
+          setViewingRevenue(tx);
+          setIsViewRevenueOpen(true);
+        } else {
+          // For losses, maybe there's a view modal too
+          toast.info('عرض تفاصيل التالف/الاكسباير متاح من خلال التعديل');
+        }
+      } else {
+        toast.error('لم يتم العثور على المعاملة');
+      }
+    } else if (type === 'opening_cash') {
+      setActiveTab('financial-settings');
+      toast.info('جاري الانتقال للإعدادات المالية');
+    } else {
+      toast.info('عرض التفاصيل لهذا النوع غير متاح حالياً');
+    }
+  };
+
+  const handleEditRecordFromReport = (type: string, id: string) => {
+    console.log("Editing record from report:", type, id);
+    if (type === 'invoice' || type === 'purchase' || type === 'payment' || type === 'expense' || type === 'salary' || type === 'debt' || type === 'supplier_debt') {
+      const entry = allLedgerEntries.find(e => e.id === id);
+      if (entry) {
+        setViewingInvoice(entry);
+        setIsEditInvoiceOpen(true);
+      }
+    } else if (type === 'revenue') {
+      const tx = transactions.find(t => t.id === id);
+      if (tx) {
+        setSelectedTransaction(tx);
+        setIsAddRevenueOpen(true);
+      }
+    } else if (type === 'damaged' || type === 'expired') {
+      const loss = expiredDamagedLosses.find(l => l.id === id);
+      if (loss) {
+        // Find if there's an edit loss modal? I'll assume adding/editing is the same or similar
+        toast.info('يمكن تعديل هذه السجلات من قسم التالف والاكسباير');
+      }
+    } else if (type === 'opening_cash') {
+       const o = rawOpeningCash.find(item => item.id === id);
+       if (o) {
+         setActiveTab('financial-settings');
+         toast.info('يمكن تعديل الرصيد الافتتاحي من الإعدادات المالية');
+       }
+    }
+  };
+
+  const handleDeleteRecordFromReport = async (type: string, id: string) => {
+    console.log("Deleting record from report:", type, id);
+    
+    const confirmDelete = (title: string, desc: string, onConfirm: () => void) => {
+      triggerDelete(title, desc, onConfirm);
+    };
+
+    if (type === 'invoice' || type === 'purchase' || type === 'payment' || type === 'expense' || type === 'salary' || type === 'debt' || type === 'supplier_debt') {
+      const entry = allLedgerEntries.find(e => e.id === id);
+      if (entry) {
+        confirmDelete(
+          'حذف السجل المالي', 
+          'هل أنت متأكد من حذف هذا السجل من الأستاذ العام؟ سيؤثر هذا على كشوفات الحساب والموازين المالية.',
+          () => handleDeleteInvoice(entry)
+        );
+      }
+    } else if (type === 'revenue') {
+      const tx = transactions.find(t => t.id === id);
+      if (tx) {
+        confirmDelete(
+          'حذف العملية', 
+          'هل أنت متأكد من حذف هذه المعاملة؟ سيتم خصم المبلغ من الصندوق وتحديث الأرباح.',
+          () => handleDeleteTransaction(tx)
+        );
+      }
+    } else if (type === 'damaged' || type === 'expired') {
+      const loss = expiredDamagedLosses.find(l => l.id === id);
+      if (loss) {
+        confirmDelete(
+          'حذف سجل تالف/اكسباير',
+          'هل أنت متأكد من حذف هذا السجل؟ لن يمكن التراجع عن هذه العملية.',
+          () => handleDeleteLoss(loss)
+        );
+      }
+    } else if (type === 'opening_cash') {
+       const o = rawOpeningCash.find(item => item.id === id);
+       if (o) {
+          confirmDelete(
+            'حذف رصيد افتتاحي',
+            'سيؤدي حذف الرصيد الافتتاحي إلى تغيير رصيد الصندوق للمدة الحالية والمقبلة. هل تود المتابعة؟',
+            () => handleDeleteOpeningCash(o)
+          );
+       }
+    }
+  };
+
   const handleLogout = async () => {
     await signOut(auth);
     localStorage.removeItem('pharma-is-authenticated');
@@ -5738,6 +5846,10 @@ export default function App() {
                   employeeAttendance={employeeAttendance}
                   openingCash={rawOpeningCash}
                   customerDebts={customerDebts}
+                  onViewRecord={handleViewRecordFromReport}
+                  onEditRecord={handleEditRecordFromReport}
+                  onDeleteRecord={handleDeleteRecordFromReport}
+                  onRefresh={() => window.location.reload()}
                />
              )}
           </TabsContent>

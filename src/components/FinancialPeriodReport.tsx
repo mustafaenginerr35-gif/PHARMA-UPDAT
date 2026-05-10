@@ -20,13 +20,34 @@ import {
   Package,
   History,
   Layers,
-  FileDown
+  FileDown,
+  ChevronLeft,
+  MoreVertical,
+  Eye,
+  Edit,
+  Trash2,
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { 
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { 
   format, 
   startOfMonth, 
@@ -73,19 +94,27 @@ interface FinancialPeriodReportProps {
   entities: Entity[];
   branches: PharmacyBranch[];
   employeeAttendance: EmployeeAttendance[];
-  openingCash: any[]; // Use any[] for now to avoid import issues or define full type
+  openingCash: any[]; 
   customerDebts: CustomerDebt[];
+  // Actions
+  onRefresh?: () => void;
+  onViewRecord?: (type: string, id: string) => void;
+  onEditRecord?: (type: string, id: string) => void;
+  onDeleteRecord?: (type: string, id: string) => void;
 }
 
 type ReportEntry = {
   id: string;
+  originalId: string;
   date: Date;
-  type: 'revenue' | 'expense' | 'damaged' | 'expired' | 'payment' | 'purchase' | 'opening_cash';
+  type: 'revenue' | 'expense' | 'damaged' | 'expired' | 'payment' | 'purchase' | 'opening_cash' | 'salary' | 'debt' | 'supplier_debt';
   description: string;
   amount: number;
   profit: number;
   branchName: string;
-  source: 'direct' | 'excel' | 'historical';
+  branchId?: string;
+  source: 'direct' | 'excel' | 'historical' | 'ledger' | 'system';
+  originalObject?: any;
 };
 
 export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
@@ -97,13 +126,21 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
   branches,
   employeeAttendance,
   openingCash,
-  customerDebts
+  customerDebts,
+  onRefresh,
+  onViewRecord,
+  onEditRecord,
+  onDeleteRecord
 }) => {
   const [fromDate, setFromDate] = useState<string>(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [toDate, setToDate] = useState<string>(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [branchId, setBranchId] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
-  const [tableFilter, setTableFilter] = useState<'all' | 'revenue' | 'expense' | 'damaged' | 'payment' | 'purchase'>('all');
+  const [tableFilter, setTableFilter] = useState<'all' | 'revenue' | 'expense' | 'damaged' | 'payment' | 'purchase' | 'opening_cash'>('all');
+
+  const [drilldownType, setDrilldownType] = useState<string | null>(null);
+  const [isDrilldownOpen, setIsDrilldownOpen] = useState(false);
+  const [drilldownSearch, setDrilldownSearch] = useState('');
 
   const reportRef = useRef<HTMLDivElement>(null);
 
@@ -125,68 +162,83 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
     // 1. Revenues
     const revenueEntries: ReportEntry[] = [
       ...transactions
-        .filter(t => (t.type === 'revenue' || t.type === 'income') && checkInterval(t.date) && checkBranch(t.branchId))
+        .filter(t => (t.type === 'revenue' || t.type === 'income') && checkInterval(t.date) && checkBranch(t.branchId) && !t.isDeleted)
         .map(t => ({
-          id: t.id || Math.random().toString(),
+          id: `tx-${t.id}`,
+          originalId: t.id!,
           date: toValidDate(t.date),
           type: 'revenue' as const,
           description: t.description || t.customerName || 'وارد نقدي',
           amount: Number(t.saleAmount || t.amount || 0),
           profit: Number(t.profitAmount || t.netProfit || 0),
           branchName: branches.find(b => b.id === t.branchId)?.name || 'غير محدد',
-          source: t.source === 'excel_import' ? 'excel' : t.isHistorical ? 'historical' : 'direct' as const
+          branchId: t.branchId,
+          source: t.source === 'excel_import' ? 'excel' : t.isHistorical ? 'historical' : 'direct' as const,
+          originalObject: t
         })),
       ...historicalRecords
         .filter(r => r.entryType === 'revenue' && checkInterval(r.date) && checkBranch(r.branchId))
         .map(r => ({
-          id: r.id || Math.random().toString(),
+          id: `hist-${r.id}`,
+          originalId: r.id!,
           date: toValidDate(r.date!),
           type: 'revenue' as const,
           description: r.notes || 'وارد (تاريخي)',
           amount: Number(r.amount || 0),
           profit: Number(r.totalProfits || 0),
           branchName: branches.find(b => b.id === r.branchId)?.name || 'غير محدد',
-          source: 'historical' as const
+          branchId: r.branchId || undefined,
+          source: 'historical' as const,
+          originalObject: r
         }))
     ];
 
-    // 2. Expenses
+    // 2. Expenses & Salaries
     const expenseEntries: ReportEntry[] = [
       ...transactions
-        .filter(t => t.type === 'expense' && checkInterval(t.date) && checkBranch(t.branchId))
+        .filter(t => t.type === 'expense' && checkInterval(t.date) && checkBranch(t.branchId) && !t.isDeleted)
         .map(t => ({
-          id: t.id || Math.random().toString(),
+          id: `tx-exp-${t.id}`,
+          originalId: t.id!,
           date: toValidDate(t.date),
           type: 'expense' as const,
           description: t.description || t.expenseClassification || 'مصروف عام',
           amount: Number(t.amount || 0),
           profit: 0,
           branchName: branches.find(b => b.id === t.branchId)?.name || 'غير محدد',
-          source: t.source === 'excel_import' ? 'excel' : t.isHistorical ? 'historical' : 'direct' as const
+          branchId: t.branchId,
+          source: t.source === 'excel_import' ? 'excel' : t.isHistorical ? 'historical' : 'direct' as const,
+          originalObject: t
         })),
       ...employeeAttendance
         .filter(a => checkInterval(a.date) && checkBranch(a.branchId))
         .map(a => ({
-          id: a.id || Math.random().toString(),
+          id: `sal-${a.id}`,
+          originalId: a.id!,
           date: toValidDate(a.date),
-          type: 'expense' as const,
+          type: 'salary' as const,
           description: `راتب موظف: ${a.employeeName}`,
           amount: Number(a.dailyWage || 0),
           profit: 0,
           branchName: branches.find(b => b.id === a.branchId)?.name || 'غير محدد',
-          source: 'direct' as const
+          branchId: a.branchId || undefined,
+          source: 'direct' as const,
+          originalObject: a
         })),
       ...historicalRecords
         .filter(r => r.entryType === 'expense' && checkInterval(r.date) && checkBranch(r.branchId))
         .map(r => ({
-          id: r.id || Math.random().toString(),
+          id: `hist-exp-${r.id}`,
+          originalId: r.id!,
           date: toValidDate(r.date!),
           type: 'expense' as const,
           description: r.notes || 'مصروف (تاريخي)',
           amount: Number(r.amount || 0),
           profit: 0,
           branchName: branches.find(b => b.id === r.branchId)?.name || 'غير محدد',
-          source: 'historical' as const
+          branchId: r.branchId || undefined,
+          source: 'historical' as const,
+          originalObject: r
         }))
     ];
 
@@ -195,70 +247,85 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
       ...expiredDamagedLosses
         .filter(l => checkInterval(l.date) && checkBranch(l.branchId))
         .map(l => ({
-          id: l.id || Math.random().toString(),
+          id: `loss-${l.id}`,
+          originalId: l.id!,
           date: toValidDate(l.date),
           type: (l.lossType === 'damaged' ? 'damaged' : 'expired') as any,
           description: `${l.lossType === 'damaged' ? 'تالف' : 'اكسباير'}: ${l.itemName}`,
           amount: Number(l.totalLoss || 0),
           profit: 0,
           branchName: branches.find(b => b.id === l.branchId)?.name || 'غير محدد',
-          source: 'direct' as const
+          branchId: l.branchId || undefined,
+          source: 'direct' as const,
+          originalObject: l
         }))
     ];
 
     // 4. Purchases
     const purchaseEntries: ReportEntry[] = [
       ...allLedgerEntries
-        .filter(e => e.operationType === 'invoice' && checkInterval(e.date) && checkBranch(e.branchId))
+        .filter(e => e.operationType === 'invoice' && checkInterval(e.date) && checkBranch(e.branchId) && !e.isDeleted)
         .map(e => ({
-          id: e.id || Math.random().toString(),
+          id: `ledge-inv-${e.id}`,
+          originalId: e.id!,
           date: toValidDate(e.date),
           type: 'purchase' as const,
           description: `فاتورة شراء: ${e.accountName} (#${e.invoiceNumber})`,
           amount: Number(e.amount || 0),
           profit: 0,
           branchName: branches.find(b => b.id === e.branchId)?.name || 'غير محدد',
-          source: e.source === 'excel_import' ? 'excel' : e.isHistorical ? 'historical' : 'direct' as const
+          branchId: e.branchId,
+          source: e.source === 'excel_import' ? 'excel' : e.isHistorical ? 'historical' : 'direct' as const,
+          originalObject: e
         })),
       ...historicalRecords
         .filter(r => r.entryType === 'invoice' && checkInterval(r.date) && checkBranch(r.branchId))
         .map(r => ({
-          id: r.id || Math.random().toString(),
+          id: `hist-inv-${r.id}`,
+          originalId: r.id!,
           date: toValidDate(r.date!),
           type: 'purchase' as const,
           description: `شراء (تاريخي): ${r.entityName || ''} (#${r.invoiceNumber || ''})`,
           amount: Number(r.amount || 0),
           profit: 0,
           branchName: branches.find(b => b.id === r.branchId)?.name || 'غير محدد',
-          source: 'historical' as const
+          branchId: r.branchId || undefined,
+          source: 'historical' as const,
+          originalObject: r
         }))
     ];
 
     // 5. Payments
     const paymentEntries: ReportEntry[] = [
       ...allLedgerEntries
-        .filter(e => e.operationType === 'payment' && checkInterval(e.date) && checkBranch(e.branchId))
+        .filter(e => e.operationType === 'payment' && checkInterval(e.date) && checkBranch(e.branchId) && !e.isDeleted)
         .map(e => ({
-          id: e.id || Math.random().toString(),
+          id: `ledge-pay-${e.id}`,
+          originalId: e.id!,
           date: toValidDate(e.date),
           type: 'payment' as const,
           description: `تسديد للمورد: ${e.accountName}`,
           amount: Number(e.amount || 0),
           profit: 0,
           branchName: branches.find(b => b.id === e.branchId)?.name || 'غير محدد',
-          source: e.source === 'excel_import' ? 'excel' : e.isHistorical ? 'historical' : 'direct' as const
+          branchId: e.branchId,
+          source: e.source === 'excel_import' ? 'excel' : e.isHistorical ? 'historical' : 'direct' as const,
+          originalObject: e
         })),
       ...historicalRecords
         .filter(r => r.entryType === 'payment' && checkInterval(r.date) && checkBranch(r.branchId))
         .map(r => ({
-          id: r.id || Math.random().toString(),
+          id: `hist-pay-${r.id}`,
+          originalId: r.id!,
           date: toValidDate(r.date!),
           type: 'payment' as const,
           description: `تسديد (تاريخي): ${r.entityName || ''}`,
           amount: Number(r.amount || 0),
           profit: 0,
           branchName: branches.find(b => b.id === r.branchId)?.name || 'غير محدد',
-          source: 'historical' as const
+          branchId: r.branchId || undefined,
+          source: 'historical' as const,
+          originalObject: r
         }))
     ];
 
@@ -267,27 +334,69 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
       ...openingCash
         .filter(o => checkInterval(o.date) && checkBranch(o.branchId))
         .map(o => ({
-          id: o.id || Math.random().toString(),
+          id: `op-cash-${o.id}`,
+          originalId: o.id!,
           date: toValidDate(o.date),
           type: 'opening_cash' as const,
           description: `رصيد افتتاحي: ${o.source || 'كاش مرحّل'}`,
           amount: Number(o.amount || 0),
           profit: 0,
           branchName: branches.find(b => b.id === o.branchId)?.name || 'غير محدد',
-          source: 'direct' as const
+          branchId: o.branchId,
+          source: 'direct' as const,
+          originalObject: o
         })),
-      // Legacy support if they are in ledger
       ...allLedgerEntries
         .filter(e => e.sourceType === 'opening_cash' && checkInterval(e.date) && checkBranch(e.branchId))
         .map(e => ({
-          id: e.id || Math.random().toString(),
+          id: `ledge-op-${e.id}`,
+          originalId: e.id!,
           date: toValidDate(e.date),
           type: 'opening_cash' as const,
           description: e.notes || 'رصيد افتتاحي (سجل)',
           amount: Number(e.amount || 0),
           profit: 0,
           branchName: branches.find(b => b.id === e.branchId)?.name || 'غير محدد',
-          source: 'direct' as const
+          branchId: e.branchId,
+          source: 'direct' as const,
+          originalObject: e
+        }))
+    ];
+
+    // 7. Debts (Current snapshot)
+    const customerDebtEntries: ReportEntry[] = [
+      ...customerDebts
+        .filter(d => checkBranch(d.branchId) && d.status !== 'paid')
+        .map(d => ({
+          id: `debt-${d.id}`,
+          originalId: d.id!,
+          date: toValidDate(d.saleDate),
+          type: 'debt' as const,
+          description: `دين زبون: ${d.customerName}`,
+          amount: Number(d.remainingAmount || 0),
+          profit: 0,
+          branchName: branches.find(b => b.id === d.branchId)?.name || 'غير محدد',
+          branchId: d.branchId || undefined,
+          source: 'system' as const,
+          originalObject: d
+        }))
+    ];
+
+    const supplierDebtEntries: ReportEntry[] = [
+      ...entities
+        .filter(e => (e.type === 'office' || e.type === 'warehouse') && checkBranch(e.branchId) && Number(e.balance) !== 0 && !e.deletedAt)
+        .map(e => ({
+          id: `ent-${e.id}`,
+          originalId: e.id!,
+          date: new Date(),
+          type: 'supplier_debt' as const,
+          description: `مستحقات للمورد: ${e.name}`,
+          amount: Number(e.balance || 0),
+          profit: 0,
+          branchName: branches.find(b => b.id === e.branchId)?.name || 'غير محدد',
+          branchId: (e.branchId as string) || undefined,
+          source: 'system' as const,
+          originalObject: e
         }))
     ];
 
@@ -297,7 +406,9 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
       ...lossEntries,
       ...purchaseEntries,
       ...paymentEntries,
-      ...openingCashEntries
+      ...openingCashEntries,
+      ...customerDebtEntries,
+      ...supplierDebtEntries
     ].sort((a, b) => b.date.getTime() - a.date.getTime());
 
     const stats = {
@@ -320,7 +431,21 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
     const remainingCash = cashAvailable - stats.totalExpenses - stats.totalPayments;
     const netResult = stats.totalProfit - stats.totalExpenses - stats.totalLosses;
 
-    return { allEntries, stats, netResult, cashAvailable, remainingCash };
+    return { 
+      allEntries, 
+      stats, 
+      netResult, 
+      cashAvailable, 
+      remainingCash,
+      revenueEntries, 
+      expenseEntries, 
+      paymentEntries, 
+      purchaseEntries, 
+      lossEntries, 
+      openingCashEntries,
+      customerDebtEntries,
+      supplierDebtEntries
+    };
   }, [fromDate, toDate, branchId, transactions, allLedgerEntries, expiredDamagedLosses, historicalRecords, entities, branches, employeeAttendance, customerDebts, openingCash]);
 
   const filteredEntries = useMemo(() => {
@@ -474,17 +599,17 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex gap-2 h-12">
-               <Button onClick={exportToExcel} variant="outline" className="flex-1 h-full rounded-xl border-border hover:bg-muted text-emerald-600 font-bold gap-2">
+            <div className="flex flex-wrap gap-2 h-auto lg:h-12 col-span-1 lg:col-span-1 items-end">
+               <Button onClick={onRefresh} variant="outline" className="h-12 w-12 rounded-xl border-border bg-primary/5 text-primary hover:bg-primary/10 font-bold p-0">
+                 <RefreshCw className="h-4 w-4" />
+               </Button>
+               <Button onClick={exportToExcel} variant="outline" className="flex-1 h-12 rounded-xl border-border hover:bg-muted text-emerald-600 font-bold gap-2">
                  <FileSpreadsheet className="h-4 w-4" />
                  Excel
                </Button>
-               <Button onClick={exportToPDF} variant="outline" className="flex-1 h-full rounded-xl border-border hover:bg-muted text-rose-500 font-bold gap-2">
+               <Button onClick={exportToPDF} variant="outline" className="flex-1 h-12 rounded-xl border-border hover:bg-muted text-rose-500 font-bold gap-2">
                  <FileDown className="h-4 w-4" />
                  PDF
-               </Button>
-               <Button onClick={() => window.print()} variant="outline" className="h-full rounded-xl border-border hover:bg-muted text-primary font-bold px-4">
-                 <Printer className="h-4 w-4" />
                </Button>
             </div>
           </div>
@@ -502,28 +627,35 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {[
-            { label: 'الرصيد الافتتاحي', value: reportData.stats.openingCash, icon: History, color: 'text-amber-500', bg: 'bg-amber-500/5' },
-            { label: 'واردات الفترة', value: reportData.stats.totalRevenue, icon: BarChart3, color: 'text-blue-500', bg: 'bg-blue-500/5' },
-            { label: 'الكاش المتاح', value: reportData.cashAvailable, icon: Layers, color: 'text-emerald-600', bg: 'bg-emerald-500/5' },
-            { label: 'المصروفات العامة', value: reportData.stats.totalExpenses, icon: ArrowUpCircle, color: 'text-rose-500', bg: 'bg-rose-500/5' },
-            { label: 'إجمالي التسديدات', value: reportData.stats.totalPayments, icon: CheckCircle2, color: 'text-indigo-500', bg: 'bg-indigo-500/5' },
-            { label: 'الرصيد المتبقي', value: reportData.remainingCash, icon: DollarSign, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-            { label: 'صافي الأرباح', value: reportData.stats.totalProfit, icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/5' },
-            { label: 'تالف واكسباير', value: reportData.stats.totalLosses, icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-500/5' },
-            { label: 'إجمالي المشتريات', value: reportData.stats.totalPurchases, icon: ShoppingCart, color: 'text-violet-500', bg: 'bg-violet-500/5' },
-            { label: 'ديون الموردين', value: reportData.stats.supplierDebt, icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-600/5' },
-            { label: 'ديون الزبائن', value: reportData.stats.customerDebt, icon: History, color: 'text-amber-600', bg: 'bg-amber-600/5' },
-            { label: 'صافي النتيجة', value: reportData.netResult, icon: DollarSign, color: reportData.netResult >= 0 ? 'text-emerald-600' : 'text-rose-600', bg: reportData.netResult >= 0 ? 'bg-emerald-600/5' : 'bg-rose-600/5' },
+            { id: 'opening_cash', label: 'الرصيد الافتتاحي', value: reportData.stats.openingCash, icon: History, color: 'text-amber-500', bg: 'bg-amber-500/5' },
+            { id: 'revenue', label: 'واردات الفترة', value: reportData.stats.totalRevenue, icon: BarChart3, color: 'text-blue-500', bg: 'bg-blue-500/5' },
+            { id: 'cash_available', label: 'الكاش المتاح', value: reportData.cashAvailable, icon: Layers, color: 'text-emerald-600', bg: 'bg-emerald-500/5' },
+            { id: 'expense', label: 'المصروفات العامة', value: reportData.stats.totalExpenses, icon: ArrowUpCircle, color: 'text-rose-500', bg: 'bg-rose-500/5' },
+            { id: 'payment', label: 'إجمالي التسديدات', value: reportData.stats.totalPayments, icon: CheckCircle2, color: 'text-indigo-500', bg: 'bg-indigo-500/5' },
+            { id: 'remaining_cash', label: 'الرصيد المتبقي', value: reportData.remainingCash, icon: DollarSign, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+            { id: 'profit', label: 'صافي الأرباح', value: reportData.stats.totalProfit, icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/5' },
+            { id: 'damaged', label: 'تالف واكسباير', value: reportData.stats.totalLosses, icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-500/5' },
+            { id: 'purchase', label: 'إجمالي المشتريات', value: reportData.stats.totalPurchases, icon: ShoppingCart, color: 'text-violet-500', bg: 'bg-violet-500/5' },
+            { id: 'supplier_debt', label: 'ديون الموردين', value: reportData.stats.supplierDebt, icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-600/5' },
+            { id: 'customer_debt', label: 'ديون الزبائن', value: reportData.stats.customerDebt, icon: History, color: 'text-amber-600', bg: 'bg-amber-600/5' },
+            { id: 'net_result', label: 'صافي النتيجة', value: reportData.netResult, icon: DollarSign, color: reportData.netResult >= 0 ? 'text-emerald-600' : 'text-rose-600', bg: reportData.netResult >= 0 ? 'bg-emerald-600/5' : 'bg-rose-600/5' },
           ].map((stat, i) => (
-            <Card key={i} className={`border-border rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-shadow`}>
+            <Card 
+              key={i} 
+              onClick={() => {
+                setDrilldownType(stat.id);
+                setIsDrilldownOpen(true);
+              }}
+              className={`border-border rounded-3xl overflow-hidden shadow-sm hover:shadow-lg transition-all cursor-pointer group active:scale-95`}
+            >
               <CardContent className="p-6 flex items-center justify-between">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-black text-muted-foreground uppercase">{stat.label}</span>
-                  <div className={`text-2xl font-black font-mono tracking-tighter ${stat.color}`}>
+                  <span className="text-[10px] font-black text-muted-foreground uppercase group-hover:text-primary transition-colors">{stat.label}</span>
+                  <div className={`text-2xl font-black font-mono tracking-tighter transition-transform group-hover:scale-105 origin-right ${stat.color}`}>
                     {formatNumberWithCommas(stat.value)}
                   </div>
                 </div>
-                <div className={`p-4 rounded-2xl ${stat.bg}`}>
+                <div className={`p-4 rounded-2xl transition-all group-hover:rotate-12 ${stat.bg}`}>
                   <stat.icon className={`h-8 w-8 ${stat.color} opacity-80`} />
                 </div>
               </CardContent>
@@ -597,6 +729,7 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
                 { id: 'payment', label: 'تسديد' },
                 { id: 'purchase', label: 'شراء' },
                 { id: 'expense', label: 'مصروف' },
+                { id: 'salary', label: 'رواتب' },
                 { id: 'damaged', label: 'تالف/اكسباير' },
               ].map(f => (
                 <button
@@ -641,11 +774,12 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
                             e.type === 'revenue' ? 'bg-blue-500/10 text-blue-500' :
                             e.type === 'opening_cash' ? 'bg-amber-500/10 text-amber-500' :
                             e.type === 'expense' ? 'bg-rose-500/10 text-rose-500' :
+                            e.type === 'salary' ? 'bg-emerald-500/10 text-emerald-500' :
                             e.type === 'purchase' ? 'bg-violet-500/10 text-violet-500' :
                             e.type === 'payment' ? 'bg-indigo-500/10 text-indigo-500' :
                             'bg-amber-500/10 text-amber-500'
                           }`}>
-                            {e.type === 'revenue' ? 'وارد' : e.type === 'opening_cash' ? 'رصيد افتتاحي' : e.type === 'expense' ? 'مصروف' : e.type === 'purchase' ? 'شراء' : e.type === 'payment' ? 'تسديد' : 'خسارة'}
+                            {e.type === 'revenue' ? 'وارد' : e.type === 'opening_cash' ? 'رصيد افتتاحي' : e.type === 'expense' ? 'مصروف' : e.type === 'salary' ? 'راتب' : e.type === 'purchase' ? 'شراء' : e.type === 'payment' ? 'تسديد' : 'خسارة'}
                           </span>
                         </TableCell>
                         <TableCell className="font-bold text-xs text-foreground/80 group-hover:text-foreground">{e.description}</TableCell>
@@ -681,6 +815,219 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
           </CardContent>
         </Card>
       </div>
+
+      {/* Drilldown Modal */}
+      <Dialog open={isDrilldownOpen} onOpenChange={setIsDrilldownOpen}>
+        <DialogContent className="max-w-6xl w-[95vw] h-[85vh] flex flex-col p-0 overflow-hidden bg-card border-border rounded-3xl shadow-2xl">
+          <DialogHeader className="p-8 border-b border-border/50 bg-muted/20">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                 <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                      {drilldownType === 'revenue' && <BarChart3 className="h-5 w-5" />}
+                      {drilldownType === 'expense' && <ArrowUpCircle className="h-5 w-5" />}
+                      {drilldownType === 'purchase' && <ShoppingCart className="h-5 w-5" />}
+                      {drilldownType === 'payment' && <CheckCircle2 className="h-5 w-5" />}
+                      {drilldownType === 'damaged' && <AlertTriangle className="h-5 w-5" />}
+                      {!['revenue', 'expense', 'purchase', 'payment', 'damaged'].includes(drilldownType || '') && <Layers className="h-5 w-5" />}
+                    </div>
+                    <DialogTitle className="text-2xl font-black">
+                      {drilldownType === 'revenue' && 'تفاصيل الواردات'}
+                      {drilldownType === 'expense' && 'تفاصيل المصروفات والرواتب'}
+                      {drilldownType === 'purchase' && 'تفاصيل المشتريات'}
+                      {drilldownType === 'payment' && 'تفاصيل التسديدات والمبالغ المدفوعة'}
+                      {drilldownType === 'damaged' && 'تفاصيل التالف والاكسباير'}
+                      {drilldownType === 'opening_cash' && 'تفاصيل الرصيد الافتتاحي'}
+                      {drilldownType === 'supplier_debt' && 'تفاصيل ديون الموردين'}
+                      {drilldownType === 'customer_debt' && 'تفاصيل ديون الزبائن'}
+                      {drilldownType === 'profit' && 'تفاصيل أرباح المبيعات'}
+                      {drilldownType === 'net_result' && 'تفاصيل صافي النتيجة'}
+                      {drilldownType === 'cash_available' && 'تفاصيل الكاش المتوفر'}
+                      {drilldownType === 'remaining_cash' && 'تفاصيل الكاش المتبقي'}
+                    </DialogTitle>
+                 </div>
+                 <DialogDescription className="text-[10px] font-bold text-muted-foreground mr-10 uppercase tracking-widest leading-loose">
+                    سجلات الفترة من {fromDate} إلى {toDate}
+                 </DialogDescription>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setIsDrilldownOpen(false)} className="rounded-full hover:bg-rose-500/10 hover:text-rose-500">
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-hidden flex flex-col p-8 gap-6">
+            <div className="flex items-center gap-4 bg-muted/30 p-2 rounded-2xl border border-border/40 shadow-inner">
+               <div className="relative flex-1">
+                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                 <Input 
+                   placeholder="بحث في السجلات..." 
+                   value={drilldownSearch}
+                   onChange={e => setDrilldownSearch(e.target.value)}
+                   className="pr-10 h-10 bg-background border-border rounded-xl font-bold font-sans"
+                 />
+               </div>
+               <div className="px-4 py-2 bg-background border border-border rounded-xl flex items-center gap-3">
+                  <span className="text-[9px] font-black text-muted-foreground">عدد السجلات:</span>
+                  <span className="text-xs font-black text-primary">
+                    {(() => {
+                        const records = (() => {
+                          if (drilldownType === 'revenue' || drilldownType === 'profit') return reportData.revenueEntries;
+                          if (drilldownType === 'expense') return reportData.expenseEntries;
+                          if (drilldownType === 'purchase') return reportData.purchaseEntries;
+                          if (drilldownType === 'payment') return reportData.paymentEntries;
+                          if (drilldownType === 'damaged') return reportData.lossEntries;
+                          if (drilldownType === 'opening_cash') return reportData.openingCashEntries;
+                          if (drilldownType === 'customer_debt') return reportData.customerDebtEntries;
+                          if (drilldownType === 'supplier_debt') return reportData.supplierDebtEntries;
+                          if (drilldownType === 'cash_available') return [...reportData.openingCashEntries, ...reportData.revenueEntries];
+                          if (drilldownType === 'remaining_cash' || drilldownType === 'net_result') return reportData.allEntries;
+                          return [];
+                        })();
+                        return records.filter(e => 
+                          e.description.toLowerCase().includes(drilldownSearch.toLowerCase()) || 
+                          e.branchName.toLowerCase().includes(drilldownSearch.toLowerCase())
+                        ).length;
+                    })()}
+                  </span>
+               </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto border border-border/50 rounded-2xl shadow-inner scrollbar-hide">
+               <Table>
+                 <TableHeader className="bg-muted/50 sticky top-0 z-10">
+                   <TableRow className="border-border hover:bg-transparent">
+                     <TableHead className="font-black text-right w-[100px]">التاريخ</TableHead>
+                     <TableHead className="font-black text-right w-[80px]">النوع</TableHead>
+                     <TableHead className="font-black text-right">البيان</TableHead>
+                     <TableHead className="font-black text-right">القيمة</TableHead>
+                     <TableHead className="font-black text-right">الفرع</TableHead>
+                     <TableHead className="font-black text-right">المصدر</TableHead>
+                     <TableHead className="font-black text-left w-[120px]">إجراءات</TableHead>
+                   </TableRow>
+                 </TableHeader>
+                 <TableBody>
+                   {(() => {
+                      const records = (() => {
+                        if (drilldownType === 'revenue' || drilldownType === 'profit') return reportData.revenueEntries;
+                        if (drilldownType === 'expense') return reportData.expenseEntries;
+                        if (drilldownType === 'purchase') return reportData.purchaseEntries;
+                        if (drilldownType === 'payment') return reportData.paymentEntries;
+                        if (drilldownType === 'damaged') return reportData.lossEntries;
+                        if (drilldownType === 'opening_cash') return reportData.openingCashEntries;
+                        if (drilldownType === 'customer_debt') return reportData.customerDebtEntries;
+                        if (drilldownType === 'supplier_debt') return reportData.supplierDebtEntries;
+                        if (drilldownType === 'cash_available') return [...reportData.openingCashEntries, ...reportData.revenueEntries];
+                        if (drilldownType === 'remaining_cash' || drilldownType === 'net_result') return reportData.allEntries;
+                        return [];
+                      })();
+
+                      const filtered = records.filter(e => 
+                        e.description.toLowerCase().includes(drilldownSearch.toLowerCase()) || 
+                        e.branchName.toLowerCase().includes(drilldownSearch.toLowerCase())
+                      );
+
+                      if (filtered.length === 0) {
+                        return <TableRow><TableCell colSpan={7} className="h-40 text-center text-muted-foreground font-bold">لا توجد سجلات مطابقة</TableCell></TableRow>;
+                      }
+
+                      return filtered.map(e => (
+                        <TableRow key={e.id} className="border-border/40 hover:bg-muted/5 group transition-colors">
+                           <TableCell className="font-mono text-xs font-black">{format(e.date, 'yyyy-MM-dd')}</TableCell>
+                           <TableCell>
+                             <span className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase ${
+                               e.type === 'revenue' ? 'bg-blue-500/10 text-blue-500' :
+                               e.type === 'salary' ? 'bg-emerald-500/10 text-emerald-500' :
+                               e.type === 'expense' ? 'bg-rose-500/10 text-rose-500' :
+                               e.type === 'purchase' ? 'bg-violet-500/10 text-violet-500' :
+                               e.type === 'payment' ? 'bg-indigo-500/10 text-indigo-500' :
+                               'bg-amber-500/10 text-amber-500'
+                             }`}>
+                               {e.type === 'revenue' ? 'وارد' : e.type === 'salary' ? 'راتب' : e.type === 'expense' ? 'مصروف' : e.type === 'purchase' ? 'شراء' : e.type === 'payment' ? 'تسديد' : 'أخرى'}
+                             </span>
+                           </TableCell>
+                           <TableCell className="font-bold text-xs max-w-[200px] truncate" title={e.description}>{e.description}</TableCell>
+                           <TableCell className="font-mono font-black text-sm text-foreground">
+                             {formatNumberWithCommas(drilldownType === 'profit' ? e.profit : e.amount)}
+                           </TableCell>
+                           <TableCell className="text-[10px] font-bold text-muted-foreground">{e.branchName}</TableCell>
+                           <TableCell>
+                              <span className="text-[9px] font-black text-muted-foreground bg-muted px-1.5 py-0.5 rounded border border-border/30">
+                                {e.source === 'historical' ? 'تاريخي' : e.source === 'excel' ? 'اكسل' : e.source === 'ledger' ? 'سجل' : e.source === 'system' ? 'نظام' : 'مباشر'}
+                              </span>
+                           </TableCell>
+                           <TableCell>
+                              <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                                 <Button 
+                                   variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
+                                   onClick={() => onViewRecord?.(e.type, e.originalId)}
+                                 >
+                                   <Eye className="h-3.5 w-3.5" />
+                                 </Button>
+                                 <Button 
+                                   variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-amber-500/10 hover:text-amber-500 transition-colors"
+                                   onClick={() => onEditRecord?.(e.type, e.originalId)}
+                                 >
+                                   <Edit className="h-3.5 w-3.5" />
+                                 </Button>
+                                 <Button 
+                                   variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-rose-500/10 hover:text-rose-500 transition-colors"
+                                   onClick={() => onDeleteRecord?.(e.type, e.originalId)}
+                                 >
+                                   <Trash2 className="h-3.5 w-3.5" />
+                                 </Button>
+                              </div>
+                           </TableCell>
+                        </TableRow>
+                      ));
+                   })()}
+                 </TableBody>
+               </Table>
+            </div>
+          </div>
+          
+          <div className="p-8 border-t border-border/50 bg-muted/10">
+             <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                   <div className="p-4 rounded-2xl bg-background border border-border/60 shadow-sm min-w-[200px]">
+                      <span className="text-[10px] font-black text-muted-foreground uppercase block mb-1">إجمالي القيمة المعروضة</span>
+                      <span className="text-2xl font-black font-mono tracking-tighter text-primary">
+                        {(() => {
+                             const records = (() => {
+                              if (drilldownType === 'revenue' || drilldownType === 'profit') return reportData.revenueEntries;
+                              if (drilldownType === 'expense') return reportData.expenseEntries;
+                              if (drilldownType === 'purchase') return reportData.purchaseEntries;
+                              if (drilldownType === 'payment') return reportData.paymentEntries;
+                              if (drilldownType === 'damaged') return reportData.lossEntries;
+                              if (drilldownType === 'opening_cash') return reportData.openingCashEntries;
+                              if (drilldownType === 'customer_debt') return reportData.customerDebtEntries;
+                              if (drilldownType === 'supplier_debt') return reportData.supplierDebtEntries;
+                              if (drilldownType === 'cash_available') return [...reportData.openingCashEntries, ...reportData.revenueEntries];
+                              if (drilldownType === 'remaining_cash' || drilldownType === 'net_result') return reportData.allEntries;
+                              return [];
+                            })();
+                            const filtered = records.filter(e => 
+                              e.description.toLowerCase().includes(drilldownSearch.toLowerCase()) || 
+                              e.branchName.toLowerCase().includes(drilldownSearch.toLowerCase())
+                            );
+                            return formatNumberWithCommas(filtered.reduce((sum, e) => sum + (drilldownType === 'profit' ? e.profit : e.amount), 0));
+                        })()}
+                      </span>
+                   </div>
+                </div>
+                <div className="flex gap-3">
+                   <Button variant="outline" className="rounded-xl border-border h-12 px-8 font-black gap-2" onClick={() => setIsDrilldownOpen(false)}>
+                     إغلاق
+                   </Button>
+                   <Button onClick={onRefresh} className="rounded-xl h-12 px-8 font-black shadow-lg shadow-primary/20 gap-2">
+                     <RefreshCw className="h-4 w-4" />
+                     تحديث البيانات
+                   </Button>
+                </div>
+             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
