@@ -19,6 +19,7 @@ import {
   Building2,
   Package,
   History,
+  Layers,
   FileDown
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -72,13 +73,14 @@ interface FinancialPeriodReportProps {
   entities: Entity[];
   branches: PharmacyBranch[];
   employeeAttendance: EmployeeAttendance[];
+  openingCash: any[]; // Use any[] for now to avoid import issues or define full type
   customerDebts: CustomerDebt[];
 }
 
 type ReportEntry = {
   id: string;
   date: Date;
-  type: 'revenue' | 'expense' | 'damaged' | 'expired' | 'payment' | 'purchase';
+  type: 'revenue' | 'expense' | 'damaged' | 'expired' | 'payment' | 'purchase' | 'opening_cash';
   description: string;
   amount: number;
   profit: number;
@@ -94,6 +96,7 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
   entities,
   branches,
   employeeAttendance,
+  openingCash,
   customerDebts
 }) => {
   const [fromDate, setFromDate] = useState<string>(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -259,15 +262,46 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
         }))
     ];
 
+    // 6. Opening Cash
+    const openingCashEntries: ReportEntry[] = [
+      ...openingCash
+        .filter(o => checkInterval(o.date) && checkBranch(o.branchId))
+        .map(o => ({
+          id: o.id || Math.random().toString(),
+          date: toValidDate(o.date),
+          type: 'opening_cash' as const,
+          description: `رصيد افتتاحي: ${o.source || 'كاش مرحّل'}`,
+          amount: Number(o.amount || 0),
+          profit: 0,
+          branchName: branches.find(b => b.id === o.branchId)?.name || 'غير محدد',
+          source: 'direct' as const
+        })),
+      // Legacy support if they are in ledger
+      ...allLedgerEntries
+        .filter(e => e.sourceType === 'opening_cash' && checkInterval(e.date) && checkBranch(e.branchId))
+        .map(e => ({
+          id: e.id || Math.random().toString(),
+          date: toValidDate(e.date),
+          type: 'opening_cash' as const,
+          description: e.notes || 'رصيد افتتاحي (سجل)',
+          amount: Number(e.amount || 0),
+          profit: 0,
+          branchName: branches.find(b => b.id === e.branchId)?.name || 'غير محدد',
+          source: 'direct' as const
+        }))
+    ];
+
     const allEntries = [
       ...revenueEntries,
       ...expenseEntries,
       ...lossEntries,
       ...purchaseEntries,
-      ...paymentEntries
+      ...paymentEntries,
+      ...openingCashEntries
     ].sort((a, b) => b.date.getTime() - a.date.getTime());
 
     const stats = {
+      openingCash: openingCashEntries.reduce((sum, e) => sum + e.amount, 0),
       totalRevenue: revenueEntries.reduce((sum, e) => sum + e.amount, 0),
       totalProfit: revenueEntries.reduce((sum, e) => sum + e.profit, 0),
       totalExpenses: expenseEntries.reduce((sum, e) => sum + e.amount, 0),
@@ -282,10 +316,12 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
         .reduce((sum, d) => sum + Number(d.remainingAmount || 0), 0)
     };
 
+    const cashAvailable = stats.openingCash + stats.totalRevenue;
+    const remainingCash = cashAvailable - stats.totalExpenses - stats.totalPayments;
     const netResult = stats.totalProfit - stats.totalExpenses - stats.totalLosses;
 
-    return { allEntries, stats, netResult };
-  }, [fromDate, toDate, branchId, transactions, allLedgerEntries, expiredDamagedLosses, historicalRecords, entities, branches, employeeAttendance, customerDebts]);
+    return { allEntries, stats, netResult, cashAvailable, remainingCash };
+  }, [fromDate, toDate, branchId, transactions, allLedgerEntries, expiredDamagedLosses, historicalRecords, entities, branches, employeeAttendance, customerDebts, openingCash]);
 
   const filteredEntries = useMemo(() => {
     if (tableFilter === 'all') return reportData.allEntries;
@@ -295,6 +331,7 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
       if (tableFilter === 'damaged') return e.type === 'damaged' || e.type === 'expired';
       if (tableFilter === 'payment') return e.type === 'payment';
       if (tableFilter === 'purchase') return e.type === 'purchase';
+      if (tableFilter === 'opening_cash') return e.type === 'opening_cash';
       return true;
     });
   }, [reportData.allEntries, tableFilter]);
@@ -328,11 +365,14 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
       [`من: ${fromDate}`, `إلى: ${toDate}`],
       [""],
       ["ملخص مالي"],
+      ["الرصيد الافتتاحي", reportData.stats.openingCash],
       ["إجمالي الوارد", reportData.stats.totalRevenue],
+      ["إجمالي الكاش المتاح", reportData.cashAvailable],
       ["إجمالي الأرباح", reportData.stats.totalProfit],
       ["إجمالي المصاريف", reportData.stats.totalExpenses],
       ["إجمالي التالف/الاكسباير", reportData.stats.totalLosses],
       ["إجمالي التسديدات", reportData.stats.totalPayments],
+      ["الرصيد المتبقي (كاش)", reportData.remainingCash],
       ["إجمالي المشتريات", reportData.stats.totalPurchases],
       ["ديون الموردين", reportData.stats.supplierDebt],
       ["ديون الزبائن", reportData.stats.customerDebt],
@@ -344,7 +384,11 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
     reportData.allEntries.forEach(e => {
       wsData.push([
         format(e.date, 'yyyy-MM-dd'),
-        e.type === 'revenue' ? 'وارد' : e.type === 'expense' ? 'مصروف' : e.type === 'purchase' ? 'شراء' : e.type === 'payment' ? 'تسديد' : 'تالف/اكسباير',
+        e.type === 'revenue' ? 'وارد' : 
+        e.type === 'expense' ? 'مصروف' : 
+        e.type === 'purchase' ? 'شراء' : 
+        e.type === 'payment' ? 'تسديد' : 
+        e.type === 'opening_cash' ? 'رصيد افتتاحي' : 'تالف/اكسباير',
         e.description,
         e.amount,
         e.profit,
@@ -456,16 +500,19 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {[
-            { label: 'إجمالي الوارد', value: reportData.stats.totalRevenue, icon: BarChart3, color: 'text-blue-500', bg: 'bg-blue-500/5' },
-            { label: 'إجمالي الأرباح', value: reportData.stats.totalProfit, icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/5' },
-            { label: 'إجمالي المصاريف العامة', value: reportData.stats.totalExpenses, icon: ArrowUpCircle, color: 'text-rose-500', bg: 'bg-rose-500/5' },
-            { label: 'إجمالي التالف والاكسباير', value: reportData.stats.totalLosses, icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-500/5' },
+            { label: 'الرصيد الافتتاحي', value: reportData.stats.openingCash, icon: History, color: 'text-amber-500', bg: 'bg-amber-500/5' },
+            { label: 'واردات الفترة', value: reportData.stats.totalRevenue, icon: BarChart3, color: 'text-blue-500', bg: 'bg-blue-500/5' },
+            { label: 'الكاش المتاح', value: reportData.cashAvailable, icon: Layers, color: 'text-emerald-600', bg: 'bg-emerald-500/5' },
+            { label: 'المصروفات العامة', value: reportData.stats.totalExpenses, icon: ArrowUpCircle, color: 'text-rose-500', bg: 'bg-rose-500/5' },
             { label: 'إجمالي التسديدات', value: reportData.stats.totalPayments, icon: CheckCircle2, color: 'text-indigo-500', bg: 'bg-indigo-500/5' },
+            { label: 'الرصيد المتبقي', value: reportData.remainingCash, icon: DollarSign, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+            { label: 'صافي الأرباح', value: reportData.stats.totalProfit, icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/5' },
+            { label: 'تالف واكسباير', value: reportData.stats.totalLosses, icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-500/5' },
             { label: 'إجمالي المشتريات', value: reportData.stats.totalPurchases, icon: ShoppingCart, color: 'text-violet-500', bg: 'bg-violet-500/5' },
-            { label: 'ديون الموردين المتبقية', value: reportData.stats.supplierDebt, icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-600/5' },
-            { label: 'ديون الزبائن المتبقية', value: reportData.stats.customerDebt, icon: History, color: 'text-amber-600', bg: 'bg-amber-600/5' },
+            { label: 'ديون الموردين', value: reportData.stats.supplierDebt, icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-600/5' },
+            { label: 'ديون الزبائن', value: reportData.stats.customerDebt, icon: History, color: 'text-amber-600', bg: 'bg-amber-600/5' },
             { label: 'صافي النتيجة', value: reportData.netResult, icon: DollarSign, color: reportData.netResult >= 0 ? 'text-emerald-600' : 'text-rose-600', bg: reportData.netResult >= 0 ? 'bg-emerald-600/5' : 'bg-rose-600/5' },
           ].map((stat, i) => (
             <Card key={i} className={`border-border rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-shadow`}>
@@ -546,6 +593,7 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
               {[
                 { id: 'all', label: 'الكل' },
                 { id: 'revenue', label: 'وارد' },
+                { id: 'opening_cash', label: 'رصيد افتتاحي' },
                 { id: 'payment', label: 'تسديد' },
                 { id: 'purchase', label: 'شراء' },
                 { id: 'expense', label: 'مصروف' },
@@ -576,7 +624,7 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
                     <TableHead className="font-black text-muted-foreground text-right">المبلغ</TableHead>
                     <TableHead className="font-black text-muted-foreground text-right">الربح</TableHead>
                     <TableHead className="font-black text-muted-foreground text-right">الفرع</TableHead>
-                    <TableHead className="font-black text-muted-foreground text-right">المصدر</TableHead>
+                    <TableHead className="font-black text-muted-foreground text-left">المصدر</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -591,12 +639,13 @@ export const FinancialPeriodReport: React.FC<FinancialPeriodReportProps> = ({
                         <TableCell>
                           <span className={`px-2 py-1 rounded-md text-[9px] font-black uppercase ${
                             e.type === 'revenue' ? 'bg-blue-500/10 text-blue-500' :
+                            e.type === 'opening_cash' ? 'bg-amber-500/10 text-amber-500' :
                             e.type === 'expense' ? 'bg-rose-500/10 text-rose-500' :
                             e.type === 'purchase' ? 'bg-violet-500/10 text-violet-500' :
                             e.type === 'payment' ? 'bg-indigo-500/10 text-indigo-500' :
                             'bg-amber-500/10 text-amber-500'
                           }`}>
-                            {e.type === 'revenue' ? 'وارد' : e.type === 'expense' ? 'مصروف' : e.type === 'purchase' ? 'شراء' : e.type === 'payment' ? 'تسديد' : 'خسارة'}
+                            {e.type === 'revenue' ? 'وارد' : e.type === 'opening_cash' ? 'رصيد افتتاحي' : e.type === 'expense' ? 'مصروف' : e.type === 'purchase' ? 'شراء' : e.type === 'payment' ? 'تسديد' : 'خسارة'}
                           </span>
                         </TableCell>
                         <TableCell className="font-bold text-xs text-foreground/80 group-hover:text-foreground">{e.description}</TableCell>

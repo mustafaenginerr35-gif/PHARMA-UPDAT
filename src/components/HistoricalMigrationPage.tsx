@@ -52,17 +52,27 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { formatIQD, safeFormatDate, toValidDate } from '@/src/lib/formatters';
-import { HistoricalRecord, Entity } from '../db';
+import { HistoricalRecord, Entity, OpeningCash } from '../db';
 
 interface HistoricalMigrationPageProps {
   branchId: string | null;
   ownerId: string;
+  openingCash?: OpeningCash[];
   onImportExcel?: () => void;
   onMultiEntry?: () => void;
   onDeleteHistoricalRecord: (id: string) => void;
+  onDeleteOpeningCash: (item: OpeningCash) => void;
 }
 
-export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = ({ branchId, ownerId, onImportExcel, onMultiEntry, onDeleteHistoricalRecord }) => {
+export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = ({ 
+  branchId, 
+  ownerId, 
+  openingCash = [],
+  onImportExcel, 
+  onMultiEntry, 
+  onDeleteHistoricalRecord,
+  onDeleteOpeningCash
+}) => {
   const [activeTab, setActiveTab] = useState('opening');
   const [editingRecord, setEditingRecord] = useState<HistoricalRecord | null>(null);
   
@@ -1036,6 +1046,47 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
                                  <Trash2 className="h-4 w-4" />
                                </Button>
                             </div>
+                        </td>
+                      </motion.tr>
+                    ))}
+
+                    {/* Opening Cash Entries */}
+                    {openingCash.map((item) => (
+                      <motion.tr 
+                        key={item.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="hover:bg-muted/20 transition-colors border-t border-border"
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black bg-indigo-500/10 text-indigo-500">
+                              رصيد نقد افتتاحي
+                           </span>
+                        </td>
+                        <td className="px-6 py-4">
+                           <div className="text-xs font-bold text-foreground">
+                              {item.source || 'رصيد نقد'} - {item.month}/{item.year}
+                           </div>
+                           <div className="text-[10px] text-muted-foreground mt-1 line-clamp-1">{item.notes}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                           <div className="text-[10px] font-black text-emerald-600">{(item.amount || 0).toLocaleString()} د.ع</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                           <div className="text-xs font-bold text-foreground">{safeFormatDate(item.createdAt, 'yyyy/MM/dd HH:mm')}</div>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                             <div className="flex items-center justify-center gap-2">
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-8 w-8 text-rose-500 hover:bg-rose-500/10 rounded-lg"
+                                  onClick={() => onDeleteOpeningCash(item)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                             </div>
                         </td>
                       </motion.tr>
                     ))}

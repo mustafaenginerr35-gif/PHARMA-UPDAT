@@ -293,6 +293,10 @@ export const SupplierAccountPage = ({
             <Clock className="h-4 w-4" />
             الجدول الزمني
           </TabsTrigger>
+          <TabsTrigger value="statement" className="gap-2 px-4 py-2 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm whitespace-nowrap">
+            <DollarSign className="h-4 w-4" />
+            كشف الحساب
+          </TabsTrigger>
         </TabsList>
 
         <div className="mt-6">
@@ -534,7 +538,12 @@ export const SupplierAccountPage = ({
                                 <Receipt className="h-5 w-5 text-emerald-500" />
                              </div>
                              <div>
-                                <CardTitle className="text-sm font-bold">تسديد دفعة مالية</CardTitle>
+                                <CardTitle className="text-sm font-bold">
+                                   {payment.paymentSource === 'opening_balance' ? 'تسديد من الرصيد الافتتاحي' : 'تسديد فاتورة'}
+                                   {payment.linkedInvoiceNumber && (
+                                     <span className="mr-1 text-primary">({payment.linkedInvoiceNumber})</span>
+                                   )}
+                                </CardTitle>
                                 <div className="text-[10px] text-muted-foreground">{safeFormatDate(payment.date, 'yyyy/MM/dd HH:mm')}</div>
                              </div>
                           </div>
@@ -864,6 +873,70 @@ export const SupplierAccountPage = ({
                   );
                 })}
              </div>
+          </TabsContent>
+          <TabsContent value="statement" className="animate-in fade-in zoom-in-95 duration-300">
+             <Card className="bg-card border-border overflow-hidden rounded-2xl">
+                <div className="overflow-x-auto">
+                   <table className="w-full text-right">
+                      <thead className="bg-muted/50 border-b border-border text-[10px] font-bold text-muted-foreground uppercase">
+                         <tr>
+                            <th className="px-6 py-4">التاريخ</th>
+                            <th className="px-6 py-4">التفاصيل</th>
+                            <th className="px-6 py-4 text-center">مدين (قوائم)</th>
+                            <th className="px-6 py-4 text-center">دائن (تسديدات)</th>
+                            <th className="px-6 py-4 text-center">الرصيد</th>
+                         </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                         {(() => {
+                            let runningBalance = entity.initialBalance || 0;
+                            const rows = [];
+                            
+                            // Start with Initial Balance
+                            rows.push(
+                               <tr key="initial" className="bg-muted/10 italic">
+                                  <td className="px-6 py-4 text-xs font-mono">{safeFormatDate(entity.createdAt || new Date(2024,0,1), 'yyyy/MM/dd')}</td>
+                                  <td className="px-6 py-4 font-bold text-sm">رصيد افتتاحي</td>
+                                  <td className="px-6 py-4 text-center font-mono">{formatNumberWithCommas(entity.initialBalance)}</td>
+                                  <td className="px-6 py-4 text-center font-mono">0</td>
+                                  <td className="px-6 py-4 text-center font-mono font-black">{formatNumberWithCommas(runningBalance)}</td>
+                               </tr>
+                            );
+
+                            const sortedEntries = [...ledgerEntries].filter(e => !e.isDeleted).sort((a,b) => toValidDate(a.date).getTime() - toValidDate(b.date).getTime());
+                            
+                            sortedEntries.forEach(e => {
+                               let debit = 0;
+                               let credit = 0;
+                               let desc = '';
+                               
+                               if (e.operationType === 'invoice') {
+                                  debit = e.netAmount || 0;
+                                  desc = `فاتورة رقم: ${e.invoiceNumber}`;
+                               } else if (e.operationType === 'payment') {
+                                  credit = (e.amount || 0) + (e.discount || 0) - (e.refundAmount || 0);
+                                  desc = e.paymentSource === 'opening_balance' ? 'تسديد من الرصيد الافتتاحي' : `تسديد فاتورة رقم: ${e.linkedInvoiceNumber || 'غير محدد'}`;
+                               }
+                               
+                               runningBalance += (debit - credit);
+                               
+                               rows.push(
+                                  <tr key={e.id} className="hover:bg-muted/30 transition-colors">
+                                     <td className="px-6 py-4 text-xs font-mono text-muted-foreground">{safeFormatDate(e.date, 'yyyy/MM/dd')}</td>
+                                     <td className="px-6 py-4 font-bold text-sm">{desc}</td>
+                                     <td className="px-6 py-4 text-center font-mono text-rose-500">{debit > 0 ? formatNumberWithCommas(debit) : '-'}</td>
+                                     <td className="px-6 py-4 text-center font-mono text-emerald-500">{credit > 0 ? formatNumberWithCommas(credit) : '-'}</td>
+                                     <td className="px-6 py-4 text-center font-mono font-black">{formatNumberWithCommas(runningBalance)}</td>
+                                  </tr>
+                               );
+                            });
+                            
+                            return rows.reverse();
+                         })()}
+                      </tbody>
+                   </table>
+                </div>
+             </Card>
           </TabsContent>
         </div>
       </Tabs>

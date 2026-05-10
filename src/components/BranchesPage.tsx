@@ -150,12 +150,19 @@ export const BranchesPage = ({
                     }}
                   />
                   <div className="flex flex-col items-end gap-2">
-                     <div className="p-3 rounded-2xl bg-blue-500/10 text-blue-600">
+                     <div className={`p-3 rounded-2xl ${branch.isMain ? 'bg-amber-500/10 text-amber-600' : 'bg-blue-500/10 text-blue-600'}`}>
                         <Building2 className="h-6 w-6" />
                      </div>
-                     <span className="text-[10px] font-mono font-black text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border">
-                        {branch.code}
-                     </span>
+                     <div className="flex flex-col items-end gap-1">
+                        <span className="text-[10px] font-mono font-black text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border">
+                            {branch.code}
+                        </span>
+                        {branch.isMain && (
+                          <span className="flex items-center gap-1 text-[8px] font-black text-amber-600 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 uppercase">
+                            الفرع الرئيسي
+                          </span>
+                        )}
+                     </div>
                   </div>
                 </div>
                 

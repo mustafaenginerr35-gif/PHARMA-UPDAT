@@ -399,7 +399,8 @@ export const EmployeesPage = ({
                           <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-right">الشهر / السنة</th>
                           <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-right">الموظف</th>
                           <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-center">أيام الحضور</th>
-                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-center">ساعات العمل</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-center">ساعات عمل يومية</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-center">إجمالي الساعات</th>
                           <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-right">أجر الساعة</th>
                           <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-right">أجر الشهر</th>
                           <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase text-center">الإجراءات</th>
@@ -415,20 +416,25 @@ export const EmployeesPage = ({
                               <div className="font-black text-foreground">{record.employeeName}</div>
                             </td>
                             <td className="px-6 py-4 text-center">
-                              <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 text-[10px] font-black font-mono">
+                              <span className="px-2 py-1 rounded-lg bg-amber-500/10 text-amber-600 text-[10px] font-black font-mono">
                                 {record.attendanceDays || 0} يوم
                               </span>
                             </td>
                             <td className="px-6 py-4 text-center">
-                              <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-600 text-[10px] font-black font-mono">
+                              <span className="px-2 py-1 rounded-lg bg-blue-500/10 text-blue-600 text-[10px] font-black font-mono">
+                                {record.dailyWorkHours || 8} ساعة
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <span className="px-2 py-1 rounded-lg bg-indigo-500/10 text-indigo-600 text-[10px] font-black font-mono">
                                 {record.hoursWork} ساعة
                               </span>
                             </td>
-                            <td className="px-6 py-4 font-mono font-black text-muted-foreground text-right">
+                            <td className="px-6 py-4 font-mono font-black text-muted-foreground text-right text-xs">
                               {record.hourlyRate.toLocaleString()}
                             </td>
                             <td className="px-6 py-4 text-right">
-                              <div className="font-black text-emerald-600 font-mono tracking-tighter">
+                              <div className="font-black text-emerald-600 font-mono tracking-tighter text-sm">
                                 {record.dailyWage.toLocaleString()} <span className="text-[9px] font-sans">د.ع</span>
                               </div>
                             </td>
@@ -458,14 +464,18 @@ export const EmployeesPage = ({
                          <span className="font-mono">{safeFormatDate(record.date, 'yyyy/MM/dd')}</span>
                          <span className="text-primary">{record.employeeName}</span>
                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div className="bg-muted px-2 py-1 rounded text-center">
-                            <span className="text-muted-foreground block text-[8px]">أيام الحضور</span>
-                            <span className="font-black text-amber-600">{record.attendanceDays || 0}</span>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div className="bg-muted px-2 py-1 rounded text-center border border-border/50">
+                            <span className="text-muted-foreground block text-[7px] font-bold uppercase">الحضور</span>
+                            <span className="font-black text-amber-600">{record.attendanceDays || 0} يوم</span>
                           </div>
-                          <div className="bg-muted px-2 py-1 rounded text-center">
-                            <span className="text-muted-foreground block text-[8px]">ساعات العمل</span>
-                            <span className="font-black text-blue-600">{record.hoursWork}</span>
+                          <div className="bg-muted px-2 py-1 rounded text-center border border-border/50">
+                            <span className="text-muted-foreground block text-[7px] font-bold uppercase">ساعة/يوم</span>
+                            <span className="font-black text-blue-600">{record.dailyWorkHours || 8}</span>
+                          </div>
+                          <div className="bg-muted px-2 py-1 rounded text-center border border-border/50">
+                            <span className="text-muted-foreground block text-[7px] font-bold uppercase">إجمالي</span>
+                            <span className="font-black text-indigo-600">{record.hoursWork}</span>
                           </div>
                         </div>
                         <div className="text-xl font-black text-emerald-600 font-mono tracking-tighter">

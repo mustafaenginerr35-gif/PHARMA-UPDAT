@@ -26,6 +26,7 @@ export const BranchForm = ({ onSubmit, onClose, initialData }: BranchFormProps) 
       notes: formData.get('notes') as string,
       activationCode: formData.get('activationCode') as string,
       status: (initialData?.status as any) || 'pending',
+      isMain: formData.get('isMain') === 'on',
     };
     onSubmit(data);
   };
@@ -127,6 +128,17 @@ export const BranchForm = ({ onSubmit, onClose, initialData }: BranchFormProps) 
               />
             </div>
           </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 p-4 bg-primary/5 rounded-2xl border border-primary/10">
+          <Label htmlFor="isMain" className="text-sm font-black text-foreground cursor-pointer">هل هذا هو الفرع الرئيسي للمؤسسة؟</Label>
+          <input
+            type="checkbox"
+            id="isMain"
+            name="isMain"
+            defaultChecked={initialData?.isMain}
+            className="w-5 h-5 rounded border-border text-primary focus:ring-primary"
+          />
         </div>
 
         {(!initialData || initialData.status === 'pending') && (

@@ -143,6 +143,12 @@ service cloud.firestore {
       allow update, delete: if isDataOwner();
     }
 
+    match /openingCash/{id} {
+      allow read: if canRead(resource.data.ownerId);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
     match /recoveryRequests/{id} {
       allow read: if canRead(resource.data.ownerId);
       allow create: if isNewDataOwner();

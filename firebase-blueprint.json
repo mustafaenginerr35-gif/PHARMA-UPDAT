@@ -24,13 +24,24 @@
     },
     "LedgerEntry": {
       "title": "Ledger Entry",
-      "description": "Invoice or payment record in the ledger",
+      "description": "Unified accounting ledger entry",
       "type": "object",
       "properties": {
-        "accountId": { "type": "string" },
+        "sourceType": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "userId": { "type": "string" },
+        "branchId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "debit": { "type": "number" },
+        "credit": { "type": "number" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "entityId": { "type": "string" },
+        "entityName": { "type": "string" },
+        "description": { "type": "string" },
         "ownerId": { "type": "string" }
       },
-      "required": ["accountId", "ownerId"]
+      "required": ["sourceType", "sourceId", "userId", "branchId", "date", "amount", "ownerId"]
     },
     "UserSettings": {
       "title": "User Settings",
@@ -40,6 +51,21 @@
         "syncSettings": { "type": "object" },
         "imageSettings": { "type": "object" }
       }
+    },
+    "OpeningCash": {
+      "title": "Opening Cash",
+      "description": "Carried forward balance or opening starting cash",
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "month": { "type": "number" },
+        "year": { "type": "number" },
+        "source": { "type": "string" },
+        "branchId": { "type": "string" },
+        "ownerId": { "type": "string" }
+      },
+      "required": ["amount", "date", "month", "year", "source", "branchId", "ownerId"]
     }
   },
   "firestore": {
@@ -62,6 +88,7 @@
     "activationCodes": { "schema": "object", "description": "App activation codes" },
     "activationRequests": { "schema": "object", "description": "Activation requests" },
     "recoveryRequests": { "schema": "object", "description": "Account recovery" },
-    "entityActivities": { "schema": "object", "description": "Tracking entity actions" }
+    "entityActivities": { "schema": "object", "description": "Tracking entity actions" },
+    "openingCash": { "schema": "OpeningCash", "description": "Opening cash records" }
   }
 }

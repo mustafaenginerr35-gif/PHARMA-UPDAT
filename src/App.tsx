@@ -22,6 +22,7 @@ import {
   Camera, 
   Image as ImageIcon, 
   CheckCircle2, 
+  CheckCircle,
   AlertCircle,
   AlertTriangle,
   Clock,
@@ -65,7 +66,9 @@ import {
   PlusCircle,
   Bug,
   Pencil,
-  Table as TableIcon
+  Table as TableIcon,
+  Database,
+  Layers
 } from 'lucide-react';
 import { SupplierHistoricalImportWizard } from './components/SupplierHistoricalImportWizard';
 
@@ -153,7 +156,8 @@ import {
   type HistoricalRecord,
   type MedicineRequest,
   type ExpiredDamagedLoss,
-  type EntityActivity
+  type EntityActivity,
+  type OpeningCash
 } from './db';
 import { 
   AreaChart, 
@@ -321,6 +325,264 @@ const ViewRevenueDialog = ({
   );
 };
 
+const AddOpeningCashDialog = ({ 
+  isOpen, 
+  onOpenChange, 
+  onSubmit,
+  branches,
+  currentBranchId
+}: { 
+  isOpen: boolean; 
+  onOpenChange: (open: boolean) => void; 
+  onSubmit: (data: any) => void;
+  branches: PharmacyBranch[];
+  currentBranchId: string | null;
+}) => {
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [notes, setNotes] = useState('');
+  const [source, setSource] = useState('previous_month');
+  const [branchId, setBranchId] = useState(currentBranchId || (branches.length > 0 ? branches[0].id || '' : ''));
+
+  useEffect(() => {
+    if (isOpen) {
+      setAmount('');
+      setDate(new Date().toISOString().split('T')[0]);
+      setNotes('');
+      setSource('previous_month');
+      setBranchId(currentBranchId || (branches.length > 0 ? branches[0].id || '' : ''));
+    }
+  }, [isOpen, currentBranchId, branches]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const selDate = new Date(date);
+    onSubmit({
+      amount: parseFormattedNumber(amount),
+      date: selDate,
+      month: selDate.getMonth() + 1,
+      year: selDate.getFullYear(),
+      notes,
+      source,
+      branchId
+    });
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent dir="rtl" className="bg-card border-border text-foreground max-w-lg rounded-3xl">
+        <DialogHeader>
+          <DialogTitle className="text-2xl font-black flex items-center gap-3">
+            <div className="size-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-600">
+              <DollarSign className="h-6 w-6" />
+            </div>
+            إضافة رصيد افتتاحي كاش
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground pt-2 font-bold">
+            تسجيل الرصيد النقدي المدور للفترة المالية الحالية.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-6 pt-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2 md:col-span-2">
+              <Label className="text-xs font-black uppercase text-muted-foreground mr-1 tracking-widest">المبلغ (د.ع)</Label>
+              <CurrencyInput 
+                value={amount} 
+                onValueChange={setAmount} 
+                placeholder="0" 
+                className="h-16 rounded-2xl font-mono text-2xl font-black bg-emerald-500/5 border-emerald-500/20 focus:border-emerald-500 focus:ring- emerald-500/20" 
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase text-muted-foreground mr-1 tracking-widest">التاريخ</Label>
+              <Input 
+                type="date" 
+                required 
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="h-14 rounded-2xl font-bold bg-muted/30" 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase text-muted-foreground mr-1 tracking-widest">المصدر</Label>
+              <Select value={source} onValueChange={setSource}>
+                <SelectTrigger className="h-14 rounded-2xl font-bold bg-muted/30">
+                  <SelectValue placeholder="اختر المصدر" />
+                </SelectTrigger>
+                <SelectContent dir="rtl" className="bg-card border-border rounded-xl">
+                  <SelectItem value="previous_month">وارد سابق</SelectItem>
+                  <SelectItem value="leftover_cash">كاش متبقي</SelectItem>
+                  <SelectItem value="internal_transfer">تحويل داخلي</SelectItem>
+                  <SelectItem value="other">أخرى</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-black uppercase text-muted-foreground mr-1 tracking-widest">الفرع</Label>
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-14 rounded-2xl font-bold bg-muted/30">
+                  <SelectValue placeholder="اختر الفرع" />
+                </SelectTrigger>
+                <SelectContent dir="rtl" className="bg-card border-border rounded-xl">
+                  {branches.map(b => (
+                    <SelectItem key={b.id} value={b.id || ''}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label className="text-xs font-black uppercase text-muted-foreground mr-1 tracking-widest">ملاحظات</Label>
+              <Textarea 
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="إضافة تفاصيل اختيارية..." 
+                className="rounded-2xl font-bold bg-muted/30 min-h-[80px]" 
+              />
+            </div>
+          </div>
+          
+          <DialogFooter className="flex flex-row gap-3 pt-4">
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} className="flex-1 rounded-2xl h-14 font-bold">إلغاء</Button>
+            <Button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl h-14 font-black shadow-xl shadow-emerald-500/20 transition-all active:scale-95">
+              حفظ الرصيد
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+const DiagnosisPage = ({ 
+  ledger, 
+  transactions, 
+  entities, 
+  onMigrate,
+  stats
+}: { 
+  ledger: any[]; 
+  transactions: any[]; 
+  entities: any[]; 
+  onMigrate: () => Promise<void>;
+  stats: any;
+}) => {
+  const [isMigrating, setIsMigrating] = React.useState(false);
+
+  const handleMigrate = async () => {
+    setIsMigrating(true);
+    try {
+      await onMigrate();
+      toast.success('تمت عملية المزامنة بنجاح');
+    } catch (e) {
+      toast.error('فشلت عملية المزامنة');
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
+  const revenueCount = ledger.filter(e => e.sourceType === 'revenue' && !e.isDeleted).length;
+  const expenseCount = ledger.filter(e => e.sourceType === 'expense' && !e.isDeleted).length;
+  const salaryCount = ledger.filter(e => e.sourceType === 'employee_salary' && !e.isDeleted).length;
+  const invoicesCount = ledger.filter(e => e.sourceType === 'invoice' && !e.isDeleted).length;
+  const paymentsCount = ledger.filter(e => e.sourceType === 'payment' && !e.isDeleted).length;
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-700">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div>
+          <h2 className="text-3xl font-black text-foreground mb-2">تشخيص الحسابات والنظام</h2>
+          <p className="text-muted-foreground font-bold tracking-tight">أدوات فحص سلامة البيانات والمزامنة مع الأستاذ العام الموحد</p>
+        </div>
+        <Button 
+          onClick={handleMigrate} 
+          disabled={isMigrating}
+          className="bg-primary hover:bg-primary/90 text-white font-black h-14 px-8 rounded-2xl shadow-xl shadow-primary/20 gap-3"
+        >
+          {isMigrating ? <RefreshCcw className="h-5 w-5 animate-spin" /> : <Database className="h-5 w-5" />}
+          مزامنة كافة السجلات مع الأستاذ العام
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {[
+          { label: 'سجلات الأستاذ العام', value: ledger.length, color: 'text-primary' },
+          { label: 'سجلات الإيرادات', value: revenueCount, color: 'text-emerald-500' },
+          { label: 'سجلات المصاريف', value: expenseCount, color: 'text-rose-500' },
+          { label: 'سجلات الرواتب', value: salaryCount, color: 'text-blue-500' },
+          { label: 'سجلات الفواتير', value: invoicesCount, color: 'text-amber-500' },
+          { label: 'سجلات المدفوعات', value: paymentsCount, color: 'text-purple-500' },
+          { label: 'موردون نشطون', value: entities.length, color: 'text-foreground' },
+          { label: 'العمليات المحذوفة', value: ledger.filter(e => e.isDeleted).length, color: 'text-muted-foreground' }
+        ].map((item, idx) => (
+          <Card key={idx} className="bg-card border-border p-6 rounded-2xl flex flex-col items-center justify-center text-center shadow-sm">
+            <div className={`text-4xl font-black mb-2 font-mono ${item.color}`}>{item.value}</div>
+            <div className="text-xs font-black text-muted-foreground uppercase tracking-widest">{item.label}</div>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="bg-card border-border rounded-2xl overflow-hidden">
+        <CardHeader className="bg-muted/20 border-b border-border p-8">
+          <CardTitle className="text-xl font-black">حالة الأستاذ العام الموحد</CardTitle>
+          <CardDescription className="text-muted-foreground font-bold">ملخص سلامة الحسابات وتطابق الأرقام</CardDescription>
+        </CardHeader>
+        <CardContent className="p-8 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-4">
+              <h3 className="font-black text-foreground border-r-4 border-primary pr-4">فحص التوازن المالي</h3>
+              <div className="space-y-3">
+                <div className="flex justify-between p-4 bg-muted/30 rounded-xl">
+                  <span className="font-bold text-muted-foreground">رصيد الصندوق الحالي:</span>
+                  <span className="font-black font-mono text-emerald-600">{formatIQD(stats.cashBalance)}</span>
+                </div>
+                <div className="flex justify-between p-4 bg-muted/30 rounded-xl">
+                  <span className="font-bold text-muted-foreground">إجمالي ديون الموردين:</span>
+                  <span className="font-black font-mono text-rose-500">{formatIQD(stats.supplierDues)}</span>
+                </div>
+                <div className="flex justify-between p-4 bg-muted/30 rounded-xl">
+                  <span className="font-bold text-muted-foreground">الرصيد النقدي الافتتاحي:</span>
+                  <span className="font-black font-mono text-blue-500">{formatIQD(stats.openingCashBalance)}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <h3 className="font-black text-foreground border-r-4 border-amber-500 pr-4">آخر العمليات</h3>
+              <div className="space-y-2">
+                {ledger.slice(0, 5).map((entry, idx) => (
+                  <div key={idx} className="flex items-center gap-3 p-3 bg-muted/20 rounded-xl border border-border text-xs">
+                    <span className="font-mono text-muted-foreground font-bold">{safeFormatDate(entry.date, 'yyyy/MM/dd')}</span>
+                    <span className="font-black text-foreground flex-1 truncate">{entry.description}</span>
+                    <span className={`font-black font-mono ${entry.credit > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {entry.credit > 0 ? '+' : '-'}{formatNumberWithCommas(entry.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6 bg-primary/5 border border-primary/10 rounded-2xl">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="h-6 w-6 text-primary shrink-0 mt-1" />
+              <div>
+                <h4 className="font-black text-primary mb-1">ملاحظات حول المزامنة</h4>
+                <p className="text-sm font-bold text-muted-foreground leading-relaxed">
+                  عند الضغط على "مزامنة كافة السجلات"، سيقوم النظام بفحص جميع الفواتير والمصاريف والإيرادات والرواتب، والتأكد من وجود سجل مطابق لها في الأستاذ العام. 
+                  هذا الإجراء آمن ولا يحذف البيانات، بل يقوم فقط بتحديث الأستاذ العام لضمان دقة التقارير.
+                </p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
 const DeleteInvoiceConfirmDialog = ({ 
   isOpen, 
   onOpenChange, 
@@ -596,6 +858,7 @@ export default function App() {
   const { data: rawAllLedgerEntries = [] } = useFirebaseQuery<LedgerEntry>('ledgerEntries', ledgerEntriesQuery);
   const { data: rawHistoricalRecords = [] } = useFirebaseQuery<HistoricalRecord>('historicalRecords', historicalQuery);
   const { data: rawEntityActivities = [] } = useFirebaseQuery<EntityActivity>('entityActivities', entityActivitiesQuery);
+  const { data: rawOpeningCash = [] } = useFirebaseQuery<OpeningCash>('openingCash');
   const { data: deadlines = [] } = useFirebaseQuery<Deadline>('deadlines');
   const { data: activationCodes = [] } = useFirebaseQuery<ActivationCode>('activationCodes');
   const { data: activationRequests = [] } = useFirebaseQuery<ActivationRequest>('activationRequests');
@@ -607,9 +870,19 @@ export default function App() {
   const { data: announcements = [] } = useFirebaseQuery<Announcement>('announcements', announcementsConstraints);
   const { data: readAnnouncementsData = [] } = useFirebaseQuery<AnnouncementRead>('announcementReads', readAnnouncementsConstraints);
 
-  // Client-side sorting to avoid Firestore Index requirements
+  // Client-side sorting and deduplication to avoid Firestore Index requirements and handle historical duplicates
   const branches = useMemo(() => {
-    return [...rawBranches].sort((a, b) => {
+    // 1. Deduplicate by ID first
+    const uniqueById = Array.from(new Map(rawBranches.map(b => [b.id, b])).values());
+    
+    // 2. If there are duplicates by NAME that are both "Main Branch", we should probably only show one.
+    // However, unique ID is the primary key. If the user has two "Main Branch" with different IDs, they will show.
+    // The previous logic fixed NEW creations, but for cleanup:
+    return [...uniqueById].sort((a, b) => {
+      // Prioritize isMain branches
+      if (a.isMain && !b.isMain) return -1;
+      if (!a.isMain && b.isMain) return 1;
+
       const da = toValidDate(a.createdAt || Date.now());
       const db = toValidDate(b.createdAt || Date.now());
       const ta = isNaN(da.getTime()) ? 0 : da.getTime();
@@ -819,6 +1092,7 @@ export default function App() {
     { id: 'transactions', label: 'المصاريف العامة', icon: ArrowUpCircle },
     { id: 'notifications', label: 'الإشعارات', icon: Bell, badge: (notifications || []).filter(n => !n.read).length },
     { id: 'reports', label: 'التقارير', icon: PieChart },
+    { id: 'diagnosis', label: 'تشخيص الحسابات', icon: ShieldCheck },
     { id: 'medicine-requests', label: 'طلبات الأدوية', icon: PackageSearch },
     { id: 'branches', label: 'إدارة الصيدليات', icon: Building2 },
     { id: 'historical', label: 'الأرصدة والترحيل التاريخي', icon: History },
@@ -826,6 +1100,7 @@ export default function App() {
   ].filter(item => {
     if (item.id === 'branches') return userPermissions.canManageBranches;
     if (item.id === 'reports') return userPermissions.canViewReports;
+    if (item.id === 'diagnosis') return appUser?.role === 'admin';
     return true;
   });
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
@@ -876,6 +1151,7 @@ export default function App() {
   
   const [isAddRevenueOpen, setIsAddRevenueOpen] = useState(false);
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
+  const [isAddOpeningCashOpen, setIsAddOpeningCashOpen] = useState(false);
   const [isAddBonusOpen, setIsAddBonusOpen] = useState(false);
   const [isAddLossOpen, setIsAddLossOpen] = useState(false);
   const [incomeType, setIncomeType] = useState<'cash' | 'credit'>('cash');
@@ -905,6 +1181,7 @@ export default function App() {
   const [payDiscountPercentage, setPayDiscountPercentage] = useState<number>(0);
   const [payRefund, setPayRefund] = useState<string>('0');
   const [payLinkedInvoice, setPayLinkedInvoice] = useState<string>('');
+  const [paySource, setPaySource] = useState<'invoice' | 'opening_balance'>('invoice');
 
   const [deadlineAmount, setDeadlineAmount] = useState<string>('');
   const [deadlineDiscount, setDeadlineDiscount] = useState<string>('0');
@@ -1005,33 +1282,41 @@ export default function App() {
   // Requirement: Auto-create default branch if none exist
   useEffect(() => {
     const initDefaultBranch = async () => {
-      if (branches.length === 0 && authStep === 'authenticated') {
-        process.env.NODE_ENV !== 'production' && console.log("No branches found, creating default branch...");
+      // Only run if we are definitely authenticated and we have checked branches
+      // We use rawBranches to check the actual data from metadata hook or query
+      if (authStep === 'authenticated' && user?.uid) {
+        // Find if a main branch exists by looking for name or isMain flag
+        const mainBranch = rawBranches.find(b => b.isMain === true || b.name === 'الفرع الرئيسي');
         
-        const defaultBranch = {
-          id: 'main',
-          name: 'الفرع الرئيسي',
-          code: 'MAIN01',
-          ownerId: user?.uid || 'guest',
-          status: 'active',
-          createdAt: new Date(),
-          updatedAt: new Date()
-        } as any;
-        
-        try {
-          // In Firestore we can just try to add, or check if any exists
-          const existingMain = branches.find(b => b.id === 'main');
-          if (!existingMain) {
-            await firebaseService.addDocument('branches', defaultBranch);
+        if (!mainBranch && rawBranches.length === 0) {
+          process.env.NODE_ENV !== 'production' && console.log("No branches found, creating default branch...");
+          
+          const defaultBranch: PharmacyBranch = {
+            id: 'main-branch-' + user.uid.substring(0, 5), // Stable-ish ID
+            name: 'الفرع الرئيسي',
+            pharmacyName: 'الصيدلية الرئيسية',
+            managerName: 'المدير العام',
+            phone: '07000000000',
+            city: 'بغداد',
+            code: 'MAIN01',
+            ownerId: user.uid,
+            status: 'active',
+            isMain: true,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          
+          try {
+            await firebaseService.setDocument('branches', defaultBranch.id!, defaultBranch);
             console.log("Default branch 'main' created successfully");
+          } catch (err) {
+            console.error("Failed to create default branch:", err);
           }
-        } catch (err) {
-          console.error("Failed to create default branch:", err);
         }
       }
     };
     initDefaultBranch();
-  }, [branches.length, authStep, appUser?.userId, user?.uid]);
+  }, [rawBranches.length, authStep, user?.uid]);
 
   // Requirement: Auto-select first branch if none selected and branches exist
   useEffect(() => {
@@ -1054,32 +1339,53 @@ export default function App() {
     const today = startOfDay(new Date());
     const monthStart = startOfMonth(new Date());
     
+    // Filter out deleted entries
+    const activeLedger = allLedgerEntries.filter(e => !e.isDeleted);
+    const bLedger = currentBranchId ? activeLedger.filter(e => e.branchId === currentBranchId) : activeLedger;
+
     // Helper to safely get date
     const getDate = (d: any) => toValidDate(d);
 
     // Daily revenue (Income today)
-    const dailyRevenue = transactions
-      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && startOfDay(getDate(tx.date)).getTime() === today.getTime())
-      .reduce((acc, tx) => acc + Number(tx.saleAmount || tx.amount || 0), 0);
+    const dailyRevenue = bLedger
+      .filter(e => e.sourceType === 'revenue' && startOfDay(getDate(e.date)).getTime() === today.getTime())
+      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
 
     // Monthly stats
-    const monthlyRevenue = transactions
-      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && getDate(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + Number(tx.saleAmount || tx.amount || 0), 0);
+    const monthlyRevenue = bLedger
+      .filter(e => e.sourceType === 'revenue' && getDate(e.date) >= monthStart)
+      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
 
     // GROSS Profit from sales this month
+    // We need to calculate profit from the source transactions for now if not in ledger
+    // But user says: "Ledger entries count... revenues count..."
+    // I'll use transactions for profit for now until I ensure ledger has profit field
     const monthlyGrossProfit = transactions
-      .filter(tx => (tx.type === 'income' || tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && getDate(tx.date) >= monthStart)
+      .filter(tx => !tx.isDeleted && (tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && getDate(tx.date) >= monthStart)
       .reduce((acc, tx) => acc + Number(tx.profitAmount || tx.netProfit || 0), 0);
 
-    const monthlySalary = employeeAttendance
-      .filter(record => (!currentBranchId || record.branchId === currentBranchId) && getDate(record.date) >= monthStart)
-      .reduce((acc, record) => acc + Number(record.dailyWage || 0), 0);
+    // Monthly Salaries from Ledger
+    const monthlySalary = bLedger
+      .filter(e => e.sourceType === 'employee_salary' && getDate(e.date) >= monthStart)
+      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
 
-    // Monthly Expense
-    const monthlyExpense = transactions
-      .filter(tx => tx.type === 'expense' && (!currentBranchId || tx.branchId === currentBranchId) && getDate(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + Number(tx.amount || 0), 0) + monthlySalary;
+    // Monthly Expense (General + Salaries)
+    const monthlyExpense = bLedger
+      .filter(e => e.sourceType === 'expense' && getDate(e.date) >= monthStart)
+      .reduce((acc, e) => acc + Number(e.amount || 0), 0) + monthlySalary;
+
+    // Opening Cash Balance from dedicated collection
+    const bOpeningCash = currentBranchId ? rawOpeningCash.filter(o => o.branchId === currentBranchId) : rawOpeningCash;
+    const openingCashTotal = bOpeningCash
+      .filter(o => o.month === monthStart.getMonth() + 1 && o.year === monthStart.getFullYear())
+      .reduce((acc, o) => acc + Number(o.amount || 0), 0);
+
+    // Opening Cash Balance from Ledger (Legacy/fallback)
+    const ledgerOpeningCash = bLedger
+      .filter(e => e.sourceType === 'opening_cash' && getDate(e.date) >= monthStart)
+      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
+    
+    const openingCashBalance = openingCashTotal || ledgerOpeningCash;
 
     // Net Profit (Monthly) = Gross Profit from Sales - Expenses
     const netProfit = monthlyGrossProfit - monthlyExpense;
@@ -1087,62 +1393,56 @@ export default function App() {
 
     // Supplier Dues
     const supplierDues = entities
-      .filter(e => !currentBranchId || e.branchId === currentBranchId)
+      .filter(e => !e.deletedAt && (!currentBranchId || e.branchId === currentBranchId))
       .reduce((acc, e) => acc + Number(e.balance || 0), 0);
 
-    // Due InvoicesCount
-    const dueInvoicesCount = (allLedgerEntries || [])
-      .filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'invoice' && e.paymentStatus !== 'paid')
+    // Due Invoices
+    const dueInvoicesCount = bLedger
+      .filter(e => e.sourceType === 'invoice' && !(e as any).isPaid) // Using simplified check for now
       .length;
 
-    const bTx = currentBranchId ? transactions.filter(t => t.branchId === currentBranchId) : transactions;
-    
     // Total Revenue (All time)
     const showHistorical = reportTypeFilter === 'all' || reportTypeFilter === 'historical';
     const showCurrent = reportTypeFilter === 'all' || reportTypeFilter === 'current';
 
-    const histSales = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalSales || 0), 0) : 0;
-    const histProfits = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalProfits || 0) + Number(r.retainedEarnings || 0), 0) : 0;
-    const histExpenses = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalExpenses || 0) + Number(r.accumulatedExpenses || 0), 0) : 0;
-    const histDues = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalDebtOwed || 0) + Number(r.officeDebts || 0) + Number(r.warehouseDebts || 0), 0) : 0;
+    const histRevenue = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalSales || 0), 0) : 0;
+    const currentRevenue = showCurrent ? bLedger.filter(e => e.sourceType === 'revenue').reduce((acc, e) => acc + Number(e.amount || 0), 0) : 0;
+    const totalRevenue = currentRevenue + histRevenue;
+    
+    // Total Expense (All time)
+    const histExpense = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalExpenses || 0), 0) : 0;
+    const currentExpense = showCurrent ? (bLedger.filter(e => e.sourceType === 'expense' || e.sourceType === 'employee_salary' || e.sourceType === 'damaged_expired').reduce((acc, e) => acc + Number(e.amount || 0), 0)) : 0;
+    const totalExpense = currentExpense + histExpense;
 
-    const currentRevenue = showCurrent ? bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.saleAmount || t.amount || 0), 0) : 0;
-    const totalRevenue = currentRevenue + histSales;
-    
-    // Calculate total losses from expired/damaged items
-    const totalLossesAmount = showCurrent ? expiredDamagedLosses
-      .filter(l => !currentBranchId || l.branchId === currentBranchId)
-      .reduce((acc, l) => acc + Number(l.totalLoss || 0), 0) : 0;
+    // Total Net Profit
+    const histProfits = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalProfits || 0), 0) : 0;
+    const currentGrossProfit = showCurrent ? transactions.filter(tx => !tx.isDeleted && tx.type === 'revenue' && (!currentBranchId || tx.branchId === currentBranchId)).reduce((acc, tx) => acc + Number(tx.profitAmount || tx.netProfit || 0), 0) : 0;
+    const totalNetProfit = (currentGrossProfit + histProfits) - totalExpense;
 
-    const currentExpense = showCurrent ? (bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + Number(t.amount || 0), 0) + 
-      employeeAttendance.filter(record => !currentBranchId || record.branchId === currentBranchId).reduce((acc, record) => acc + Number(record.dailyWage || 0), 0) + totalLossesAmount) : 0;
-    
-    const totalExpense = currentExpense + histExpenses;
-    
-    // Total Gross Profit from transactions
-    const currentGrossProfit = showCurrent ? bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.profitAmount || t.netProfit || 0), 0) : 0;
-    const totalGrossProfit = currentGrossProfit + histProfits;
-    
-    // TOTAL Net Profit = Total Gross Profit - Total Expenses
-    const totalNetProfit = totalGrossProfit - totalExpense;
-    
+    // Cash Balance = Opening Cash + Sales Cash - Expenses Paid - Supplier Payments
+    // This is a simplified cash flow
+    const cashSales = bLedger.filter(e => e.sourceType === 'revenue').reduce((acc, e) => acc + Number(e.amount || 0), 0); // Assuming all sales for now or filter by cash
+    const totalSupplierPayments = bLedger.filter(e => e.sourceType === 'payment' || e.sourceType === 'supplier_opening_payment').reduce((acc, e) => acc + Number(e.amount || 0), 0);
+    const cashBalance = openingCashBalance + cashSales - currentExpense - totalSupplierPayments;
+
     const totals = {
       dailyRevenue,
       monthlyRevenue,
       monthlyExpense,
       netProfit,
       profitPercentage,
-      supplierDues: (showCurrent ? supplierDues : 0) + histDues,
-      dueInvoices: showCurrent ? dueInvoicesCount : 0,
+      supplierDues: (showCurrent ? supplierDues : 0),
+      dueInvoices: dueInvoicesCount,
       totalRevenue,
       totalExpense,
       totalNetProfit,
-      totalLosses: totalLossesAmount
+      cashBalance,
+      openingCashBalance
     };
 
-    console.log("Dashboard totals:", totals);
+    console.log("Unified Ledger Stats:", totals);
     return totals;
-  }, [transactions, entities, allLedgerEntries, employeeAttendance, historicalRecords, expiredDamagedLosses, reportTypeFilter, currentBranchId]);
+  }, [allLedgerEntries, transactions, entities, historicalRecords, currentBranchId, reportTypeFilter]);
 
   const [reportsMonth, setReportsMonth] = useState(new Date().getMonth());
   const [reportsYear, setReportsYear] = useState(new Date().getFullYear());
@@ -1406,10 +1706,30 @@ export default function App() {
     
     try {
       const docRef = await firebaseService.addDocument('entities', newEntity as Entity);
+      const entityId = (docRef as any);
+
+      // Create Ledger Entry for Opening Balance
+      if (initialBalance !== 0) {
+        await firebaseService.syncLedger({
+          sourceType: 'supplier_opening_balance',
+          sourceId: entityId,
+          userId: appUser?.userId || 'demo-user',
+          branchId: targetBranchId as string,
+          date: new Date(),
+          debit: initialBalance, // Debt increases (positive balance for suppliers usually means we owe them)
+          credit: 0,
+          amount: initialBalance,
+          category: 'أرصدة افتتاحية',
+          entityId: entityId,
+          entityName: data.name,
+          description: `رصيد افتتاحي للمورد: ${data.name}`,
+          ownerId: appUser?.userId || 'demo-user'
+        });
+      }
       
       // Activity
       await firebaseService.addDocument('entityActivities', {
-        entityId: (docRef as any).id,
+        entityId: entityId,
         type: 'add_invoice',
         action: 'تأسيس حساب جديد',
         details: `تم إنشاء حساب مورد جديد: ${data.name}`,
@@ -1551,28 +1871,26 @@ export default function App() {
   };
 
   const handleFullDeleteEntity = async (id: string) => {
-    try {
-      // 1. Delete entity
-      await firebaseService.deleteDocument('entities', id);
-      
-      const relatedEntries = rawAllLedgerEntries.filter(e => e.accountId === id);
-      for (const entry of relatedEntries) {
-        if (entry.id) await firebaseService.deleteDocument('ledgerEntries', entry.id);
+    triggerDelete(
+      'حذف المورد نهائياً',
+      'هل أنت متأكد؟ سيتم حذف المورد وكافة سجلاته المالية (كشف حساب، فواتير، تسديدات) نهائياً من كل مكان ولا يمكن التراجع.',
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          await firebaseService.deleteDocument('entities', id);
+          
+          setIsEntityDeleteOptionsOpen(false);
+          setViewingEntityDetail(null);
+          setDeletingEntityData(null);
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف المورد وكافة بياناته المرتبطة نهائياً');
+        } catch (error) {
+          console.error("Full delete failed:", error);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('فشل في عملية الحذف النهائي');
+        }
       }
-
-      // Also delete activities
-      const relatedActivities = rawEntityActivities.filter(a => a.entityId === id);
-      for (const act of relatedActivities) {
-        if (act.id) await firebaseService.deleteDocument('entityActivities', act.id);
-      }
-
-      setIsEntityDeleteOptionsOpen(false);
-      setDeletingEntityData(null);
-      toast.success('تم حذف المورد وكافة بياناته المرتبطة نهائياً');
-    } catch (error) {
-      console.error(error);
-      toast.error('فشل في عملية الحذف الكامل');
-    }
+    );
   };
 
   const handleAddEmployee = async (data: Partial<Employee>) => {
@@ -1618,49 +1936,26 @@ export default function App() {
     const employee = employees.find(e => e.id === id);
     const attendanceCount = rawEmployeeAttendance.filter(a => a.employeeId === id).length;
     
-    if (attendanceCount > 0) {
-      triggerDelete(
-        `حذف موظف: ${employee?.name}`,
-        `هذا الموظف لديه ${attendanceCount} سجل حضور. هل تريد حذفه نهائياً مع كافة سجلاته؟ لا يمكن التراجع.`,
-        async () => {
-          setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
-          try {
-            console.log("Deleting employee and attendance:", id);
-            await firebaseService.deleteDocument('employees', id);
-            const attendance = rawEmployeeAttendance.filter(a => a.employeeId === id);
-            for (const att of attendance) {
-              if (att.id) await firebaseService.deleteDocument('employeeAttendance', att.id);
-            }
-            console.log("Deleted successfully: employee", id);
-            setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
-            toast.success('تم حذف الموظف وسجلاته بنجاح');
-          } catch (error) {
-            console.error(error);
-            setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
-            toast.error('فشل في الحذف');
-          }
+    triggerDelete(
+      `حذف الموظف: ${employee?.name}`,
+      attendanceCount > 0 
+        ? `هذا الموظف لديه ${attendanceCount} سجل حضور. هل أنت متأكد؟ سيتم حذف الموظف وكافة سجلاته نهائياً من كل مكان ولا يمكن التراجع.`
+        : `هل أنت متأكد؟ سيتم حذف الموظف وكل بياناته نهائياً من كل مكان ولا يمكن التراجع.`,
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          console.log("Deleting employee and cascading records:", id);
+          await firebaseService.deleteDocument('employees', id);
+          
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف الموظف وكافة بياناته نهائياً');
+        } catch (error) {
+          console.error(error);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('فشل في حذف الموظف');
         }
-      );
-    } else {
-      triggerDelete(
-        'تأكيد الحذف',
-        `هل أنت متأكد من حذف الموظف ${employee?.name}؟`,
-        async () => {
-          setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
-          try {
-            console.log("Deleting employee:", id);
-            await firebaseService.deleteDocument('employees', id);
-            console.log("Deleted successfully: employee", id);
-            setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
-            toast.success('تم حذف الموظف');
-          } catch (error) {
-            console.error(error);
-            setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
-            toast.error('فشل في الحذف');
-          }
-        }
-      );
-    }
+      }
+    );
   };
 
   const handleAddAttendance = async (data: Partial<EmployeeAttendance>) => {
@@ -1669,15 +1964,51 @@ export default function App() {
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
     
     try {
-      await firebaseService.addDocument('employeeAttendance', {
-        ...data as EmployeeAttendance,
+      // 1. Save attendance record
+      const docId = await firebaseService.addDocument('employeeAttendance', {
+        ...data,
         branchId: targetBranchId as string | undefined,
         ownerId: appUser.userId,
         createdAt: new Date(),
         updatedAt: new Date(),
       } as any);
+
+      if (data.dailyWage && Number(data.dailyWage) > 0) {
+        const commonData = {
+          sourceId: docId as string,
+          branchId: targetBranchId as string,
+          date: data.date || new Date(),
+          amount: Number(data.dailyWage) || 0,
+          entityId: data.employeeId,
+          entityName: data.employeeName,
+          ownerId: appUser.userId,
+          updatedAt: new Date()
+        };
+
+        // 2. Sync Ledger Entry
+        await firebaseService.syncLedger({
+          ...commonData,
+          sourceType: 'employee_salary',
+          userId: appUser.userId,
+          debit: commonData.amount,
+          credit: 0,
+          category: 'رواتب الموظفين',
+          description: `راتب موظف: ${data.employeeName} - ${data.notes || ''}`
+        });
+
+        // 3. Sync Transaction
+        await firebaseService.syncTransaction({
+          ...commonData,
+          type: 'expense',
+          category: 'salaries',
+          description: `راتب موظف: ${data.employeeName} (${data.month}/${data.year})`,
+          employeeName: data.employeeName,
+          createdBy: appUser.userId
+        });
+      }
+
       console.log("Saved successfully (Attendance)");
-      toast.success('تم تسجيل الحضور بنجاح');
+      toast.success('تم تسجيل الحضور والراتب بنجاح');
     } catch (error) {
       console.error("Failed to save attendance:", error);
       toast.error('فشل في تسجيل الحضور');
@@ -1685,11 +2016,55 @@ export default function App() {
   };
 
   const handleUpdateAttendance = async (id: string, data: Partial<EmployeeAttendance>) => {
+    console.log("Updating record... (Attendance)");
+    if (!appUser) return;
+    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+
     try {
-      await firebaseService.updateDocument('employeeAttendance', id, data);
-      toast.success('تم تحديث سجل الحضور');
+      // 1. Update attendance record
+      await firebaseService.updateDocument('employeeAttendance', id, {
+        ...data,
+        updatedAt: new Date()
+      });
+
+      // 2. Find and sync related records
+      if (data.dailyWage && Number(data.dailyWage) > 0) {
+        const commonData = {
+          sourceId: id,
+          branchId: targetBranchId as string,
+          date: data.date || new Date(),
+          amount: Number(data.dailyWage) || 0,
+          entityId: data.employeeId,
+          entityName: data.employeeName,
+          ownerId: appUser.userId,
+          updatedAt: new Date()
+        };
+
+        // Sync Ledger
+        await firebaseService.syncLedger({
+          ...commonData,
+          sourceType: 'employee_salary',
+          userId: appUser.userId,
+          debit: commonData.amount,
+          credit: 0,
+          category: 'رواتب الموظفين',
+          description: `تعديل راتب موظف: ${data.employeeName} - ${data.notes || ''}`
+        });
+
+        // Sync Transaction
+        await firebaseService.syncTransaction({
+          ...commonData,
+          type: 'expense',
+          category: 'salaries',
+          description: `تعديل راتب موظف: ${data.employeeName} (${data.month}/${data.year})`,
+          employeeName: data.employeeName,
+          createdBy: appUser.userId
+        });
+      }
+      
+      toast.success('تم تحديث سجل الحضور وإعادة حساب الراتب');
     } catch (error) {
-      console.error(error);
+      console.error("Failed to update attendance:", error);
       toast.error('فشل في التحديث');
     }
   };
@@ -1697,15 +2072,14 @@ export default function App() {
   const handleDeleteAttendance = async (id: string) => {
     triggerDelete(
       'حذف سجل الحضور',
-      'هل أنت متأكد من حذف هذا السجل؟ لا يمكن التراجع عن هذه العملية.',
+      'هل أنت متأكد؟ سيتم حذف هذا السجل نهائياً من كل مكان ولا يمكن التراجع.',
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
           console.log("Deleting attendance:", id);
           await firebaseService.deleteDocument('employeeAttendance', id);
-          console.log("Deleted successfully: attendance", id);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
-          toast.success('تم حذف سجل الحضور');
+          toast.success('تم حذف سجل الحضور نهائياً');
         } catch (error) {
           console.error(error);
           setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
@@ -1721,8 +2095,16 @@ export default function App() {
       toast.error('يجب تسجيل الدخول أولاً');
       return;
     }
+
+    // Protection: check for duplicate name
+    const isDuplicate = rawBranches.some(b => b.name === data.name && b.status !== 'archived');
+    if (isDuplicate) {
+      toast.error('يوجد فرع بالفعل بهذا الاسم، يرجى اختيار اسم مختلف');
+      return;
+    }
+
     try {
-      const allBranches = branches;
+      const allBranches = rawBranches;
       const nextNum = (allBranches.length > 0) 
         ? Math.max(...allBranches.map(b => {
              const num = parseInt(b.code?.split('-')[1] || '0');
@@ -1731,18 +2113,26 @@ export default function App() {
         : 1;
       const code = `BR-${nextNum.toString().padStart(4, '0')}`;
       
+      // If this is set as main, unset other main branches
+      if (data.isMain) {
+        const otherMainBranches = rawBranches.filter(b => b.isMain === true);
+        for (const mb of otherMainBranches) {
+          await firebaseService.updateDocument('branches', mb.id!, { isMain: false });
+        }
+      }
+
       const newBranch: PharmacyBranch = {
         ...data as any,
         code,
         ownerId: appUser.userId,
         createdAt: new Date(),
         updatedAt: new Date(),
-        status: data.activationCode ? 'active' : 'pending' 
+        status: data.isMain ? 'active' : (data.activationCode ? 'active' : 'pending')
       } as any;
 
       await firebaseService.addDocument('branches', newBranch);
       console.log("[App] Branch added successfully");
-      toast.success(newBranch.status === 'active' ? 'تم تفعيل وربط الفرع الجديد بنجاح' : 'تم تسجيل الفرع. بانتظار التفعيل الإداري');
+      toast.success(newBranch.status === 'active' ? 'تم تسجيل وتفعيل الفرع بنجاح' : 'تم تسجيل الفرع. بانتظار التفعيل');
     } catch (error) {
       console.error("[App] Failed to add branch:", error);
       toast.error('فشل في عملية تسجيل الفرع');
@@ -1751,6 +2141,28 @@ export default function App() {
 
   const handleUpdateBranch = async (id: string, data: Partial<PharmacyBranch>) => {
     try {
+      // Check for duplicate name if name is being changed
+      if (data.name) {
+        const isDuplicate = rawBranches.some(b => 
+          b.id !== id &&
+          b.status !== 'archived' && 
+          b.name.trim().toLowerCase() === data.name?.trim().toLowerCase()
+        );
+        
+        if (isDuplicate) {
+          toast.error('يوجد فرع نشط بنفس هذا الاسم بالفعل');
+          return;
+        }
+      }
+
+      // If setting this as main, unset others
+      if (data.isMain) {
+        const otherMainBranches = rawBranches.filter(b => b.isMain === true && b.id !== id);
+        for (const mb of otherMainBranches) {
+          await firebaseService.updateDocument('branches', mb.id!, { isMain: false });
+        }
+      }
+
       await firebaseService.updateDocument('branches', id, data);
       toast.success('تم تحديث بيانات الفرع');
     } catch (error) {
@@ -1773,21 +2185,19 @@ export default function App() {
   const handleDeleteBranch = async (id: string) => {
     const branch = rawBranches.find(b => b.id === id);
     triggerDelete(
-      'حذف فرع',
-      `هل أنت متأكد من حذف فرع ${branch?.name || id}؟ سيتم حذف كافة البيانات المرتبطة به نهائياً.`,
+      'تعطيل فرع',
+      'هل أنت متأكد؟ لن يتم حذف الفرع نهائياً للحفاظ على السجلات المالية، ولكن سيتم إزالته من القوائم النشطة وتعطيله.',
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
-          console.log("Deleting branch:", id);
-          await firebaseService.deleteDocument('branches', id);
+          await firebaseService.updateDocument('branches', id, { status: 'inactive' });
           if (currentBranchId === id) setCurrentBranchId(null);
-          console.log("Deleted successfully: branch", id);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
-          toast.success('تم حذف الفرع نهائياً');
-        } catch (error) {
-          console.error("Error deleting branch:", error);
+          toast.success('تم تعطيل الفرع بنجاح');
+        } catch (err) {
+          console.error("Delete Branch Error:", err);
           setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
-          toast.error('فشل في الحذف');
+          toast.error('حدث خطأ أثناء التعطيل');
         }
       }
     );
@@ -1872,6 +2282,24 @@ export default function App() {
 
     try {
       const addedId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
+      
+      // Sync to unified ledger
+      await firebaseService.syncLedger({
+        sourceType: 'invoice',
+        sourceId: addedId as string,
+        userId: appUser?.userId || 'demo-user',
+        branchId: (targetBranchId as string) || 'main',
+        date: data.date ? new Date(data.date) : new Date(),
+        debit: netAmount,
+        credit: 0,
+        amount: netAmount,
+        category: 'المشتريات',
+        entityId: entityToInvoice.id,
+        entityName: entityToInvoice.name,
+        description: `فاتورة شراء: ${entityToInvoice.name} - ${data.invoiceNumber || ''}`,
+        ownerId: appUser?.userId || 'demo-user'
+      });
+
       await firebaseService.addDocument('transactions', newTx as Transaction);
       console.log("Operations after save:", transactions);
 
@@ -2021,10 +2449,9 @@ export default function App() {
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log("Saving record... (Payment)");
-    if (!selectedEntity?.id) return;
+    if (!selectedEntity?.id || !appUser) return;
     
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
-
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
     
@@ -2033,6 +2460,28 @@ export default function App() {
     const refund = Number(formData.get('refund')) || 0;
     const totalEffect = amount + discount - refund;
     
+    const paymentSource = paySource;
+    const linkedInvoiceId = viewingInvoice?.id;
+    const linkedInvoiceNumber = formData.get('linkedInvoice') as string;
+
+    // Validation
+    if (paymentSource === 'invoice' && viewingInvoice) {
+      const remaining = viewingInvoice.remainingAmount || 0;
+      if (amount > remaining) {
+        toast.error(`المبلغ المدخل (${formatNumberWithCommas(amount)}) أكبر من المتبقي في الفاتورة (${formatNumberWithCommas(remaining)})`);
+        return;
+      }
+    } else if (paymentSource === 'opening_balance') {
+      const supplierOpeningPaid = (allLedgerEntries || [])
+        .filter(e => e.accountId === selectedEntity.id && e.paymentSource === 'opening_balance' && !e.isDeleted)
+        .reduce((sum, e) => sum + (e.amount || 0), 0);
+      const remainingOpening = (selectedEntity.initialBalance || 0) - supplierOpeningPaid;
+      if (amount > remainingOpening) {
+        toast.error(`المبلغ المدخل (${formatNumberWithCommas(amount)}) أكبر من المتبقي في الرصيد الافتتاحي (${formatNumberWithCommas(remainingOpening)})`);
+        return;
+      }
+    }
+
     let receiptImageUrl = '';
     if (payImageFile) {
       try {
@@ -2048,18 +2497,20 @@ export default function App() {
       accountType: selectedEntity.type,
       date: new Date(formData.get('date') as string),
       operationType: 'payment',
+      sourceType: paymentSource === 'opening_balance' ? 'supplier_opening_payment' : 'payment',
+      paymentSource: paymentSource,
       amount,
       discount,
       discountType: payDiscountType,
       discountValue: payDiscountPercentage,
       refundAmount: refund,
       netAmount: amount,
-      linkedInvoiceNumber: formData.get('linkedInvoice') as string,
-      linkedInvoiceId: viewingInvoice?.id,
+      linkedInvoiceNumber,
+      linkedInvoiceId,
       balanceAfterOperation: selectedEntity.balance - totalEffect,
       receiptImageUrl,
       notes: formData.get('notes') as string,
-      ownerId: appUser?.userId || 'demo-user',
+      ownerId: appUser.userId,
       branchId: (targetBranchId as string) || undefined,
       createdAt: new Date(),
       updatedAt: new Date()
@@ -2071,71 +2522,81 @@ export default function App() {
       category: 'payment',
       amount: totalEffect,
       date: new Date(formData.get('date') as string),
-      description: `تسديد دفعى: ${selectedEntity.name} - ${formData.get('linkedInvoice') || ''}`,
+      description: paymentSource === 'opening_balance' 
+        ? `تسديد من الرصيد الافتتاحي: ${selectedEntity.name}`
+        : `تسديد فاتورة: ${selectedEntity.name} - ${linkedInvoiceNumber || ''}`,
       entityId: selectedEntity.id,
       entityName: selectedEntity.name,
-      invoiceNumber: formData.get('linkedInvoice') as string,
+      invoiceNumber: linkedInvoiceNumber,
       branchId: targetBranchId as string | undefined,
-      createdBy: appUser?.userId || 'demo-user',
-      ownerId: appUser?.userId || 'demo-user',
-      userId: appUser?.userId || 'demo-user',
+      createdBy: appUser.userId,
+      ownerId: appUser.userId,
+      userId: appUser.userId,
       createdAt: new Date(),
       updatedAt: new Date()
     } as any;
 
     try {
-      await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
-      await firebaseService.addDocument('transactions', newTx as Transaction);
-      console.log("Operations after save:", transactions);
+      const addedId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
       
-      // Update linked invoice status if applicable
-      if (viewingInvoice?.id) {
-        const currentPaid = (viewingInvoice.paidAmount || 0) + amount + discount;
-        const currentRemaining = Math.max(0, viewingInvoice.netAmount - currentPaid);
-        let status: 'paid' | 'partial' | 'pending' | 'overdue' = 'partial';
-        if (currentRemaining <= 0) status = 'paid';
-        else if (currentPaid === 0) status = 'pending';
-        // Check if it's already overdue (simplified check for now)
-        if (status !== 'paid' && viewingInvoice.dueDate && new Date(viewingInvoice.dueDate) < new Date()) {
-          status = 'overdue';
-        }
-
-        await firebaseService.updateDocument('ledgerEntries', viewingInvoice.id, {
-          paidAmount: currentPaid,
-          remainingAmount: currentRemaining,
-          paymentStatus: status,
-          updatedAt: new Date()
-        } as any);
-      }
-
+      // Update entity balance
       await firebaseService.updateDocument('entities', selectedEntity.id, {
         balance: selectedEntity.balance - totalEffect,
         totalPayments: selectedEntity.totalPayments + 1,
+        totalPaidAmount: (selectedEntity.totalPaidAmount || 0) + totalEffect,
+        initialBalancePaid: paymentSource === 'opening_balance' 
+          ? (selectedEntity.initialBalancePaid || 0) + amount 
+          : (selectedEntity.initialBalancePaid || 0),
         updatedAt: new Date()
       } as any);
 
+      // If invoice payment, update invoice status
+      if (paymentSource === 'invoice' && linkedInvoiceId) {
+        const inv = allLedgerEntries.find(i => i.id === linkedInvoiceId);
+        if (inv) {
+          const newPaidAmount = (inv.paidAmount || 0) + amount + discount;
+          const newRemaining = Math.max(0, (inv.netAmount || 0) - newPaidAmount);
+          await firebaseService.updateDocument('ledgerEntries', linkedInvoiceId, {
+            paidAmount: newPaidAmount,
+            remainingAmount: newRemaining,
+            paymentStatus: newRemaining <= 0 ? 'paid' : 'partial',
+            updatedAt: new Date()
+          } as any);
+        }
+      }
+
+      // Sync to unified ledger
+      await firebaseService.syncLedger({
+        sourceType: paymentSource === 'opening_balance' ? 'supplier_opening_payment' : 'payment',
+        sourceId: addedId as string,
+        userId: appUser.userId,
+        branchId: (targetBranchId as string) || 'main',
+        date: new Date(formData.get('date') as string),
+        debit: 0,
+        credit: totalEffect,
+        amount: totalEffect,
+        category: 'التسديدات',
+        entityId: selectedEntity.id,
+        entityName: selectedEntity.name,
+        description: newTx.description || '',
+        ownerId: appUser.userId
+      });
+
+      await firebaseService.addDocument('transactions', newTx as Transaction);
+      
       setIsAddPaymentOpen(false);
-      setViewingInvoice(null);
-      setPaymentMode('normal');
       setPayAmount(0);
       setPayDiscount(0);
       setPayDiscountPercentage(0);
       setPayDiscountType('fixed');
       setPayRefund('0');
       setPayImageFile(null);
-      toast.success('تم إضافة الدفعة بنجاح');
+      setViewingInvoice(null);
+      setPaymentMode('normal');
+      toast.success('تم تسجيل التسديد بنجاح');
     } catch (err) {
       console.error("Failed to save payment:", err);
-      // Fallback
-      try {
-        const localOps = JSON.parse(localStorage.getItem('pharma-offline-ops') || '[]');
-        localOps.push({ ...newTx, id: 'local-' + Date.now(), isOffline: true });
-        localStorage.setItem('pharma-offline-ops', JSON.stringify(localOps));
-        toast.info('تم الحفظ محلياً لعدم توفر الاتصال');
-        setIsAddPaymentOpen(false);
-      } catch (lsErr) {
-        toast.error('حدث خطأ أثناء إضافة الدفعة');
-      }
+      toast.error('حدث خطأ أثناء حفظ التسديد');
     }
   };
 
@@ -2186,6 +2647,24 @@ export default function App() {
 
     try {
       await firebaseService.updateDocument('ledgerEntries', viewingInvoice.id, updatedInvoice as any);
+      
+      // Sync to unified ledger
+      await firebaseService.syncLedger({
+        sourceType: 'invoice',
+        sourceId: viewingInvoice.id as string,
+        userId: appUser?.userId || 'demo-user',
+        branchId: viewingInvoice.branchId || 'main',
+        date: updatedInvoice.date,
+        debit: updatedInvoice.netAmount,
+        credit: 0,
+        amount: updatedInvoice.netAmount,
+        category: 'المشتريات',
+        entityId: selectedEntity.id,
+        entityName: selectedEntity.name,
+        description: `تعديل فاتورة: ${selectedEntity.name} - ${updatedInvoice.invoiceNumber || ''}`,
+        ownerId: appUser?.userId || 'demo-user'
+      });
+
       await firebaseService.updateDocument('entities', selectedEntity.id, {
         balance: selectedEntity.balance + balanceDiff,
         updatedAt: new Date()
@@ -2205,73 +2684,103 @@ export default function App() {
     const inv = invoiceToDel || viewingInvoice;
     if (!inv?.id || !selectedEntity?.id) return;
     
+    const isPayment = inv.operationType === 'payment';
     const isInvoice = inv.operationType === 'invoice';
-    const amountLabel = isInvoice ? inv.netAmount : inv.paidAmount;
+
+    const title = isPayment ? 'حذف التسديد' : (isInvoice ? 'حذف الفاتورة' : 'حذف العملية');
+    const message = 'هل أنت متأكد؟ سيتم حذف هذا السجل نهائياً من كل مكان ولا يمكن التراجع.';
 
     triggerDelete(
-      `حذف ${isInvoice ? 'الفاتورة' : 'العملية'}`,
-      `هل أنت متأكد من حذف ${isInvoice ? 'الفاتورة رقم ' + inv.invoiceNumber : 'هذا الوصل'}؟ بمبلغ ${formatIQD(amountLabel)}. سيتم تعديل رصيد المورد تلقائياً.`,
+      title,
+      message,
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
-          console.log("Deleting ledger entry:", inv.id);
-          const netAmount = inv.netAmount;
-          const paidAmount = inv.paidAmount;
-          const remaining = inv.remainingAmount;
+          // 1. Reversal logic for payments before deletion
+          if (isPayment) {
+            const amount = inv.amount || 0;
+            const discount = inv.discount || 0;
+            const refund = inv.refundAmount || 0;
+            const totalToReverse = amount + discount - refund;
 
-          await firebaseService.deleteDocument('ledgerEntries', inv.id!);
-          
-          // Also delete associated images from storage
-          if (inv.imageUrls && Array.isArray(inv.imageUrls)) {
-            for (const url of inv.imageUrls) {
-              if (url.startsWith('http')) {
-                try {
-                  await firebaseService.deleteImage(url);
-                } catch (e) {
-                  console.warn('Failed to delete image from storage:', url, e);
-                }
+            if (inv.paymentSource === 'invoice') {
+              let invoiceDoc = inv.linkedInvoiceId ? allLedgerEntries.find(e => e.id === inv.linkedInvoiceId) : null;
+              
+              if (!invoiceDoc && inv.linkedInvoiceNumber) {
+                invoiceDoc = allLedgerEntries.find(e => 
+                  e.accountId === selectedEntity.id && 
+                  e.invoiceNumber === inv.linkedInvoiceNumber && 
+                  e.operationType === 'invoice'
+                );
+              }
+
+              if (invoiceDoc && invoiceDoc.id) {
+                const newPaidAmount = Math.max(0, (invoiceDoc.paidAmount || 0) - amount - discount);
+                const newRemaining = (invoiceDoc.netAmount || 0) - newPaidAmount;
+                
+                let newStatus: 'pending' | 'partial' | 'paid' | 'overdue' = 'pending';
+                if (newRemaining <= 0) newStatus = 'paid';
+                else if (newPaidAmount > 0) newStatus = 'partial';
+                
+                await firebaseService.updateDocument('ledgerEntries', invoiceDoc.id, {
+                  paidAmount: newPaidAmount,
+                  remainingAmount: newRemaining,
+                  paymentStatus: newStatus,
+                  updatedAt: new Date()
+                } as any);
               }
             }
           }
-          if (inv.imageUrl && typeof inv.imageUrl === 'string' && inv.imageUrl.startsWith('http')) {
-            try {
-              await firebaseService.deleteImage(inv.imageUrl);
-            } catch (e) {
-              console.warn('Failed to delete single image from storage:', inv.imageUrl, e);
+
+          // 2. Hard delete the original record (cascading cleanup)
+          await firebaseService.deleteDocument('ledgerEntries', inv.id!);
+          
+          // 3. Add audit log
+          await firebaseService.addDocument('historicalRecords', {
+            title: `حذف نهائي: ${isPayment ? 'تسديد' : (isInvoice ? 'فاتورة' : 'عملية')}`,
+            type: 'permanent_delete',
+            sourceType: isPayment ? "payment_deleted_reversal" : "record_deleted",
+            amount: isPayment ? (inv.amount || 0) : 0,
+            entityId: selectedEntity.id,
+            entityName: selectedEntity.name,
+            recordId: inv.id,
+            details: `تم حذف ${isPayment ? 'وصل' : 'عملية'} بقيمة ${formatIQD(isPayment ? (inv.amount || 0) : 0)} للمورد ${selectedEntity.name} نهائياً`,
+            ownerId: appUser?.userId || 'demo-user',
+            createdAt: new Date()
+          } as any);
+
+          // 4. Update entity balance & totals
+          const amount = inv.amount || 0;
+          const discount = inv.discount || 0;
+          const refund = inv.refundAmount || 0;
+          const totalToReverseOnEntity = isPayment ? (amount + discount - refund) : 0;
+          
+          const balanceAdjustment = isInvoice 
+            ? -((inv as any).remainingAmount || 0) 
+            : totalToReverseOnEntity; 
+
+          const updateData: any = {
+            balance: (selectedEntity.balance || 0) + balanceAdjustment,
+            updatedAt: new Date()
+          };
+
+          if (isPayment) {
+            updateData.totalPaidAmount = Math.max(0, (selectedEntity.totalPaidAmount || 0) - totalToReverseOnEntity);
+            if (inv.paymentSource === 'opening_balance') {
+              updateData.initialBalancePaid = Math.max(0, (selectedEntity.initialBalancePaid || 0) - amount);
             }
           }
           
-          // Update entity balance logic
-          // If invoice deleted: balance decreases by remaining amount (debt removed)
-          // If payment deleted: balance increases by paid amount (payment reversed)
-          const balanceAdjustment = isInvoice ? -remaining : paidAmount;
+          await firebaseService.updateDocument('entities', selectedEntity.id!, updateData);
           
-          await firebaseService.updateDocument('entities', selectedEntity.id!, {
-            balance: (selectedEntity.balance || 0) + balanceAdjustment,
-            totalInvoices: isInvoice ? Math.max(0, (selectedEntity.totalInvoices || 0) - 1) : (selectedEntity.totalInvoices || 0)
-          });
-          
-          // Add activity
-          await firebaseService.addDocument('entityActivities', {
-            entityId: selectedEntity.id!,
-            type: isInvoice ? 'delete_invoice' : 'delete_payment',
-            action: `حذف ${isInvoice ? 'فاتورة' : 'وصل تسديد'}`,
-            details: `المبلغ: ${formatIQD(isInvoice ? netAmount : paidAmount)}`,
-            performedBy: appUser?.username || 'user',
-            createdAt: new Date(),
-            ownerId: appUser?.userId || 'demo-user',
-            branchId: currentBranchId || undefined
-          });
-
-          console.log("Deleted successfully: ledgerEntry", inv.id);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
           setIsDeleteInvoiceConfirmOpen(false);
           setViewingInvoice(null);
-          toast.success('تم الحذف وتحديث الرصيد بنجاح');
+          toast.success('تم الحذف النهائي وتحديث الحسابات بنجاح');
         } catch (err) {
-          console.error("Error deleting ledger entry:", err);
+          console.error("Failed to delete record:", err);
           setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
-          toast.error('حدث خطأ أثناء الحذف');
+          toast.error(err instanceof Error ? err.message : 'فشل حذف العملية');
         }
       }
     );
@@ -2279,50 +2788,66 @@ export default function App() {
 
   const handleDeleteTransaction = async (tx: Transaction) => {
     const isExpense = tx.type === 'expense';
-    const label = tx.type === 'income' ? (tx.customerName || tx.description || 'إيراد') : (tx.description || tx.category || 'مصروف');
-    
-    console.log(`[DeleteAudit] Attempting to delete ${isExpense ? 'expense' : 'income'}:`, tx.id);
     
     triggerDelete(
       `حذف ${isExpense ? 'المصروف' : 'الإيراد'}`,
-      `هل أنت متأكد من حذف العملية: ${label}؟ بمبلغ ${formatIQD(tx.amount)}`,
+      'هل أنت متأكد؟ سيتم حذف هذا السجل نهائياً من كل مكان ولا يمكن التراجع.',
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
-          console.log(`[DeleteAudit] Confirming deletion of ID: ${tx.id}`);
           if (!tx.id) throw new Error("ID السجل غير موجود");
           
           await firebaseService.deleteDocument('transactions', tx.id);
           
-          console.log(`[DeleteAudit] Deleted successfully: ${tx.id}`);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
           setIsEditTransactionOpen(false);
-          toast.success(`تم حذف ${isExpense ? 'المصروف' : 'الإيراد'} بنجاح`);
+          toast.success(`تم حذف ${isExpense ? 'المصروف' : 'الإيراد'} نهائياً`);
         } catch (err) {
-          const errMsg = err instanceof Error ? err.message : 'خطأ غير معروف';
-          console.error(`[DeleteAudit] Delete failed for ID ${tx.id}:`, errMsg);
           setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
-          toast.error(`فشل حذف ${isExpense ? 'المصروف' : 'الإيراد'}: ${errMsg}`);
+          toast.error('فشل عملية الحذف النهائي');
         }
       }
     );
   };
 
   const handleDeleteHistoricalRecord = async (id: string) => {
-    const record = rawHistoricalRecords.find(r => r.id === id);
     triggerDelete(
       'حذف سجل تاريخي',
-      `هل أنت متأكد من حذف السجل التاريخي: ${record?.title || id}؟ لا يمكن التراجع.`,
+      'هل أنت متأكد؟ سيتم حذف هذا السجل نهائياً من كل مكان ولا يمكن التراجع.',
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
-          console.log("Deleting historical record:", id);
           await firebaseService.deleteDocument('historicalRecords', id);
-          console.log("Deleted successfully: historicalRecord", id);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
           toast.success('تم حذف السجل التاريخي بنجاح');
         } catch (err) {
-          console.error("Error deleting historical record:", err);
+          setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
+          toast.error('حدث خطأ أثناء الحذف');
+        }
+      }
+    );
+  };
+
+  const handleDeleteOpeningCash = async (item: OpeningCash) => {
+    triggerDelete(
+      'حذف رصيد افتتاحي كاش',
+      'هل أنت متأكد؟ سيتم حذف هذا الرصيد نهائياً مع قيود الأستاذ العام المرتبطة به.',
+      async () => {
+        setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+          // Delete from openingCash collection
+          await firebaseService.deleteDocument('openingCash', item.id!);
+          
+          // Delete associated ledger entries
+          const ledgerEntries = rawAllLedgerEntries.filter(e => e.sourceId === item.id);
+          for (const entry of ledgerEntries) {
+             await firebaseService.deleteDocument('ledgerEntries', entry.id!);
+          }
+
+          setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
+          toast.success('تم حذف الرصيد الافتتاحي والقيود المرتبطة به بنجاح');
+        } catch (err) {
+          console.error("Delete Opening Cash Error:", err);
           setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
           toast.error('حدث خطأ أثناء الحذف');
         }
@@ -2332,20 +2857,16 @@ export default function App() {
 
   const handleDeleteBonus = async (id: string | undefined) => {
     if (!id) return;
-    const b = bonuses.find(item => item.id === id);
     triggerDelete(
       'حذف البونص',
-      `هل أنت متأكد من حذف البونص بقيمة ${formatIQD(b?.amount || 0)}؟ لا يمكن التراجع.`,
+      'هل أنت متأكد؟ سيتم حذف هذا السجل نهائياً من كل مكان ولا يمكن التراجع.',
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
-          console.log("Deleting bonus:", id);
           await firebaseService.deleteDocument('bonuses', id);
-          console.log("Deleted successfully: bonus", id);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
           toast.success('تم حذف البونص بنجاح');
         } catch (err) {
-          console.error("Error deleting bonus:", err);
           setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
           toast.error('حدث خطأ أثناء الحذف');
         }
@@ -2359,11 +2880,10 @@ export default function App() {
 
     triggerDelete(
       'حذف المرفق',
-      'هل أنت متأكد من حذف هذه الصورة؟ سيتم حذفها من سجلات النظام نهائياً.',
+      'هل أنت متأكد؟ سيتم حذف هذه الصورة نهائياً من كل مكان ولا يمكن التراجع.',
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
-          console.log("Deleting attachment:", url, "from entry:", ledgerId);
           let updateData: any = {};
           if (entry.imageUrl === url) updateData.imageUrl = null;
           if (entry.receiptImageUrl === url) updateData.receiptImageUrl = null;
@@ -2372,7 +2892,6 @@ export default function App() {
           }
           
           await firebaseService.updateDocument('ledgerEntries', ledgerId, updateData);
-          console.log("Deleted successfully: attachment from", ledgerId);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
           toast.success('تم حذف الصورة بنجاح');
         } catch (err) {
@@ -2493,8 +3012,26 @@ export default function App() {
     } as any;
     
     try {
-      const savedDoc = await firebaseService.addDocument('transactions', newTx as Transaction);
-      console.log("Revenue saved:", { ...newTx, id: (savedDoc as any).id });
+      const savedDocId = await firebaseService.addDocument('transactions', newTx as Transaction);
+      
+      // Sync to unified ledger
+      await firebaseService.syncLedger({
+        sourceType: 'revenue',
+        sourceId: savedDocId as string,
+        userId: appUser?.userId || 'demo-user',
+        branchId: targetBranchId as string,
+        date: data.date ? new Date(data.date) : new Date(),
+        debit: 0,
+        credit: Number(data.saleAmount || data.amount || 0),
+        amount: Number(data.saleAmount || data.amount || 0),
+        category: 'إيرادات مبيعات',
+        entityId: data.entityId,
+        entityName: data.customerName,
+        description: newTx.description!,
+        ownerId: appUser?.userId || 'demo-user'
+      });
+
+      console.log("Revenue saved:", { ...newTx, id: savedDocId });
       console.log("Revenue records loaded:", transactions);
       setIsAddRevenueOpen(false);
       setRevenueImageFiles([]);
@@ -2728,6 +3265,22 @@ export default function App() {
     
     try {
       await firebaseService.updateDocument('transactions', selectedTransaction.id, updatedTx);
+      
+      // Update associated ledger entry if it exists
+      await firebaseService.syncLedger({
+        sourceType: updatedTx.type === 'revenue' ? 'revenue' : 'expense',
+        sourceId: selectedTransaction.id,
+        userId: appUser?.userId || 'demo-user',
+        branchId: updatedTx.branchId || 'main',
+        date: updatedTx.date instanceof Date ? updatedTx.date : new Date(updatedTx.date),
+        debit: updatedTx.type === 'expense' ? updatedTx.amount : 0,
+        credit: updatedTx.type === 'revenue' ? updatedTx.amount : 0,
+        amount: updatedTx.amount,
+        category: updatedTx.category || (updatedTx.type === 'revenue' ? 'إيرادات مبيعات' : 'مصاريف'),
+        description: updatedTx.description || '',
+        ownerId: appUser?.userId || 'demo-user'
+      });
+
       setIsEditTransactionOpen(false);
       setRevenueImageFiles([]);
       toast.success('تم تحديث البيانات بنجاح');
@@ -2737,20 +3290,60 @@ export default function App() {
     }
   };
 
+  const handleAddOpeningCash = async (data: Partial<OpeningCash>) => {
+    console.log("Adding opening cash balance records:", data);
+    if (!appUser) return;
+    
+    // Ensure all required fields for openingCash are present
+    const openingCashData: any = {
+      ...data,
+      date: data.date || new Date(),
+      month: data.month || (new Date().getMonth() + 1),
+      year: data.year || (new Date().getFullYear()),
+      amount: data.amount || 0,
+      branchId: data.branchId || 'main',
+      ownerId: appUser.userId
+    };
+
+    try {
+      // 1. Add to dedicated collection for management
+      const cashId = await firebaseService.addDocument('openingCash', openingCashData);
+      
+      // 2. Sync to unified ledger for accounting
+      await firebaseService.syncLedger({
+        sourceType: 'opening_cash',
+        sourceId: cashId, // Link to the openingCash document
+        userId: appUser.userId,
+        branchId: openingCashData.branchId,
+        date: openingCashData.date,
+        debit: 0,
+        credit: openingCashData.amount,
+        amount: openingCashData.amount,
+        category: 'أرصدة افتتاحية',
+        description: `رصيد مدور: ${openingCashData.notes || ''}`,
+        notes: openingCashData.notes,
+        ownerId: appUser.userId
+      });
+
+      setIsAddOpeningCashOpen(false);
+      toast.success('تم إضافة الرصيد الافتتاحي وتحديث الحسابات بنجاح');
+    } catch (err) {
+      console.error("Failed to add opening cash:", err);
+      toast.error('حدث خطأ أثناء إضافة الرصيد');
+    }
+  };
+
   const handleDeleteLoss = async (loss: ExpiredDamagedLoss) => {
     triggerDelete(
       'حذف سجل التالف/المنتهي',
-      `هل أنت متأكد من حذف السجل الخاص بـ: ${loss.itemName}؟ لا يمكن التراجع عن هذه العملية.`,
+      'هل أنت متأكد؟ سيتم حذف هذا السجل نهائياً من كل مكان ولا يمكن التراجع.',
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
-          console.log("Deleting loss record:", loss.id);
           await firebaseService.deleteDocument('expiredDamagedLosses', loss.id!);
-          console.log("Deleted successfully: loss record", loss.id);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
           toast.success('تم حذف السجل بنجاح');
         } catch (err) {
-          console.error("Failed to delete loss:", err);
           setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
           toast.error('حدث خطأ أثناء الحذف');
         }
@@ -2763,13 +3356,11 @@ export default function App() {
   const handleDeleteMedicineRequest = async (id: string) => {
     triggerDelete(
       'حذف طلب توفير دواء',
-      'هل أنت متأكد من حذف هذا الطلب؟ لا يمكن التراجع عن هذه العملية.',
+      'هل أنت متأكد؟ سيتم حذف هذا الطلب نهائياً من كل مكان ولا يمكن التراجع.',
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
-          console.log("Deleting medicine request:", id);
           await firebaseService.deleteDocument('medicineRequests', id);
-          console.log("Deleted successfully: medicineRequest", id);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
           toast.success('تم حذف الطلب بنجاح');
         } catch (err) {
@@ -2784,19 +3375,17 @@ export default function App() {
   const handleDeleteRequestImage = async (id: string) => {
     triggerDelete(
       'حذف صورة الطلب',
-      'هل أنت متأكد من حذف الصورة المرفقة؟',
+      'هل أنت متأكد؟ سيتم حذف هذه الصورة نهائياً من كل مكان ولا يمكن التراجع.',
       async () => {
         setDeleteConfirmState(prev => ({ ...prev, isLoading: true }));
         try {
-          console.log("Deleting medicine request image:", id);
           await firebaseService.updateDocument('medicineRequests', id, { imageUrl: null });
-          console.log("Deleted successfully: image from medicineRequest", id);
           setDeleteConfirmState(prev => ({ ...prev, isOpen: false, isLoading: false }));
-          toast.success('تم حذف الصورة');
+          toast.success('تم حذف الصورة بنجاح');
         } catch (err) {
           console.error("Error deleting image:", err);
           setDeleteConfirmState(prev => ({ ...prev, isLoading: false }));
-          toast.error('فشل في الحدث');
+          toast.error('فشل في الحذف');
         }
       }
     );
@@ -2839,6 +3428,72 @@ export default function App() {
       toast.success('مرحباً بك مجدداً');
     } catch (error: any) {
       toast.error('خطأ في الدخول: تأكد من اسم المستخدم وكلمة المرور');
+    }
+  };
+
+  const handleMigrateToLedger = async () => {
+    if (!appUser) return;
+    try {
+      console.log("[Migration] Starting full sync...");
+      
+      // 1. Sync Base Transactions (Revenue & Expenses)
+      for (const tx of transactions) {
+        if (!tx.isDeleted) {
+          await firebaseService.syncLedger({
+            sourceType: tx.type === 'revenue' ? 'revenue' : 'expense',
+            sourceId: tx.id!,
+            userId: appUser.userId,
+            branchId: tx.branchId || 'main',
+            date: tx.date || tx.createdAt || new Date(),
+            debit: tx.type === 'expense' ? tx.amount : 0,
+            credit: tx.type === 'revenue' ? tx.amount : 0,
+            amount: tx.amount || 0,
+            category: tx.category || (tx.type === 'revenue' ? 'إيرادات' : 'مصاريف'),
+            description: tx.description || tx.statement || '',
+            ownerId: appUser.userId
+          });
+        }
+      }
+
+      // 2. Sync Invoices & Payments (already handled by ledgerEntries normally, but ensure types match)
+      for (const entry of allLedgerEntries) {
+        if (!entry.isDeleted) {
+           // We ensure sourceType is set if missing
+           const st = entry.sourceType || (entry.operationType === 'invoice' ? 'invoice' : 'payment');
+           await firebaseService.syncLedger({
+             ...entry,
+             sourceType: st as any,
+             sourceId: entry.id!,
+             userId: appUser.userId
+           } as any);
+        }
+      }
+
+      // 3. Sync Salaries
+      for (const record of employeeAttendance) {
+        if (record.dailyWage && Number(record.dailyWage) > 0) {
+          await firebaseService.syncLedger({
+            sourceType: 'employee_salary',
+            sourceId: record.id!,
+            userId: appUser.userId,
+            branchId: record.branchId || 'main',
+            date: record.date || record.createdAt || new Date(),
+            debit: Number(record.dailyWage),
+            credit: 0,
+            amount: Number(record.dailyWage),
+            category: 'رواتب الموظفين',
+            entityId: record.employeeId,
+            entityName: record.employeeName,
+            description: `راتب موظف: ${record.employeeName}`,
+            ownerId: appUser.userId
+          });
+        }
+      }
+
+      console.log("[Migration] Full sync completed");
+    } catch (err) {
+      console.error("[Migration] Error:", err);
+      throw err;
     }
   };
 
@@ -3228,6 +3883,10 @@ export default function App() {
                     <Users className="h-4 w-4 text-purple-500" />
                     <span>إضافة مورد جديد</span>
                   </DropdownMenuItem>
+                  <DropdownMenuItem className="p-3 cursor-pointer hover:bg-muted rounded-lg gap-3" onClick={() => setIsAddOpeningCashOpen(true)}>
+                    <Layers className="h-4 w-4 text-orange-500" />
+                    <span>رصيد نقدي افتتاحي</span>
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator className="bg-border" />
                   <DropdownMenuItem className="p-3 cursor-pointer hover:bg-muted rounded-lg gap-3 text-rose-500" onClick={() => setIsAddExpenseOpen(true)}>
                     <ArrowDownCircle className="h-4 w-4" />
@@ -3305,10 +3964,10 @@ export default function App() {
               {currentBranchId ? (
                 // Branch Specific Stats
                 [
+                  { label: 'الرصيد المرحّل', value: stats.openingCashBalance, icon: History, color: 'text-amber-500', bg: 'bg-amber-500/10' },
                   { label: 'دخل اليوم', value: stats.dailyRevenue, icon: DollarSign, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
                   { label: 'دخل الشهر', value: stats.monthlyRevenue, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-500/10' },
                   { label: 'ديون الموردين', value: stats.supplierDues, icon: Users, color: 'text-emerald-900 dark:text-emerald-400', bg: 'bg-emerald-900/10' },
-                  { label: 'فواتير مستحقة', value: stats.dueInvoices, icon: FileText, color: 'text-amber-600', bg: 'bg-amber-500/10', isCount: true },
                 ].map((stat, idx) => (
                   <Card key={idx} className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl w-full">
                     <div className={`absolute top-0 right-0 w-32 h-32 ${stat.bg} blur-3xl -mr-16 -mt-16 opacity-30 group-hover:opacity-50 transition-opacity`} />
@@ -3318,7 +3977,7 @@ export default function App() {
                     </CardHeader>
                     <CardContent className="relative z-10 pb-4 md:pb-6">
                       <div className="text-2xl md:text-3xl font-black text-foreground font-mono tracking-tighter">
-                        {stat.isCount ? stat.value : formatIQD(stat.value)}
+                        {formatIQD(stat.value)}
                       </div>
                       <div className="mt-1 md:mt-2 flex items-center gap-1.5">
                          <div className="h-1 w-1 md:h-1.5 md:w-1.5 rounded-full bg-primary animate-pulse" />
@@ -3330,10 +3989,10 @@ export default function App() {
               ) : (
                 // Unified Master Stats
                 [
+                  { label: 'الرصيد المرحّل المجمع', value: stats.openingCashBalance, icon: History, color: 'text-amber-500', bg: 'bg-amber-500/10' },
                   { label: 'إجمالي الوارد', value: stats.totalRevenue, icon: BarChart3, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
                   { label: 'إجمالي المصروفات', value: stats.totalExpense, icon: ArrowDownCircle, color: 'text-rose-600', bg: 'bg-rose-500/10' },
                   { label: 'إجمالي الأرباح', value: stats.totalNetProfit, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-500/10' },
-                  { label: 'ديون الموردين المجمعة', value: stats.supplierDues, icon: Users, color: 'text-amber-900 dark:text-amber-400', bg: 'bg-amber-900/10' },
                 ].map((stat, idx) => (
                   <Card key={idx} className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl w-full">
                     <div className={`absolute top-0 right-0 w-32 h-32 ${stat.bg} blur-3xl -mr-16 -mt-16 opacity-30 group-hover:opacity-50 transition-opacity`} />
@@ -4656,16 +5315,26 @@ export default function App() {
              </TabsContent>
 
             <TabsContent value="branches" className="space-y-4 outline-none">
-            <BranchesPage 
-              branches={branches}
-              currentBranchId={currentBranchId}
-              onSelectBranch={handleSelectBranch}
-              onAddBranch={handleAddBranch}
-              onUpdateBranch={handleUpdateBranch}
-              onDeleteBranch={handleDeleteBranch}
-              onArchiveBranch={handleArchiveBranch}
-            />
-          </TabsContent>
+              <BranchesPage 
+                branches={branches}
+                currentBranchId={currentBranchId}
+                onSelectBranch={handleSelectBranch}
+                onAddBranch={handleAddBranch}
+                onUpdateBranch={handleUpdateBranch}
+                onDeleteBranch={handleDeleteBranch}
+                onArchiveBranch={handleArchiveBranch}
+              />
+            </TabsContent>
+
+            <TabsContent value="diagnosis" className="space-y-4 outline-none">
+              <DiagnosisPage 
+                ledger={allLedgerEntries}
+                transactions={transactions}
+                entities={entities}
+                onMigrate={handleMigrateToLedger}
+                stats={stats}
+              />
+            </TabsContent>
 
           <TabsContent value="reports" className="space-y-8 animate-in fade-in duration-700">
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
@@ -5067,6 +5736,7 @@ export default function App() {
                   entities={entities}
                   branches={branches}
                   employeeAttendance={employeeAttendance}
+                  openingCash={rawOpeningCash}
                   customerDebts={customerDebts}
                />
              )}
@@ -5134,6 +5804,9 @@ export default function App() {
                <HistoricalMigrationPage 
                  branchId={currentBranchId} 
                  ownerId={user?.uid || ''} 
+                 openingCash={rawOpeningCash}
+                 onDeleteOpeningCash={handleDeleteOpeningCash}
+                 onDeleteHistoricalRecord={handleDeleteHistoricalRecord}
                  onImportExcel={() => setIsExcelImportOpen(true)}
                  onMultiEntry={() => setIsMultiEntryOpen(true)}
                />
@@ -5528,10 +6201,10 @@ export default function App() {
         <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-xl lg:max-w-4xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-foreground text-xl font-black">
-              {paymentMode === 'partial' ? 'تسديد جزئي للقائمة' : paymentMode === 'full' ? 'تسديد كلي للقائمة' : 'وصل دفعة سداد'}
+              {paymentMode === 'partial' ? 'تسديد جزئي للقائمة' : paymentMode === 'full' ? 'تسديد كلي للقائمة' : 'وصل سداد جديد'}
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              {paymentMode !== 'normal' ? `تسديد للفاتورة رقم ${viewingInvoice?.invoiceNumber}` : 'تسجيل دفعة نقدية مسددة للمورد'}
+              {paymentMode !== 'normal' ? `تسديد للفاتورة رقم ${viewingInvoice?.invoiceNumber}` : 'تسجيل سداد مالي للمورد'}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddPayment} className="space-y-6">
@@ -5545,20 +6218,110 @@ export default function App() {
                 </div>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="linkedInvoice" className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">ارتباط برقم قائمة</Label>
-                  <div className="relative group">
-                    <Input 
-                      id="linkedInvoice" 
-                      name="linkedInvoice" 
-                      defaultValue={viewingInvoice?.invoiceNumber || ''} 
-                      readOnly={!!viewingInvoice} 
-                      placeholder="رقم القائمة (اختياري)" 
-                      className={`bg-muted border-border text-foreground h-14 rounded-xl pr-10 font-bold ${!!viewingInvoice ? 'opacity-70 cursor-not-allowed' : 'focus:ring-2'}`} 
-                    />
-                    <FileText className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                  </div>
+                  <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">التسديد مقابل</Label>
+                  <Select value={paySource} onValueChange={(val: any) => {
+                    setPaySource(val);
+                    if (val === 'opening_balance') setViewingInvoice(null);
+                  }} disabled={paymentMode !== 'normal'}>
+                    <SelectTrigger className="bg-muted border-border text-foreground h-14 rounded-xl font-bold">
+                      <SelectValue placeholder="اختر نوع التسديد" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border text-foreground">
+                       <SelectItem value="invoice">تسديد قائمة / فاتورة محددة</SelectItem>
+                       <SelectItem value="opening_balance">تسديد من الرصيد الافتتاحي</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
+
+              {paySource === 'invoice' && (
+                <div className="p-6 bg-blue-500/5 border border-blue-500/10 rounded-2xl space-y-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className="h-5 w-5 text-blue-500" />
+                    <h4 className="font-black text-blue-500 text-sm">اختيار الفاتورة المطلوب تسديدها</h4>
+                  </div>
+                  
+                  {viewingInvoice ? (
+                    <div className="flex flex-col md:flex-row justify-between items-center bg-card p-4 rounded-xl border border-blue-500/20 gap-4">
+                      <div className="space-y-1">
+                        <div className="text-sm font-black">رقم القائمة: {viewingInvoice.invoiceNumber}</div>
+                        <div className="text-[10px] text-muted-foreground font-bold">التاريخ: {safeFormatDate(viewingInvoice.date, 'yyyy/MM/dd')}</div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-6 text-center">
+                         <div className="space-y-1">
+                           <div className="text-[9px] text-muted-foreground uppercase font-black">المبلغ</div>
+                           <div className="text-xs font-black">{formatNumberWithCommas(viewingInvoice.netAmount)}</div>
+                         </div>
+                         <div className="space-y-1">
+                           <div className="text-[9px] text-muted-foreground uppercase font-black">المسدد</div>
+                           <div className="text-xs font-black text-emerald-500">{formatNumberWithCommas(viewingInvoice.paidAmount || 0)}</div>
+                         </div>
+                         <div className="space-y-1">
+                           <div className="text-[9px] text-muted-foreground uppercase font-black">المتبقي</div>
+                           <div className="text-xs font-black text-rose-500">{formatNumberWithCommas(viewingInvoice.remainingAmount || 0)}</div>
+                         </div>
+                      </div>
+                      {paymentMode === 'normal' && (
+                        <Button type="button" variant="ghost" size="sm" className="text-rose-500 hover:bg-rose-500/10" onClick={() => setViewingInvoice(null)}>إلغاء</Button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label className="text-[10px] text-muted-foreground font-black">ابحث عن الفاتورة:</Label>
+                      <Select 
+                        onValueChange={(id) => {
+                          const inv = allLedgerEntries.find(i => i.id === id);
+                          if (inv) {
+                            setViewingInvoice(inv);
+                            setPayAmount(inv.remainingAmount || 0);
+                            setPayLinkedInvoice(inv.invoiceNumber || '');
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="bg-muted border-border h-12 rounded-xl">
+                          <SelectValue placeholder="اختر من القوائم غير المسددة لهذا المورد" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-card border-border">
+                          {allLedgerEntries
+                            .filter(e => e.accountId === selectedEntity?.id && e.operationType === 'invoice' && e.paymentStatus !== 'paid' && !e.isDeleted)
+                            .map(inv => (
+                              <SelectItem key={inv.id} value={inv.id!}>
+                                قائمة رقم: {inv.invoiceNumber} | بتاريخ: {safeFormatDate(inv.date, 'yyyy/MM/dd')} | المتبقي: {formatIQD(inv.remainingAmount || 0)}
+                              </SelectItem>
+                            ))}
+                          {allLedgerEntries.filter(e => e.accountId === selectedEntity?.id && e.operationType === 'invoice' && e.paymentStatus !== 'paid' && !e.isDeleted).length === 0 && (
+                            <div className="p-2 text-xs text-muted-foreground italic text-center">لا توجد فواتير بحاجة للتسديد</div>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <input type="hidden" name="linkedInvoice" value={viewingInvoice?.invoiceNumber || ''} />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {paySource === 'opening_balance' && selectedEntity && (
+                <div className="p-6 bg-orange-500/5 border border-orange-500/10 rounded-2xl space-y-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Layers className="h-5 w-5 text-orange-500" />
+                    <h4 className="font-black text-orange-500 text-sm">تفاصيل الرصيد الافتتاحي</h4>
+                  </div>
+                  <div className="grid grid-cols-3 gap-6 bg-card p-6 rounded-xl border border-orange-500/20 text-center">
+                    <div className="space-y-1">
+                       <div className="text-[10px] font-black text-muted-foreground">الرصيد الافتتاحي</div>
+                       <div className="text-lg font-mono font-black">{formatIQD(selectedEntity.initialBalance)}</div>
+                    </div>
+                    <div className="space-y-1">
+                       <div className="text-[10px] font-black text-muted-foreground">المسدد سابقاً</div>
+                       <div className="text-lg font-mono font-black text-emerald-500">{formatIQD(selectedEntity.initialBalancePaid || 0)}</div>
+                    </div>
+                    <div className="space-y-1">
+                       <div className="text-[10px] font-black text-muted-foreground">المتبقي</div>
+                       <div className="text-lg font-mono font-black text-orange-500">{formatIQD(selectedEntity.initialBalance - (selectedEntity.initialBalancePaid || 0))}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -5575,12 +6338,6 @@ export default function App() {
                     />
                     <DollarSign className="absolute right-4 top-1/2 -translate-y-1/2 h-6 w-6 text-emerald-500" />
                   </div>
-                  {paymentMode !== 'normal' && viewingInvoice && (
-                    <div className="flex justify-between items-center px-1">
-                      <span className="text-[10px] text-muted-foreground font-bold italic">إجمالي القائمة: {formatIQD(viewingInvoice.netAmount)}</span>
-                      <span className="text-[10px] text-amber-500 font-black">المتبقي: {formatIQD(viewingInvoice.remainingAmount || 0)}</span>
-                    </div>
-                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="pay_date" className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">تاريخ الوصول / الصرف</Label>
@@ -5588,6 +6345,23 @@ export default function App() {
                     <Input id="pay_date" name="date" type="date" defaultValue={safeFormatDate(new Date(), 'yyyy-MM-dd')} required className="bg-muted border-border text-foreground h-14 rounded-xl pr-10 font-bold" />
                     <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                   </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="pay_notes" className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">ملاحظات إضافية</Label>
+                  <Input id="pay_notes" name="notes" placeholder="مثلاً: دفعة ربع سنوية، سداد رصيد قديم..." className="bg-muted border-border text-foreground h-12 rounded-xl" />
+                </div>
+                <div className="space-y-2">
+                   <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">صورة الوصل / مستند الدفع</Label>
+                   <div className="flex items-center gap-2">
+                      <Button type="button" variant="outline" className="h-12 w-full rounded-xl gap-2 border-dashed border-2 hover:bg-muted" onClick={() => document.getElementById('receipt_upload')?.click()}>
+                        {payImageFile ? <CheckCircle className="h-4 w-4 text-emerald-500" /> : <Upload className="h-4 w-4" />}
+                        {payImageFile ? 'تم الرفع' : 'رفع مستند'}
+                      </Button>
+                      <input type="file" id="receipt_upload" className="hidden" accept="image/*" onChange={(e) => setPayImageFile(e.target.files?.[0] || null)} />
+                   </div>
                 </div>
               </div>
 
@@ -5826,6 +6600,14 @@ export default function App() {
         entities={entities}
         selectedEntity={selectedEntity}
         onImagesChange={setInvImageFiles}
+      />
+
+      <AddOpeningCashDialog
+        isOpen={isAddOpeningCashOpen}
+        onOpenChange={setIsAddOpeningCashOpen}
+        onSubmit={handleAddOpeningCash}
+        branches={branches}
+        currentBranchId={currentBranchId}
       />
 
       <Dialog open={deleteConfirmState.isOpen} onOpenChange={(open) => setDeleteConfirmState(prev => ({ ...prev, isOpen: open }))}>

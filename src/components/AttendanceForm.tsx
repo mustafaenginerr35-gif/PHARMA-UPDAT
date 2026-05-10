@@ -18,11 +18,14 @@ interface AttendanceFormProps {
 
 export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: AttendanceFormProps) => {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(initialData?.employeeId || '');
-  const [hours, setHours] = useState<number>(initialData?.hoursWork || 0);
-  const [rate, setRate] = useState<number>(initialData?.hourlyRate || 0);
   const [days, setDays] = useState<number>(initialData?.attendanceDays || 0);
+  const [dailyHours, setDailyHours] = useState<number>(initialData?.dailyWorkHours || 8);
+  const [rate, setRate] = useState<number>(initialData?.hourlyRate || 0);
   const [month, setMonth] = useState<string>(initialData?.month?.toString() || (new Date().getMonth() + 1).toString());
   const [year, setYear] = useState<number>(initialData?.year || new Date().getFullYear());
+
+  const totalMonthlyHours = days * dailyHours;
+  const totalWage = totalMonthlyHours * rate;
 
   const months = [
     { label: 'يناير', value: '1' },
@@ -46,7 +49,7 @@ export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: At
     
     if (!employee) return;
 
-    if (hours > 400) {
+    if (totalMonthlyHours > 400) {
       if (!window.confirm('عدد الساعات المدخل غير طبيعي (أكثر من 400 ساعة)، هل أنت متأكد من الحفظ؟')) {
         return;
       }
@@ -59,9 +62,10 @@ export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: At
       month: Number(month),
       year: year,
       attendanceDays: days,
-      hoursWork: hours,
+      dailyWorkHours: dailyHours,
+      hoursWork: totalMonthlyHours,
       hourlyRate: rate,
-      dailyWage: hours * rate,
+      dailyWage: totalWage,
       notes: formData.get('notes') as string,
     };
     onSubmit(data);
@@ -126,7 +130,8 @@ export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: At
                 name="attendanceDays"
                 type="number"
                 value={days}
-                onChange={(e) => setDays(Number(e.target.value))}
+                onChange={(e) => setDays(Math.max(0, Number(e.target.value)))}
+                min="0"
                 required
                 className="pr-10 bg-muted/50 border-border rounded-xl h-12 focus:ring-amber-500 focus:border-amber-500 text-right font-mono"
               />
@@ -134,24 +139,20 @@ export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: At
           </div>
 
           <div className="space-y-2 text-right">
-            <Label htmlFor="hoursWork" className="text-xs font-black text-muted-foreground mr-1">إجمالي ساعات الشهر</Label>
+            <Label htmlFor="dailyHours" className="text-xs font-black text-muted-foreground mr-1">ساعات العمل اليومية</Label>
             <div className="relative group">
               <Clock className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-blue-500 transition-colors" />
               <Input
-                id="hoursWork"
-                name="hoursWork"
+                id="dailyHours"
+                name="dailyHours"
                 type="number"
-                step="1"
-                value={hours}
-                onChange={(e) => setHours(Number(e.target.value))}
+                value={dailyHours}
+                onChange={(e) => setDailyHours(Math.max(0, Number(e.target.value)))}
+                min="0"
                 required
-                className={`pr-10 bg-muted/50 border-border rounded-xl h-12 focus:ring-blue-500 focus:border-blue-500 text-right font-mono ${hours > 400 ? 'border-rose-500 text-rose-500' : ''}`}
-                placeholder="0"
+                className="pr-10 bg-muted/50 border-border rounded-xl h-12 focus:ring-blue-500 focus:border-blue-500 text-right font-mono"
               />
             </div>
-            {hours > 400 && (
-              <p className="text-[10px] text-rose-500 font-bold mt-1">عدد الساعات المدخل غير طبيعي، يرجى التأكد</p>
-            )}
           </div>
         </div>
 
@@ -164,7 +165,7 @@ export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: At
                 id="hourlyRate"
                 name="hourlyRate"
                 value={rate}
-                onChange={(val) => setRate(val)}
+                onChange={(val) => setRate(Math.max(0, val))}
                 required
                 className="pr-10 bg-muted/50 border-border rounded-xl h-12 focus:ring-emerald-500 focus:border-emerald-500 text-right font-mono"
                 placeholder="0"
@@ -175,9 +176,16 @@ export const AttendanceForm = ({ onSubmit, onClose, employees, initialData }: At
           <div className="space-y-2 text-right">
             <Label className="text-xs font-black text-muted-foreground mr-1">أجر الشهر الإجمالي</Label>
             <div className="h-12 bg-muted/30 border border-border rounded-xl flex items-center justify-center font-black text-emerald-600 text-lg">
-              {formatIQD(hours * rate)}
+              {formatIQD(totalWage)}
             </div>
           </div>
+        </div>
+
+        <div className="p-4 bg-primary/5 rounded-xl border border-primary/10 text-center">
+            <div className="text-[10px] font-black text-muted-foreground uppercase mb-1">إحصائيات العمل</div>
+            <div className="text-sm font-bold text-primary">
+                إجمالي ساعات الشهر = {days} أيام × {dailyHours} ساعة = <span className="font-black underline">{totalMonthlyHours} ساعة</span>
+            </div>
         </div>
 
         <div className="space-y-2 text-right">

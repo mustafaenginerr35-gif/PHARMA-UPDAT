@@ -138,16 +138,166 @@ export const firebaseService = {
   },
 
   async deleteDocument(collectionName: string, id: string) {
-    const { authenticated } = getEffectiveUserInfo();
+    const { authenticated, uid } = getEffectiveUserInfo();
     if (!authenticated) throw new Error('يرجى تسجيل الدخول أولاً');
 
-    const docRef = doc(db, collectionName, id);
     try {
-      await deleteDoc(docRef);
-      console.log(`[Firebase] Successfully deleted ${collectionName}/${id}`);
+      const { writeBatch, doc } = await import('firebase/firestore');
+      const batch = writeBatch(db);
+      
+      // 1. Reference original document
+      const docRef = doc(db, collectionName, id);
+      const snapshot = await getDoc(docRef);
+      const data = snapshot.data();
+
+      // Add to batch
+      batch.delete(docRef);
+      
+      // 2. Cascade delete related records with this as sourceId
+      const relatedCols = ['ledgerEntries', 'transactions', 'entityActivities', 'notifications', 'historicalRecords'];
+      for (const col of relatedCols) {
+        try {
+          const related = await this.queryDocuments(col, [
+            { field: 'sourceId', operator: '==', value: id }
+          ]);
+          if (related && related.length > 0) {
+            for (const item of related) {
+              batch.delete(doc(db, col, item.id!));
+            }
+          }
+        } catch (relatedErr) {
+          console.warn(`[Firebase] Could not find related ${col} for ${id} for batch:`, relatedErr);
+        }
+      }
+
+      // If it's an entity, delete related by accountId or entityId too
+      if (collectionName === 'entities' || collectionName === 'suppliers' || collectionName === 'customers') {
+        const entityRelatedWays = [
+          { col: 'ledgerEntries', field: 'accountId' },
+          { col: 'entityActivities', field: 'entityId' },
+          { col: 'transactions', field: 'entityId' }
+        ];
+        for (const way of entityRelatedWays) {
+          try {
+            const related = await this.queryDocuments(way.col, [
+              { field: way.field, operator: '==', value: id }
+            ]);
+            if (related && related.length > 0) {
+              for (const item of related) {
+                batch.delete(doc(db, way.col, item.id!));
+              }
+            }
+          } catch (e) {}
+        }
+      }
+
+      // 3. Commit batch
+      await batch.commit();
+      console.log(`[Firebase] Atomically deleted ${collectionName}/${id} and related data`);
+
+      // 4. Clean up storage (cannot be part of Firestore batch)
+      if (data && data.imageUrl) {
+        try {
+          await this.deleteImage(data.imageUrl);
+        } catch (storageErr) {
+          console.warn(`[Firebase] Storage cleanup failed for ${id}:`, storageErr);
+        }
+      }
+      
+      if (data && data.attachments && Array.isArray(data.attachments)) {
+        for (const attachment of data.attachments) {
+          if (attachment.url) {
+            try {
+              await this.deleteImage(attachment.url);
+            } catch (storageErr) {
+              console.warn(`[Firebase] Attachment cleanup failed for ${id}:`, storageErr);
+            }
+          }
+        }
+      }
+
     } catch (error) {
       console.error(`[Firebase] Error deleting ${collectionName}/${id}:`, error);
       handleFirestoreError(error, OperationType.DELETE, `${collectionName}/${id}`);
+    }
+  },
+
+  async syncLedger(data: any) {
+    const { uid, authenticated } = getEffectiveUserInfo();
+    if (!authenticated) return;
+
+    if (!data.sourceId || !data.sourceType) {
+      console.error("[LedgerSync] Missing sourceId or sourceType", data);
+      return;
+    }
+
+    try {
+      const q = query(
+        collection(db, 'ledgerEntries'),
+        where('ownerId', '==', uid),
+        where('sourceId', '==', data.sourceId)
+      );
+      const snapshot = await getDocs(q);
+      
+      const ledgerData = {
+        ...data,
+        ownerId: uid,
+        updatedAt: new Date()
+      };
+
+      if (!snapshot.empty) {
+        const docId = snapshot.docs[0].id;
+        await updateDoc(doc(db, 'ledgerEntries', docId), cleanData(ledgerData));
+        console.log(`[LedgerSync] Updated ledger for ${data.sourceType}/${data.sourceId}`);
+        return docId;
+      } else {
+        const docRef = doc(collection(db, 'ledgerEntries'));
+        const now = new Date();
+        await setDoc(docRef, cleanData({
+          ...ledgerData,
+          id: docRef.id,
+          createdAt: now,
+          updatedAt: now
+        }));
+        console.log(`[LedgerSync] Created new ledger for ${data.sourceType}/${data.sourceId}`);
+        return docRef.id;
+      }
+    } catch (error) {
+      console.error("[LedgerSync] Error syncing ledger:", error);
+    }
+  },
+
+  async syncTransaction(data: any) {
+    const { uid, authenticated } = getEffectiveUserInfo();
+    if (!authenticated) return;
+    if (!data.sourceId) {
+      console.error("[TransactionSync] Missing sourceId", data);
+      return;
+    }
+
+    try {
+      const q = query(
+        collection(db, 'transactions'),
+        where('ownerId', '==', uid),
+        where('sourceId', '==', data.sourceId)
+      );
+      const snapshot = await getDocs(q);
+      const txData = { 
+        ...data, 
+        ownerId: uid, 
+        updatedAt: new Date() 
+      };
+
+      if (!snapshot.empty) {
+        const docId = snapshot.docs[0].id;
+        await updateDoc(doc(db, 'transactions', docId), cleanData(txData));
+        console.log(`[TransactionSync] Updated transaction for ${data.sourceId}`);
+        return docId;
+      } else {
+        return await this.addDocument('transactions', txData);
+      }
+    } catch (error) {
+      console.error("[TransactionSync] Error:", error);
     }
   },
 

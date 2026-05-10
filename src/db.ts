@@ -62,6 +62,7 @@ export interface Entity {
   lastPaymentDate?: Date;
   lastInvoiceDate?: Date;
   totalPaidAmount?: number;
+  initialBalancePaid?: number;
   notes?: string;
   branchId?: string;
   ownerId: string;
@@ -77,42 +78,48 @@ export interface Entity {
 
 export interface LedgerEntry {
   id?: string;
-  accountId: string;
-  accountName: string;
-  accountType: string;
+  sourceType: 'revenue' | 'expense' | 'invoice' | 'payment' | 'employee_salary' | 'opening_cash' | 'supplier_opening_balance' | 'supplier_opening_payment' | 'return' | 'damaged_expired' | 'adjustment';
+  sourceId: string;
+  userId: string;
+  branchId: string;
   date: Date;
-  operationType: 'invoice' | 'payment' | 'refund';
-  purchaseType?: 'cash' | 'credit';
-  invoiceNumber?: string;
-  linkedInvoiceNumber?: string;
-  invoiceDate?: Date;
+  debit: number;
+  credit: number;
   amount: number;
-  discount: number;
-  bonus?: number;
-  bonusArrivalDate?: Date;
-  discountType?: 'percentage' | 'fixed';
-  discountValue?: number;
-  netAmount: number;
+  category: string;
+  entityId?: string;
+  entityName?: string;
+  description: string;
   notes?: string;
   imageUrl?: string;
-  receiptImageUrl?: string;
   imageUrls?: string[];
-  balanceAfterOperation: number;
-  transactionId?: string;
-  dueDate?: Date;
-  paymentType?: 'cash' | 'deferred';
-  paymentStatus?: 'pending' | 'paid' | 'overdue' | 'partial' | 'cancelled';
-  paidAmount?: number;
-  remainingAmount?: number;
-  refundAmount?: number;
-  linkedInvoiceId?: string;
-  isHistorical?: boolean;
-  branchId?: string;
-  ownerId: string;
-  username?: string;
-  source?: string;
   createdAt: Date;
-  updatedAt?: Date;
+  updatedAt: Date;
+  isDeleted?: boolean;
+  ownerId: string;
+  
+  // Extension fields for UI and legacy helpers
+  operationType?: string;
+  invoiceNumber?: string;
+  accountName?: string;
+  accountId?: string;
+  remainingAmount?: number;
+  paidAmount?: number;
+  paymentStatus?: string;
+  dueDate?: Date;
+  netAmount?: number;
+  discount?: number;
+  bonus?: number;
+  receiptImageUrl?: string;
+  isHistorical?: boolean;
+  purchaseType?: 'cash' | 'credit';
+  accountType?: string;
+  discountType?: 'fixed' | 'percentage';
+  discountValue?: number;
+  linkedInvoiceId?: string;
+  linkedInvoiceNumber?: string;
+  paymentSource?: 'invoice' | 'opening_balance';
+  refundAmount?: number;
 }
 
 export interface Notification {
@@ -274,6 +281,7 @@ export interface EmployeeAttendance {
   month: number;
   year: number;
   attendanceDays: number;
+  dailyWorkHours: number;
   hoursWork: number; // Total monthly hours
   hourlyRate: number;
   dailyWage: number; // For monthly it will be the total pay
@@ -295,6 +303,7 @@ export interface PharmacyBranch {
   email?: string;
   notes?: string;
   status: 'active' | 'pending' | 'inactive' | 'archived';
+  isMain?: boolean;
   activationCode?: string;
   ownerId: string;
   createdAt: Date;
@@ -397,6 +406,20 @@ export interface EntityActivity {
   branchId?: string;
 }
 
+export interface OpeningCash {
+  id?: string;
+  date: Date;
+  month: number;
+  year: number;
+  amount: number;
+  branchId: string;
+  notes?: string;
+  source: 'previous_month' | 'leftover_cash' | 'internal_transfer' | 'other';
+  ownerId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export class PharmacyDatabase extends Dexie {
   transactions!: Table<Transaction>;
   entities!: Table<Entity>;
@@ -419,10 +442,11 @@ export class PharmacyDatabase extends Dexie {
   medicineRequests!: Table<MedicineRequest>;
   expiredDamagedLosses!: Table<ExpiredDamagedLoss>;
   entityActivities!: Table<EntityActivity>;
+  openingCash!: Table<OpeningCash>;
 
   constructor() {
     super('PharmacyDatabase');
-    this.version(18).stores({
+    this.version(19).stores({
       transactions: '++id, type, incomeType, category, date, entityId, branchId, createdBy',
       entities: '++id, name, type, branchId, ownerId',
       ledgerEntries: '++id, accountId, date, operationType, purchaseType, branchId, ownerId',
@@ -443,7 +467,8 @@ export class PharmacyDatabase extends Dexie {
       historicalRecords: '++id, type, startDate, endDate, branchId, ownerId',
       medicineRequests: '++id, patientName, phone, medicineName, status, branchId, ownerId',
       expiredDamagedLosses: '++id, date, lossType, invoiceId, branchId, ownerId',
-      entityActivities: '++id, entityId, type, createdAt, performedBy, branchId, ownerId'
+      entityActivities: '++id, entityId, type, createdAt, performedBy, branchId, ownerId',
+      openingCash: '++id, date, month, year, branchId, ownerId'
     });
   }
 }
