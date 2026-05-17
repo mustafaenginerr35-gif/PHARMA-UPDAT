@@ -9,7 +9,8 @@ import {
   Gift,
   Upload,
   Image as ImageIcon,
-  AlertCircle
+  AlertCircle,
+  Plus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,13 +34,21 @@ interface InvoiceFormProps {
   onSubmit: (data: any) => void;
   onClose: () => void;
   onImagesChange: (files: File[]) => void;
+  onAddEntityClick?: () => void;
   initialData?: any;
 }
 
-export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit, onClose, onImagesChange, initialData }: InvoiceFormProps) => {
+export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit, onClose, onImagesChange, onAddEntityClick, initialData }: InvoiceFormProps) => {
   const [purchaseType, setPurchaseType] = useState<'cash' | 'credit'>(initialData?.purchaseType || 'credit');
   const [bonusLater, setBonusLater] = useState(initialData?.bonusLater || false);
   const [selectedEntityId, setSelectedEntityId] = useState<string>(initialData?.accountId || initialEntity?.id || '');
+  
+  // Auto-update selectedEntityId if initialEntity changes (e.g. newly added from modal)
+  React.useEffect(() => {
+    if (initialEntity?.id && initialEntity.id !== selectedEntityId) {
+      setSelectedEntityId(initialEntity.id);
+    }
+  }, [initialEntity, selectedEntityId]);
   const [amount, setAmount] = useState<number>(initialData?.amount || 0);
   const [discountType, setDiscountType] = useState<'fixed' | 'percentage'>(initialData?.discountType || 'fixed');
   const [discount, setDiscount] = useState<number>(initialData?.discount || 0);
@@ -83,28 +92,40 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
 
   const currentEntity = entities.find(e => e.id === selectedEntityId) || initialEntity;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const formData = new FormData(e.target as HTMLFormElement);
-    const data = Object.fromEntries(formData.entries());
+    if (isSubmitting) return;
     
-    onSubmit({
-      ...initialData,
-      ...data,
-      accountId: selectedEntityId,
-      purchaseType,
-      bonusLater,
-      amount,
-      discount,
-      discountType,
-      discountPercentage,
-      netAmount,
-      bonus: parseFormattedNumber(data.bonus as string || '0'),
-      date: (data.date && !isNaN(new Date(data.date as string).getTime())) ? new Date(data.date as string) : new Date(),
-      dueDate: purchaseType === 'credit' && data.dueDate ? (isNaN(new Date(data.dueDate as string).getTime()) ? null : new Date(data.dueDate as string)) : null,
-      bonusArrivalDate: bonusLater && data.bonusArrivalDate ? (isNaN(new Date(data.bonusArrivalDate as string).getTime()) ? null : new Date(data.bonusArrivalDate as string)) : null,
-      updatedAt: new Date()
-    });
+    setIsSubmitting(true);
+    try {
+      const formData = new FormData(e.target as HTMLFormElement);
+      const data = Object.fromEntries(formData.entries());
+      
+      await onSubmit({
+        ...initialData,
+        ...data,
+        accountId: selectedEntityId,
+        purchaseType,
+        bonusLater,
+        amount,
+        discount,
+        discountType,
+        discountPercentage,
+        netAmount,
+        bonus: parseFormattedNumber(data.bonus as string || '0'),
+        date: (data.date && !isNaN(new Date(data.date as string).getTime())) ? new Date(data.date as string) : new Date(),
+        dueDate: purchaseType === 'credit' && data.dueDate ? (isNaN(new Date(data.dueDate as string).getTime()) ? null : new Date(data.dueDate as string)) : null,
+        bonusArrivalDate: bonusLater && data.bonusArrivalDate ? (isNaN(new Date(data.bonusArrivalDate as string).getTime()) ? null : new Date(data.bonusArrivalDate as string)) : null,
+        updatedAt: new Date()
+      });
+      // Component will likely be unmounted by parent on success, 
+      // but let's keep it safe.
+    } catch (error) {
+      console.error("Submission error:", error);
+      setIsSubmitting(false);
+    }
   };
 
   const handleImagesSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -132,7 +153,21 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
       <div className="space-y-4">
         {/* Supplier Selection */}
         <div className="space-y-2">
-          <Label className="text-muted-foreground font-bold">المورد / المذخر</Label>
+          <div className="flex justify-between items-center">
+            <Label className="text-muted-foreground font-bold">المورد / المذخر</Label>
+            {onAddEntityClick && !initialEntity && (
+              <Button 
+                type="button" 
+                variant="ghost" 
+                size="sm" 
+                onClick={onAddEntityClick}
+                className="h-8 text-primary font-black gap-1 hover:bg-primary/10 rounded-lg"
+              >
+                <Plus className="h-3 w-3" />
+                مورد جديد
+              </Button>
+            )}
+          </div>
           {initialEntity && !initialData ? (
             <div className="bg-muted p-4 rounded-xl border border-border flex items-center gap-3">
               <Building2 className="h-5 w-5 text-primary" />
@@ -410,9 +445,10 @@ export const InvoiceForm = ({ entities, selectedEntity: initialEntity, onSubmit,
       <div className="flex gap-3 pt-2">
         <Button 
           type="submit" 
+          disabled={isSubmitting}
           className="flex-1 font-black text-xl h-14 rounded-2xl shadow-xl transition-all bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20"
         >
-          {initialData ? 'حفظ التعديلات' : 'حفظ الفاتورة'}
+          {isSubmitting ? 'جاري الحفظ...' : (initialData ? 'حفظ التعديلات' : 'حفظ الفاتورة')}
         </Button>
         <Button 
           type="button" 

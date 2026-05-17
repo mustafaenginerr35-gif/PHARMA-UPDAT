@@ -42,7 +42,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { firebaseService } from '../services/firebaseService';
+import { firebaseService, getEffectiveUserInfo } from '../services/firebaseService';
 import { useFirebaseQuery } from '../hooks/useFirebaseQuery';
 import { where, orderBy } from 'firebase/firestore';
 import { toast } from 'sonner';
@@ -51,7 +51,7 @@ import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
-import { formatIQD, safeFormatDate, toValidDate } from '@/src/lib/formatters';
+import { formatIQD, safeFormatDate, toValidDate } from '../lib/formatters';
 import { HistoricalRecord, Entity, OpeningCash } from '../db';
 
 interface HistoricalMigrationPageProps {
@@ -250,8 +250,8 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
       if (editingRecord) {
         await firebaseService.updateDocument('historicalRecords', editingRecord.id!, {
           ...batchEntry,
-          startDate: new Date(batchEntry.startDate),
-          endDate: new Date(batchEntry.endDate),
+          startDate: toValidDate(batchEntry.startDate),
+          endDate: toValidDate(batchEntry.endDate),
           updatedAt: new Date()
         });
         toast.success('تم تحديث العمليات التاريخية بنجاح');
@@ -260,8 +260,8 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
         const record: Omit<HistoricalRecord, 'id'> = {
           type: 'batch_period',
           ...batchEntry,
-          startDate: new Date(batchEntry.startDate),
-          endDate: new Date(batchEntry.endDate),
+          startDate: toValidDate(batchEntry.startDate),
+          endDate: toValidDate(batchEntry.endDate),
           isHistorical: true,
           branchId: branchId || null,
           ownerId,
@@ -305,7 +305,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
         const records = data.map(row => ({
           type: 'single_entry',
           entryType: (row['النوع'] || row['type']) === 'وارد' ? 'revenue' : 'expense',
-          date: new Date(row['التاريخ'] || row['date'] || Date.now()),
+          date: toValidDate(row['التاريخ'] || row['date'] || Date.now()),
           amount: Number(row['المبلغ'] || row['amount']) || 0,
           notes: row['ملاحظات'] || row['notes'] || '',
           isHistorical: true,
@@ -580,7 +580,7 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
                        <Input 
                           type="date"
                           value={singleEntry.date ? safeFormatDate(singleEntry.date, 'yyyy-MM-dd', { useAr: false }) : ''}
-                          onChange={e => setSingleEntry({...singleEntry, date: new Date(e.target.value)})}
+                          onChange={e => setSingleEntry({...singleEntry, date: toValidDate(e.target.value)})}
                           className="bg-muted border-border h-12 rounded-xl"
                        />
                     </div>
@@ -1247,15 +1247,66 @@ export const HistoricalMigrationPage: React.FC<HistoricalMigrationPageProps> = (
                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl h-12 gap-2"
                onClick={async () => {
                  try {
+                    const { uid } = getEffectiveUserInfo();
                     if (reviewData.type === 'batch_import') {
                        // Save multiple records
                        const batch = reviewData.data;
                        for (const rec of batch) {
-                          await firebaseService.addDocument('historicalRecords', rec);
+                          if (rec.entryType === 'invoice') {
+                             const invData = {
+                                ...rec,
+                                accountId: rec.entityId,
+                                invoiceNumber: rec.invoiceNumber || 'OLD',
+                                totalAmount: rec.amount,
+                                amount: rec.amount,
+                                netAmount: (rec.amount || 0) - (rec.discount || 0),
+                                paidAmount: rec.paidAmount || 0,
+                                isHistorical: true,
+                                type: 'purchase_invoice',
+                                subtype: 'historical',
+                                source: 'historical'
+                             };
+                             await firebaseService.saveInvoice(invData);
+                          } else {
+                             await firebaseService.addDocument('historicalRecords', rec);
+                          }
                        }
                        toast.success(`تم استيراد ${batch.length} سجل بنجاح`);
                     } else {
-                       await firebaseService.addDocument('historicalRecords', reviewData.data);
+                       const rec = reviewData.data;
+                       if (rec.entryType === 'invoice') {
+                          const invData = {
+                             ...rec,
+                             accountId: rec.entityId,
+                             invoiceNumber: rec.invoiceNumber || 'OLD',
+                             totalAmount: rec.amount,
+                             amount: rec.amount,
+                             netAmount: (rec.amount || 0) - (rec.discount || 0),
+                             paidAmount: rec.paidAmount || 0,
+                             isHistorical: true,
+                             type: 'purchase_invoice',
+                             subtype: 'historical',
+                             source: 'historical'
+                          };
+                          await firebaseService.saveInvoice(invData);
+                          
+                          if (invData.paidAmount > 0) {
+                             await firebaseService.addDocument('ledgerEntries', {
+                                accountId: invData.accountId,
+                                amount: invData.paidAmount,
+                                date: invData.date,
+                                operationType: 'payment',
+                                isHistorical: true,
+                                subtype: 'historical',
+                                notes: `تسديد فاتورة قديمة رقم ${invData.invoiceNumber}`,
+                                ownerId: uid,
+                                branchId,
+                                createdAt: new Date()
+                             });
+                          }
+                       } else {
+                          await firebaseService.addDocument('historicalRecords', rec);
+                       }
                        toast.success('تم حفظ البيانات التاريخية بنجاح');
                     }
                     setIsReviewOpen(false);

@@ -43,15 +43,17 @@ import {
   DropdownMenuItem, 
   DropdownMenuSeparator 
 } from '@/components/ui/dropdown-menu';
-import { formatIQD, formatNumberWithCommas, safeFormatDate, toValidDate } from '@/src/lib/formatters';
-import { Entity, LedgerEntry, Bonus, EntityActivity } from '@/src/db';
+import { formatIQD, formatNumberWithCommas, safeFormatDate, toValidDate, getSupplierTypeLabel } from '@/src/lib/formatters';
+import { Entity, LedgerEntry, Bonus, EntityActivity, SupplierOpeningBalance, Deadline } from '@/src/db';
 import { toast } from 'sonner';
+import { ensureArray } from '@/src/lib/arrayUtils';
 
 interface SupplierAccountPageProps {
   entity: Entity;
   onBack: () => void;
   ledgerEntries: LedgerEntry[];
   bonuses: Bonus[];
+  supplierOpeningBalances?: SupplierOpeningBalance[];
   onAddInvoice: () => void;
   onAddPayment: () => void;
   onAddBonus: () => void;
@@ -70,8 +72,11 @@ interface SupplierAccountPageProps {
   onDeleteBonus?: (bonusId: string) => void;
   onImportHistorical?: () => void;
   onImportExcel?: () => void;
+  onMultiEntry?: () => void;
+  onSetDeadline?: (target: { id: string; number: string; amount: number; accountId: string; accountName: string }) => void;
   appMode?: 'laptop' | 'mobile';
   activities?: EntityActivity[];
+  deadlines?: Deadline[];
 }
 
 export const SupplierAccountPage = ({
@@ -79,6 +84,7 @@ export const SupplierAccountPage = ({
   onBack, 
   ledgerEntries,
   bonuses,
+  supplierOpeningBalances = [],
   onAddInvoice,
   onAddPayment,
   onAddBonus,
@@ -97,8 +103,11 @@ export const SupplierAccountPage = ({
   onDeleteBonus,
   onImportHistorical,
   onImportExcel,
+  onMultiEntry,
+  onSetDeadline,
   appMode = 'laptop',
-  activities = []
+  activities = [],
+  deadlines = []
 }: SupplierAccountPageProps) => {
   const [archiveYear, setArchiveYear] = useState(new Date().getFullYear().toString());
   const [archiveMonth, setArchiveMonth] = useState('all');
@@ -106,24 +115,27 @@ export const SupplierAccountPage = ({
   const [archiveSearch, setArchiveSearch] = useState('');
 
   const stats = useMemo(() => {
-    const invoices = ledgerEntries.filter(e => e.operationType === 'invoice');
-    const payments = ledgerEntries.filter(e => e.operationType === 'payment');
+    const invoices = ledgerEntries.filter(e => e.operationType === 'invoice' && !e.isDeleted);
+    const payments = ledgerEntries.filter(e => e.operationType === 'payment' && !e.isDeleted);
+    const openingBalances = ensureArray<SupplierOpeningBalance>(supplierOpeningBalances);
     
     // Sort to find last dates
     const sortedInvoices = [...invoices].sort((a, b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime());
     const sortedPayments = [...payments].sort((a, b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime());
 
+    const totalOpening = openingBalances.reduce((acc, op) => acc + (op.openingAmount || 0), 0);
+
     return {
-      totalPurchases: invoices.reduce((acc, i) => acc + i.netAmount, 0),
+      totalPurchases: invoices.reduce((acc, i) => acc + Number(i.amount || i.netAmount || 0), 0) + totalOpening,
       totalPayments: payments.reduce((acc, p) => acc + (p.amount || 0), 0),
-      openInvoices: invoices.filter(i => i.paymentStatus !== 'paid').length,
+      openInvoices: invoices.filter(i => i.paymentStatus !== 'paid').length + openingBalances.filter(op => op.remainingAmount > 0).length,
       overdueInvoices: invoices.filter(i => i.paymentStatus === 'overdue').length,
       pendingBonuses: bonuses.filter(b => b.status === 'pending').length,
       invoiceCount: invoices.length,
       lastInvoiceDate: sortedInvoices[0]?.date || null,
       lastPaymentDate: sortedPayments[0]?.date || null
     };
-  }, [ledgerEntries, bonuses]);
+  }, [ledgerEntries, bonuses, supplierOpeningBalances]);
 
   const historicalInvoices = useMemo(() => {
     return ledgerEntries.filter(e => e.operationType === 'invoice' && e.isHistorical === true);
@@ -131,7 +143,7 @@ export const SupplierAccountPage = ({
 
   const filteredArchive = useMemo(() => {
     return historicalInvoices.filter(inv => {
-      const date = new Date(inv.date);
+      const date = toValidDate(inv.date);
       const yearMatch = archiveYear === 'all' || date.getFullYear().toString() === archiveYear;
       const monthMatch = archiveMonth === 'all' || (date.getMonth() + 1).toString() === archiveMonth;
       const statusMatch = archiveStatus === 'all' || inv.paymentStatus === archiveStatus;
@@ -141,7 +153,7 @@ export const SupplierAccountPage = ({
   }, [historicalInvoices, archiveYear, archiveMonth, archiveStatus, archiveSearch]);
 
   const timelineItems = useMemo(() => {
-    return [...(activities || []), ...ledgerEntries, ...bonuses]
+    return [...ensureArray(activities), ...ensureArray(ledgerEntries), ...ensureArray(bonuses)]
       .sort((a, b) => {
         const dateA = (a as any).date || (a as any).createdAt;
         const dateB = (b as any).date || (b as any).createdAt;
@@ -194,9 +206,7 @@ export const SupplierAccountPage = ({
                 entity.type === 'scientific_office' ? 'bg-purple-500/10 text-purple-500' :
                 'bg-amber-500/10 text-amber-600'
               }`}>
-                {entity.type === 'office' ? 'مكتب' : 
-                 entity.type === 'scientific_office' ? 'مذخر' : 
-                 entity.type === 'warehouse' ? 'مستودع' : 'شخصي'}
+                {getSupplierTypeLabel(entity.type)}
               </span>
             </div>
             <p className="text-xs md:text-sm text-muted-foreground truncate">{entity.phone || 'لا يوجد رقم هاتف'} • آخر تعامل: {ledgerEntries.length > 0 ? safeFormatDate(ledgerEntries[ledgerEntries.length -1].date, 'yyyy/MM/dd') : 'لا يوجد'}</p>
@@ -216,6 +226,10 @@ export const SupplierAccountPage = ({
               <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={onAddInvoice}>
                 <FileText className="h-4 w-4 text-blue-500" />
                 <span>إضافة فاتورة</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={onMultiEntry}>
+                <LayoutDashboard className="h-4 w-4 text-primary" />
+                <span>إدخال متعدد</span>
               </DropdownMenuItem>
               <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={onAddPayment}>
                 <Receipt className="h-4 w-4 text-emerald-500" />
@@ -391,6 +405,7 @@ export const SupplierAccountPage = ({
                         <th className="px-6 py-4">المتبقي</th>
                         <th className="px-6 py-4">الخصم</th>
                         <th className="px-6 py-4 text-center">الاستحقاق</th>
+                        <th className="px-6 py-4 text-center">موعد التسديد</th>
                         <th className="px-6 py-4 text-center">الحالة</th>
                         <th className="px-6 py-4 text-center">إجراءات</th>
                       </tr>
@@ -404,6 +419,28 @@ export const SupplierAccountPage = ({
                           <td className="px-6 py-4 font-bold font-mono text-amber-500">{formatNumberWithCommas(invoice.remainingAmount || 0)}</td>
                           <td className="px-6 py-4 font-bold font-mono text-emerald-500">{formatNumberWithCommas(invoice.discount || 0)}</td>
                           <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{invoice.dueDate ? safeFormatDate(invoice.dueDate, 'yyyy/MM/dd') : '-'}</td>
+                          <td className="px-6 py-4 text-center">
+                            {(() => {
+                              const deadline = deadlines.find(d => d.invoiceId === invoice.id && d.status === 'pending');
+                              return (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className={`h-8 gap-1 rounded-lg font-bold text-[10px] ${deadline ? 'text-primary bg-primary/5 hover:bg-primary/10' : 'text-muted-foreground hover:bg-muted'}`}
+                                  onClick={() => onSetDeadline?.({
+                                    id: invoice.id!,
+                                    number: invoice.invoiceNumber!,
+                                    amount: invoice.remainingAmount || 0,
+                                    accountId: entity.id!,
+                                    accountName: entity.name
+                                  })}
+                                >
+                                  <Clock className={`h-3 w-3 ${deadline ? 'text-primary' : 'text-muted-foreground'}`} />
+                                  {deadline ? safeFormatDate(deadline.dueDate, 'MM/dd') : 'تحديد موعد'}
+                                </Button>
+                              );
+                            })()}
+                          </td>
                           <td className="px-6 py-4 text-center">
                             <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${
                               invoice.paymentStatus === 'paid' ? 'bg-emerald-500/10 text-emerald-500' :
@@ -437,6 +474,16 @@ export const SupplierAccountPage = ({
                                 <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onRefundInvoice(invoice)}>
                                   <RefreshCcw className="h-4 w-4 text-rose-500" />
                                   <span>استرجاع (مرتجع)</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted" onClick={() => onSetDeadline?.({
+                                   id: invoice.id!,
+                                   number: invoice.invoiceNumber!,
+                                   amount: invoice.remainingAmount || 0,
+                                   accountId: entity.id!,
+                                   accountName: entity.name
+                                 })}>
+                                  <Clock className="h-4 w-4 text-primary" />
+                                  <span>تحديد موعد تسديد</span>
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator className="bg-border" />
                                 <DropdownMenuItem className="gap-2 p-3 cursor-pointer rounded-lg hover:bg-muted text-rose-500" onClick={() => onDeleteInvoice(invoice)}>
@@ -889,33 +936,53 @@ export const SupplierAccountPage = ({
                       </thead>
                       <tbody className="divide-y divide-border">
                          {(() => {
-                            let runningBalance = entity.initialBalance || 0;
+                            let runningBalance = 0;
                             const rows = [];
                             
                             // Start with Initial Balance
-                            rows.push(
-                               <tr key="initial" className="bg-muted/10 italic">
-                                  <td className="px-6 py-4 text-xs font-mono">{safeFormatDate(entity.createdAt || new Date(2024,0,1), 'yyyy/MM/dd')}</td>
-                                  <td className="px-6 py-4 font-bold text-sm">رصيد افتتاحي</td>
-                                  <td className="px-6 py-4 text-center font-mono">{formatNumberWithCommas(entity.initialBalance)}</td>
-                                  <td className="px-6 py-4 text-center font-mono">0</td>
-                                  <td className="px-6 py-4 text-center font-mono font-black">{formatNumberWithCommas(runningBalance)}</td>
-                               </tr>
-                            );
+                            if (Number(entity.initialBalance || 0) > 0) {
+                              const initialDate = entity.initialBalanceDate || entity.createdAt || new Date(2024, 0, 1);
+                              runningBalance = Number(entity.initialBalance);
+                              rows.push(
+                                <tr key="initial" className="bg-muted/10 italic">
+                                   <td className="px-6 py-4 text-xs font-mono">{safeFormatDate(initialDate, 'yyyy/MM/dd')}</td>
+                                   <td className="px-6 py-4 font-bold text-sm text-rose-600">
+                                      <div className="flex flex-col">
+                                         <span>رصيد افتتاحي (مرحل)</span>
+                                         {entity.initialBalanceNotes && <span className="text-[10px] text-muted-foreground font-normal">{entity.initialBalanceNotes}</span>}
+                                      </div>
+                                   </td>
+                                   <td className="px-6 py-4 text-center font-mono text-rose-600 font-black">{formatNumberWithCommas(entity.initialBalance)}</td>
+                                   <td className="px-6 py-4 text-center font-mono">-</td>
+                                   <td className="px-6 py-4 text-center font-mono font-black">{formatNumberWithCommas(runningBalance)}</td>
+                                </tr>
+                              );
+                            }
 
                             const sortedEntries = [...ledgerEntries].filter(e => !e.isDeleted).sort((a,b) => toValidDate(a.date).getTime() - toValidDate(b.date).getTime());
                             
                             sortedEntries.forEach(e => {
-                               let debit = 0;
-                               let credit = 0;
-                               let desc = '';
+                               let debit = Number(e.debit) || 0;
+                               let credit = Number(e.credit) || 0;
                                
-                               if (e.operationType === 'invoice') {
-                                  debit = e.netAmount || 0;
-                                  desc = `فاتورة رقم: ${e.invoiceNumber}`;
-                               } else if (e.operationType === 'payment') {
-                                  credit = (e.amount || 0) + (e.discount || 0) - (e.refundAmount || 0);
-                                  desc = e.paymentSource === 'opening_balance' ? 'تسديد من الرصيد الافتتاحي' : `تسديد فاتورة رقم: ${e.linkedInvoiceNumber || 'غير محدد'}`;
+                               // Legacy fallback
+                               if (debit === 0 && credit === 0 && Number(e.amount) > 0) {
+                                  if (e.operationType === 'invoice' || e.sourceType === 'supplier_opening_balance') {
+                                     debit = Number(e.netAmount || e.amount);
+                                  } else if (e.operationType === 'payment' || e.sourceType === 'payment' || e.sourceType === 'supplier_opening_payment') {
+                                     credit = Number(e.amount) + (Number(e.discount) || 0) - (Number(e.refundAmount) || 0);
+                                  } else if (e.operationType === 'refund' || e.sourceType === 'return') {
+                                     credit = Number(e.refundAmount || e.amount);
+                                  }
+                               }
+
+                               let desc = e.description || '';
+                               if (!desc || desc.length < 5) {
+                                  if (e.sourceType === 'supplier_opening_balance') desc = 'رصيد افتتاحي (دين مرحل)';
+                                  else if (e.operationType === 'invoice') desc = `فاتورة شراء رقم: ${e.invoiceNumber || 'غير محدد'}`;
+                                  else if (e.operationType === 'payment' || e.sourceType === 'payment') desc = e.paymentSource === 'opening_balance' ? 'تسديد من الرصيد الافتتاحي' : `تسديد دفعة/فاتورة: ${e.linkedInvoiceNumber || 'عام'}`;
+                                  else if (e.sourceType === 'return' || e.operationType === 'refund') desc = `مرتجع مشتريات: ${e.linkedInvoiceNumber || ''}`;
+                                  else if (e.sourceType === 'adjustment') desc = `تعديل رصيد: ${e.notes || ''}`;
                                }
                                
                                runningBalance += (debit - credit);
@@ -923,10 +990,15 @@ export const SupplierAccountPage = ({
                                rows.push(
                                   <tr key={e.id} className="hover:bg-muted/30 transition-colors">
                                      <td className="px-6 py-4 text-xs font-mono text-muted-foreground">{safeFormatDate(e.date, 'yyyy/MM/dd')}</td>
-                                     <td className="px-6 py-4 font-bold text-sm">{desc}</td>
-                                     <td className="px-6 py-4 text-center font-mono text-rose-500">{debit > 0 ? formatNumberWithCommas(debit) : '-'}</td>
-                                     <td className="px-6 py-4 text-center font-mono text-emerald-500">{credit > 0 ? formatNumberWithCommas(credit) : '-'}</td>
-                                     <td className="px-6 py-4 text-center font-mono font-black">{formatNumberWithCommas(runningBalance)}</td>
+                                     <td className="px-6 py-4 font-bold text-sm">
+                                        <div className="flex flex-col">
+                                           <span>{desc}</span>
+                                           {e.notes && <span className="text-[10px] text-muted-foreground font-normal">{e.notes}</span>}
+                                        </div>
+                                     </td>
+                                     <td className="px-6 py-4 text-center font-mono text-rose-500 font-bold">{debit > 0 ? formatNumberWithCommas(debit) : '-'}</td>
+                                     <td className="px-6 py-4 text-center font-mono text-emerald-500 font-bold">{credit > 0 ? formatNumberWithCommas(credit) : '-'}</td>
+                                     <td className="px-6 py-4 text-center font-mono font-black text-foreground">{formatNumberWithCommas(runningBalance)}</td>
                                   </tr>
                                );
                             });
@@ -940,6 +1012,91 @@ export const SupplierAccountPage = ({
           </TabsContent>
         </div>
       </Tabs>
+
+      {supplierOpeningBalances.length > 0 && (
+         <Card className="bg-card border-border border-r-4 border-r-amber-500 overflow-hidden rounded-2xl shadow-lg shadow-amber-500/5">
+            <CardHeader className="bg-amber-500/5">
+               <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                     <div className="p-2 bg-amber-500/10 rounded-lg">
+                        <History className="h-5 w-5 text-amber-600" />
+                     </div>
+                     <CardTitle className="text-lg font-black text-amber-700">الرصيد / الدين الافتتاحي</CardTitle>
+                  </div>
+                  <div className="text-[10px] font-black text-amber-600 bg-amber-500/10 px-2 py-1 rounded-full uppercase tracking-tighter">ديون مرحلة</div>
+               </div>
+            </CardHeader>
+            <CardContent className="p-0">
+               <div className="overflow-x-auto">
+                  <table className="w-full text-right">
+                     <thead className="bg-muted/50 border-b border-border text-[10px] font-black text-muted-foreground uppercase">
+                        <tr>
+                           <th className="px-6 py-4">أصل الدين</th>
+                           <th className="px-6 py-4">المسدد</th>
+                           <th className="px-6 py-4">المتبقي</th>
+                           <th className="px-6 py-4 text-center">تاريخ الإدخال</th>
+                           <th className="px-6 py-4 text-center font-bold">موعد التسديد</th>
+                           <th className="px-6 py-4 text-center">الإجراءات</th>
+                        </tr>
+                     </thead>
+                     <tbody className="divide-y divide-border">
+                        {supplierOpeningBalances.map((op) => (
+                           <tr key={op.id} className="hover:bg-amber-50/10 transition-colors">
+                              <td className="px-6 py-4 font-black font-mono text-foreground text-lg">{formatNumberWithCommas(op.openingAmount)}</td>
+                              <td className="px-6 py-4 font-bold font-mono text-emerald-600">{formatNumberWithCommas(op.paidAmount || 0)}</td>
+                              <td className="px-6 py-4 font-black font-mono text-rose-600 text-lg">{formatNumberWithCommas(op.remainingAmount || 0)}</td>
+                              <td className="px-6 py-4 text-center font-mono text-muted-foreground text-xs">{safeFormatDate(op.date, 'yyyy/MM/dd')}</td>
+                              <td className="px-6 py-4 text-center">
+                                 {(() => {
+                                    const deadline = deadlines.find(d => d.invoiceId === `ob-${op.id}` && d.status === 'pending');
+                                    return (
+                                       <Button 
+                                          size="sm" 
+                                          variant="ghost"
+                                          className={`h-8 gap-1 rounded-xl font-bold text-[10px] ${deadline ? 'text-primary bg-primary/5 hover:bg-primary/10' : 'text-muted-foreground hover:bg-muted'}`}
+                                          onClick={() => onSetDeadline?.({
+                                             id: `ob-${op.id!}`,
+                                             number: 'رصيد افتتاحي',
+                                             amount: op.remainingAmount || 0,
+                                             accountId: entity.id!,
+                                             accountName: entity.name
+                                          })}
+                                       >
+                                          <Clock className="h-3.5 w-3.5" />
+                                          {deadline ? safeFormatDate(deadline.dueDate, 'MM/dd') : 'تحديد موعد'}
+                                       </Button>
+                                    );
+                                 })()}
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                 <div className="flex items-center justify-center gap-2">
+                                    <Button 
+                                       size="sm" 
+                                       className="h-8 gap-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px]"
+                                       onClick={() => onAddPayment()}
+                                    >
+                                       <Receipt className="h-3.5 w-3.5" />
+                                       تسديد
+                                    </Button>
+                                    <Button 
+                                       size="sm" 
+                                       variant="outline"
+                                       className="h-8 gap-1 rounded-xl border-border text-foreground hover:bg-muted font-bold text-[10px]"
+                                       onClick={() => onEditEntity()}
+                                    >
+                                       <Edit className="h-3.5 w-3.5" />
+                                       تعديل
+                                    </Button>
+                                 </div>
+                              </td>
+                           </tr>
+                        ))}
+                     </tbody>
+                  </table>
+               </div>
+            </CardContent>
+         </Card>
+      )}
     </div>
   );
 };

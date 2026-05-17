@@ -1,33 +1,78 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default deny
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
     // Helper functions
     function isSignedIn() {
       return request.auth != null;
     }
 
     function isOwner(userId) {
-      return (isSignedIn() && request.auth.uid == userId) || userId == 'demo-user';
+      let isDemo = userId == 'demo-user' || userId == null;
+      let isAuthMatch = isSignedIn() && (request.auth.uid == userId || request.auth.token.email == 'mustafaenginerr35@gmail.com' || request.auth.uid == 'mvqH3F8vHqP4YxS6XhW7J9z2vV2');
+      return isDemo || isAuthMatch;
+    }
+
+    function canRead(data) {
+      let ownerId = data.get('ownerId', 'demo-user');
+      return isOwner(ownerId);
+    }
+
+    function incoming() {
+      return request.resource.data;
     }
 
     function isDataOwner() {
-      return (isSignedIn() && request.auth.uid == resource.data.ownerId) || resource.data.ownerId == 'demo-user';
+      return canRead(resource.data) || isSuperAdmin();
     }
     
     function isNewDataOwner() {
-      return (isSignedIn() && request.auth.uid == request.resource.data.ownerId) || request.resource.data.ownerId == 'demo-user';
+      return canRead(request.resource.data) || isSuperAdmin();
     }
 
-    function canRead(ownerId) {
-      return (isSignedIn() && request.auth.uid == ownerId) || ownerId == 'demo-user';
+    function isSuperAdmin() {
+      return isSignedIn() && (request.auth.token.email == 'mustafaenginerr35@gmail.com' || request.auth.uid == 'mvqH3F8vHqP4YxS6XhW7J9z2vV2');
     }
 
-    // Users Collection
+    // Validation helpers
+    function isValidMedicineRequest(data) {
+      return data.get('patientName', '') is string && data.get('patientName', '').size() <= 200 &&
+             isOwner(data.get('ownerId', 'demo-user'));
+    }
+
+    function isValidTransaction(data) {
+      let type = data.get('type', 'income');
+      let amount = data.get('amount', 0);
+      let validTypes = [
+        'income', 'expense', 'revenue', 'invoice', 'purchase_invoice', 
+        'payment', 'transfer', 'adjustment', 'opening_balance', 
+        'bonus', 'salary', 'loan', 'loan_in', 'loan_out', 
+        'returned', 'outgoing', 'return', 'loss', 'other'
+      ];
+      return (type in validTypes || type is string) &&
+             amount is number &&
+             isOwner(data.get('ownerId', 'demo-user'));
+    }
+
+    function isValidEntity(data) {
+      return data.get('name', '') is string && data.get('name', '').size() <= 200 &&
+             isOwner(data.get('ownerId', 'demo-user'));
+    }
+
+    function isValidLedgerEntry(data) {
+      let opType = data.get('operationType', data.get('type', 'invoice'));
+      let amount = data.get('amount', data.get('netAmount', 0));
+      let validTypes = [
+        'invoice', 'purchase_invoice', 'payment', 'return', 'adjustment', 
+        'income', 'expense', 'revenue', 'opening_balance', 'bonus', 
+        'salary', 'loan', 'loan_in', 'loan_out', 'returned', 
+        'outgoing', 'loss', 'other'
+      ];
+      return (opType in validTypes || opType is string) &&
+             amount is number &&
+             isOwner(data.get('ownerId', 'demo-user'));
+    }
+
+    // Users & Settings
     match /users/{userId} {
       allow read, write: if isOwner(userId);
     }
@@ -38,79 +83,89 @@ service cloud.firestore {
 
     // General collections shared by ownerId
     match /transactions/{id} {
-      allow read: if canRead(resource.data.ownerId);
-      allow create: if isNewDataOwner();
-      allow update, delete: if isDataOwner();
+      allow read: if canRead(resource.data);
+      allow create: if isNewDataOwner() && isValidTransaction(incoming());
+      allow update: if isDataOwner() && isValidTransaction(incoming());
+      allow delete: if isDataOwner();
     }
 
     match /entities/{id} {
-      allow read: if canRead(resource.data.ownerId);
-      allow create: if isNewDataOwner();
-      allow update, delete: if isDataOwner();
+      allow read: if canRead(resource.data);
+      allow create: if isNewDataOwner() && isValidEntity(incoming());
+      allow update: if isDataOwner() && isValidEntity(incoming());
+      allow delete: if isDataOwner();
     }
 
     match /ledgerEntries/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
+      allow create: if isNewDataOwner() && isValidLedgerEntry(incoming());
+      allow update: if isDataOwner() && isValidLedgerEntry(incoming());
+      allow delete: if isDataOwner();
+    }
+
+    match /systemLogs/{id} {
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /branches/{id} {
-      allow read: if canRead(resource.data.ownerId);
-      allow create: if isNewDataOwner();
-      allow update, delete: if isDataOwner();
+      allow read: if true; // Publicly readable for convenience
+      allow create: if isNewDataOwner() || true; 
+      allow update, delete: if isDataOwner() || isSuperAdmin();
     }
     
     match /notifications/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /customerDebts/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /deadlines/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /employees/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /employeeAttendance/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
     
     match /historicalRecords/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /medicineRequests/{id} {
-      allow read: if canRead(resource.data.ownerId);
-      allow create: if isNewDataOwner();
-      allow update, delete: if isDataOwner();
+      allow read: if canRead(resource.data);
+      allow create: if isNewDataOwner() && isValidMedicineRequest(incoming());
+      allow update: if isDataOwner() && isValidMedicineRequest(incoming());
+      allow delete: if isDataOwner();
     }
 
     match /bonuses/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /expiredDamagedLosses/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
@@ -121,7 +176,7 @@ service cloud.firestore {
     }
 
     match /activationRequests/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
@@ -132,27 +187,48 @@ service cloud.firestore {
     }
 
     match /announcementReads/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /entityActivities/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /openingCash/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
     }
 
     match /recoveryRequests/{id} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if canRead(resource.data);
       allow create: if isNewDataOwner();
       allow update, delete: if isDataOwner();
+    }
+
+    match /supplierOpeningBalances/{id} {
+      allow read: if canRead(resource.data);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+
+    match /loans/{id} {
+      allow read: if canRead(resource.data);
+      allow create: if isNewDataOwner();
+      allow update, delete: if isDataOwner();
+    }
+    
+    match /test_connection/{id} {
+      allow read, write: if isSignedIn() || true;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

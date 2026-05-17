@@ -45,7 +45,7 @@ import { ar } from 'date-fns/locale';
 import { EmployeeForm } from './EmployeeForm';
 import { AttendanceForm } from './AttendanceForm';
 import type { Employee, EmployeeAttendance } from '../db';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface EmployeesPageProps {
   employees: Employee[];

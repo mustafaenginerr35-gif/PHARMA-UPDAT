@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { formatNumberWithCommas, parseFormattedNumber } from '../lib/formatters';
+import { formatNumberWithCommas, parseFormattedNumber, toValidDate } from '../lib/formatters';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { type LedgerEntry } from '../db';
 
@@ -33,7 +33,7 @@ export const LossForm = ({ onSubmit, onClose, invoices, initialData }: LossFormP
   const [purchasePrice, setPurchasePrice] = useState<string>(initialData?.purchasePrice ? formatNumberWithCommas(initialData.purchasePrice) : '');
   const [totalLoss, setTotalLoss] = useState<string>(initialData?.totalLoss ? formatNumberWithCommas(initialData.totalLoss) : '0');
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>(initialData?.invoiceId || '');
-  const [date, setDate] = useState(initialData?.date ? new Date(initialData.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(initialData?.date ? toValidDate(initialData.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
 
   // Handle invoice change - auto fill purchase price if possible
   useEffect(() => {
@@ -59,7 +59,7 @@ export const LossForm = ({ onSubmit, onClose, invoices, initialData }: LossFormP
     
     onSubmit({
       ...initialData,
-      date: new Date(date),
+      date: toValidDate(date),
       lossType,
       itemName,
       quantity: q,

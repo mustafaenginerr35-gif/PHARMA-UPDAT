@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL, deleteObject, uploadBytesResumable } from 'firebase/storage';
 import { db, auth, storage } from '../lib/firebase';
+import { toValidDate } from '../lib/formatters';
 
 enum OperationType {
   CREATE = 'create',
@@ -64,7 +65,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-function getEffectiveUserInfo() {
+export function getEffectiveUserInfo() {
   const user = auth.currentUser;
   if (user) return { uid: user.uid, authenticated: true };
   
@@ -76,24 +77,110 @@ function getEffectiveUserInfo() {
   return { uid: null, authenticated: false };
 }
 
-function cleanData(data: any) {
+function cleanData(data: any): any {
   if (data === null || typeof data !== 'object') return data;
+  if (data instanceof Date) return data;
+  
+  if (Array.isArray(data)) {
+    return data.map(item => cleanData(item));
+  }
   
   const cleaned: any = {};
   Object.keys(data).forEach(key => {
     const value = data[key];
     if (value !== undefined) {
-      if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
-        cleaned[key] = cleanData(value);
-      } else {
-        cleaned[key] = value;
-      }
+      cleaned[key] = cleanData(value);
     }
   });
   return cleaned;
 }
 
+// Memory lock to prevent redundant concurrent operations
+const activeOperations = new Set<string>();
+const globalSavingLock = new Map<string, number>();
+
 export const firebaseService = {
+  // Centralized Financial Save Operation
+  async saveFinancialRecordOnce(data: any) {
+    const { uid, authenticated } = getEffectiveUserInfo();
+    if (!authenticated) throw new Error('يرجى تسجيل الدخول أولاً');
+
+    const amount = Number(data.amount || data.saleAmount || data.netAmount || 0);
+    const date = toValidDate(data.date || data.invoiceDate || new Date());
+    const dateStr = date.toISOString().split('T')[0];
+    const type = data.type || data.operationType || 'other';
+    const branchId = data.branchId || 'main';
+    const entityId = data.entityId || data.accountId || 'none';
+    const group = data.group || 'general';
+
+    // 1. Generate unique operation key for blocking
+    const operationKey = `${type}_${amount}_${dateStr}_${branchId}_${entityId}_${group}`;
+    const now = Date.now();
+
+    // Check Memory Lock (Rapid double clicks in same session)
+    if (globalSavingLock.has(operationKey)) {
+      const lockTime = globalSavingLock.get(operationKey);
+      if (now - (lockTime || 0) < 5000) { // 5 second lock
+        console.warn("[Firebase] SAVE BLOCKED DUPLICATE (Lock):", operationKey);
+        return { blocked: true, id: 'lock' };
+      }
+    }
+    globalSavingLock.set(operationKey, now);
+
+    console.log("SAVE START:", operationKey);
+
+    try {
+      // 2. Database Duplicate Check (Existing record in Firestore)
+      // Check ledgerEntries primarily
+      const q = query(
+        collection(db, 'ledgerEntries'),
+        where('ownerId', '==', uid),
+        where('type', '==', type),
+        where('amount', '==', amount)
+      );
+      
+      const snapshot = await getDocs(q);
+      const existing = snapshot.docs.find(d => {
+        const dData = d.data();
+        const dDate = toValidDate(dData.date || dData.invoiceDate);
+        const dDateStr = dDate.toISOString().split('T')[0];
+        const dBranch = dData.branchId || 'main';
+        const dEntity = dData.entityId || dData.accountId || 'none';
+        
+        return dDateStr === dateStr && dBranch === branchId && dEntity === entityId;
+      });
+
+      if (existing) {
+        console.warn("[Firebase] SAVE BLOCKED DUPLICATE (Firestore):", existing.id);
+        return { blocked: true, id: existing.id, isUpdate: true };
+      }
+
+      // 3. Save purely to ledgerEntries (Single Source of Truth)
+      const docRef = doc(collection(db, 'ledgerEntries'));
+      const finalRecord = cleanData({
+        ...data,
+        id: docRef.id,
+        ownerId: uid,
+        date: date,
+        amount: amount,
+        type: type,
+        operationType: type, // compatibility
+        isCommitted: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+
+      await setDoc(docRef, finalRecord);
+      
+      console.log("SAVE SUCCESS:", docRef.id);
+      return { success: true, id: docRef.id };
+    } catch (error) {
+      globalSavingLock.delete(operationKey);
+      console.error("[Firebase] SAVE FAILED:", error);
+      throw error;
+    }
+  },
+
   // Generic collection operations
   async addDocument(collectionName: string, data: any) {
     const { uid, authenticated } = getEffectiveUserInfo();
@@ -223,82 +310,16 @@ export const firebaseService = {
   },
 
   async syncLedger(data: any) {
-    const { uid, authenticated } = getEffectiveUserInfo();
-    if (!authenticated) return;
-
-    if (!data.sourceId || !data.sourceType) {
-      console.error("[LedgerSync] Missing sourceId or sourceType", data);
-      return;
-    }
-
-    try {
-      const q = query(
-        collection(db, 'ledgerEntries'),
-        where('ownerId', '==', uid),
-        where('sourceId', '==', data.sourceId)
-      );
-      const snapshot = await getDocs(q);
-      
-      const ledgerData = {
-        ...data,
-        ownerId: uid,
-        updatedAt: new Date()
-      };
-
-      if (!snapshot.empty) {
-        const docId = snapshot.docs[0].id;
-        await updateDoc(doc(db, 'ledgerEntries', docId), cleanData(ledgerData));
-        console.log(`[LedgerSync] Updated ledger for ${data.sourceType}/${data.sourceId}`);
-        return docId;
-      } else {
-        const docRef = doc(collection(db, 'ledgerEntries'));
-        const now = new Date();
-        await setDoc(docRef, cleanData({
-          ...ledgerData,
-          id: docRef.id,
-          createdAt: now,
-          updatedAt: now
-        }));
-        console.log(`[LedgerSync] Created new ledger for ${data.sourceType}/${data.sourceId}`);
-        return docRef.id;
-      }
-    } catch (error) {
-      console.error("[LedgerSync] Error syncing ledger:", error);
-    }
+    // [DEPRECATED] All financial records now go through saveFinancialRecordOnce 
+    // which handles unified storage in ledgerEntries.
+    console.log("[Firebase] syncLedger skipped - using unified saving");
+    return null;
   },
 
   async syncTransaction(data: any) {
-    const { uid, authenticated } = getEffectiveUserInfo();
-    if (!authenticated) return;
-    if (!data.sourceId) {
-      console.error("[TransactionSync] Missing sourceId", data);
-      return;
-    }
-
-    try {
-      const q = query(
-        collection(db, 'transactions'),
-        where('ownerId', '==', uid),
-        where('sourceId', '==', data.sourceId)
-      );
-      const snapshot = await getDocs(q);
-      const txData = { 
-        ...data, 
-        ownerId: uid, 
-        updatedAt: new Date() 
-      };
-
-      if (!snapshot.empty) {
-        const docId = snapshot.docs[0].id;
-        await updateDoc(doc(db, 'transactions', docId), cleanData(txData));
-        console.log(`[TransactionSync] Updated transaction for ${data.sourceId}`);
-        return docId;
-      } else {
-        return await this.addDocument('transactions', txData);
-      }
-    } catch (error) {
-      console.error("[TransactionSync] Error:", error);
-    }
+    // [DEPRECATED] 
+    console.log("[Firebase] syncTransaction skipped - using unified saving");
+    return null;
   },
 
   async setDocument(collectionName: string, id: string, data: any, options: { merge?: boolean } = {}) {
@@ -447,10 +468,170 @@ export const firebaseService = {
 
   async deleteImage(url: string) {
     try {
+      const { ref, deleteObject } = await import('firebase/storage');
       const imageRef = ref(storage, url);
       await deleteObject(imageRef);
     } catch (error) {
       console.error('[Firebase] Error deleting image:', error);
+    }
+  },
+
+  async saveInvoice(invoiceData: any) {
+    console.log("[Firebase] saveInvoice (via unified save) for:", invoiceData.invoiceNumber);
+
+    const amount = Number(invoiceData.netAmount || invoiceData.totalAmount || invoiceData.amount || 0);
+    const date = toValidDate(invoiceData.invoiceDate || invoiceData.date || new Date());
+    
+    const result = await this.saveFinancialRecordOnce({
+      ...invoiceData,
+      amount,
+      date,
+      type: 'invoice',
+      operationType: 'invoice',
+      subtype: invoiceData.isHistorical ? 'historical' : 'normal',
+      debit: amount,
+      credit: 0
+    });
+
+    return result as any;
+  },
+
+  async saveRevenue(data: any) {
+    console.log("[Firebase] saveRevenue (via unified save)");
+    
+    const amount = Number(data.saleAmount || data.amount || 0);
+    const date = toValidDate(data.date || new Date());
+    
+    const result = await this.saveFinancialRecordOnce({
+      ...data,
+      amount,
+      date,
+      type: 'revenue',
+      operationType: 'revenue',
+      debit: 0,
+      credit: amount,
+      category: 'إيرادات مبيعات',
+      description: data.description || `${data.incomeTypeCustom || 'مبيعات'} - ${data.incomeType === 'cash' ? 'نقدي' : 'دين'}`
+    });
+
+    return result as any;
+  },
+
+  async saveExpense(data: any) {
+    console.log("[Firebase] saveExpense (via unified save)");
+    
+    const amount = Number(data.amount || 0);
+    const date = toValidDate(data.date || new Date());
+    
+    const result = await this.saveFinancialRecordOnce({
+      ...data,
+      amount,
+      date,
+      type: 'expense',
+      operationType: 'expense',
+      debit: amount,
+      credit: 0,
+      category: data.category || 'المصاريف التشغيلية',
+      description: data.description || data.statement || 'مصروف'
+    });
+
+    return result as any;
+  },
+
+  async cleanupDuplicateFinancialRecords() {
+    const { uid, authenticated } = getEffectiveUserInfo();
+    if (!authenticated) throw new Error('يرجى تسجيل الدخول أولاً');
+
+    try {
+      let totalDeleted = 0;
+      totalDeleted += await this.cleanupCollection('ledgerEntries');
+      totalDeleted += await this.cleanupCollection('transactions');
+      return totalDeleted;
+    } catch (error) {
+      console.error("[Cleanup] Error:", error);
+    }
+  },
+
+  async cleanupCollection(collectionName: string) {
+    const { uid } = getEffectiveUserInfo();
+    const q = query(collection(db, collectionName), where('ownerId', '==', uid));
+    const snap = await getDocs(q);
+    const seen = new Map();
+    const toDelete: string[] = [];
+
+    for (const d of snap.docs) {
+      const data = d.data();
+      const amount = Number(data.amount || data.netAmount || (data.debit > 0 ? (data as any).debit : (data as any).credit) || 0);
+      if (amount === 0) continue;
+
+      const date = toValidDate(data.date || data.invoiceDate);
+      const dateStr = date.toISOString().split('T')[0];
+      const type = data.type || data.operationType;
+      const entityId = data.entityId || data.accountId || 'none';
+      const key = `${type}_${amount}_${dateStr}_${entityId}_${(data as any).invoiceNumber || 'none'}`;
+
+      if (seen.has(key)) {
+        toDelete.push(d.id);
+      } else {
+        seen.set(key, d.id);
+      }
+    }
+
+    if (toDelete.length > 0) {
+      for (let i = 0; i < toDelete.length; i += 500) {
+        await this.clearCollectionsByIds(collectionName, toDelete.slice(i, i + 500));
+      }
+    }
+    return toDelete.length;
+  },
+
+  async cleanupDuplicateInvoices() {
+    console.log("[Firebase] Starting deep cleanup for both collections...");
+    const ledgerDeleted = await this.cleanupCollection('ledgerEntries');
+    const txDeleted = await this.cleanupCollection('transactions');
+    return ledgerDeleted + txDeleted;
+  },
+
+  async clearCollectionsByIds(collectionName: string, ids: string[]) {
+    const { writeBatch, doc: docRef } = await import('firebase/firestore');
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+      batch.delete(docRef(db, collectionName, id));
+    });
+    await batch.commit();
+  },
+
+  async clearCollections(collectionNames: string[]) {
+    const { uid, authenticated } = getEffectiveUserInfo();
+    if (!authenticated) throw new Error('يرجى تسجيل الدخول أولاً');
+
+    const { writeBatch, getDocs, collection, query, where, doc } = await import('firebase/firestore');
+
+    for (const colName of collectionNames) {
+      try {
+        const q = query(collection(db, colName), where('ownerId', '==', uid));
+        const snapshot = await getDocs(q);
+        
+        if (snapshot.empty) continue;
+
+        // Firestore batches are limited to 500 operations
+        const chunks = [];
+        for (let i = 0; i < snapshot.docs.length; i += 500) {
+          chunks.push(snapshot.docs.slice(i, i + 500));
+        }
+
+        for (const chunk of chunks) {
+          const batch = writeBatch(db);
+          chunk.forEach(d => {
+            batch.delete(doc(db, colName, d.id));
+          });
+          await batch.commit();
+        }
+        console.log(`[Firebase] Cleared collection: ${colName}`);
+      } catch (error) {
+        console.error(`[Firebase] Error clearing collection ${colName}:`, error);
+        handleFirestoreError(error, OperationType.DELETE, colName);
+      }
     }
   }
 };

@@ -2,11 +2,17 @@ import Dexie, { type Table } from 'dexie';
 
 export interface Transaction {
   id?: string;
-  type: 'revenue' | 'expense' | 'invoice' | 'payment' | 'income'; // added income for legacy support if needed
+  type: 'revenue' | 'expense' | 'invoice' | 'payment' | 'income' | 'loan_in'; // added income for legacy, loan_in for new feature
   incomeType?: 'cash' | 'credit';
+  revenueClassification?: 'operating' | 'non-operating' | 'receive_loan';
+  nonOperatingType?: string;
+  loanInStatus?: 'open' | 'partially_returned' | 'fully_returned';
+  returnDate?: Date;
+  entityName?: string;
+  source?: string;
   incomeClassification?: string;
   category: string;
-  expenseClassification?: string;
+  expenseClassification?: 'operating' | 'loan_in_payment' | 'pay_loan';
   employeeName?: string;
   customerName?: string;
   amount: number;
@@ -24,7 +30,6 @@ export interface Transaction {
   partyName?: string;
   notes?: string;
   entityId?: string;
-  entityName?: string;
   invoiceNumber?: string;
   invoiceAmount?: number;
   spoiledType?: 'linked' | 'unlinked';
@@ -40,7 +45,6 @@ export interface Transaction {
   ownerId: string; // added ownerId explicitly
   userId?: string; // user convenience field requested
   username?: string;
-  source?: string;
   isHistorical?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
@@ -54,6 +58,8 @@ export interface Entity {
   type: 'office' | 'scientific_office' | 'personal' | 'warehouse';
   balance: number;
   initialBalance: number;
+  initialBalanceDate?: Date;
+  initialBalanceNotes?: string;
   totalInvoices: number;
   totalPayments: number;
   limit: number;
@@ -108,10 +114,12 @@ export interface LedgerEntry {
   paymentStatus?: string;
   dueDate?: Date;
   netAmount?: number;
+  totalAmount?: number;
   discount?: number;
   bonus?: number;
   receiptImageUrl?: string;
   isHistorical?: boolean;
+  isCommitted?: boolean;
   purchaseType?: 'cash' | 'credit';
   accountType?: string;
   discountType?: 'fixed' | 'percentage';
@@ -120,6 +128,10 @@ export interface LedgerEntry {
   linkedInvoiceNumber?: string;
   paymentSource?: 'invoice' | 'opening_balance';
   refundAmount?: number;
+  invoiceDate?: Date;
+  source?: string;
+  type?: string;
+  subtype?: string;
 }
 
 export interface Notification {
@@ -393,6 +405,27 @@ export interface ExpiredDamagedLoss {
   updatedAt: Date;
 }
 
+export interface Loan {
+  id?: string;
+  type: 'outgoing' | 'returned'; // سلفة صادرة | استرجاع سلفة
+  partyName: string; // اسم الجهة أو الشخص
+  amount: number;
+  reason?: string; // سبب السلفة
+  expectedReturnDate?: Date; // موعد الاسترجاع المتوقع
+  status: 'open' | 'partially_returned' | 'fully_returned' | 'overdue'; // مفتوحة | مسترجعة جزئياً | مسترجعة بالكامل | متأخرة
+  notes?: string;
+  imageUrl?: string;
+  imageUrls?: string[];
+  parentLoanId?: string; // For returns, link to original loan
+  date: Date;
+  branchId: string;
+  ownerId: string;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt?: Date | null;
+}
+
 export interface EntityActivity {
   id?: string;
   entityId: string;
@@ -420,6 +453,23 @@ export interface OpeningCash {
   updatedAt: Date;
 }
 
+export interface SupplierOpeningBalance {
+  id?: string;
+  supplierId: string;
+  supplierName: string;
+  supplierType: 'office' | 'scientific_office' | 'personal' | 'warehouse';
+  openingAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  date: Date;
+  branchId: string;
+  userId: string;
+  ownerId: string;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export class PharmacyDatabase extends Dexie {
   transactions!: Table<Transaction>;
   entities!: Table<Entity>;
@@ -443,10 +493,12 @@ export class PharmacyDatabase extends Dexie {
   expiredDamagedLosses!: Table<ExpiredDamagedLoss>;
   entityActivities!: Table<EntityActivity>;
   openingCash!: Table<OpeningCash>;
+  supplierOpeningBalances!: Table<SupplierOpeningBalance>;
+  loans!: Table<Loan>;
 
   constructor() {
     super('PharmacyDatabase');
-    this.version(19).stores({
+    this.version(21).stores({
       transactions: '++id, type, incomeType, category, date, entityId, branchId, createdBy',
       entities: '++id, name, type, branchId, ownerId',
       ledgerEntries: '++id, accountId, date, operationType, purchaseType, branchId, ownerId',
@@ -468,7 +520,9 @@ export class PharmacyDatabase extends Dexie {
       medicineRequests: '++id, patientName, phone, medicineName, status, branchId, ownerId',
       expiredDamagedLosses: '++id, date, lossType, invoiceId, branchId, ownerId',
       entityActivities: '++id, entityId, type, createdAt, performedBy, branchId, ownerId',
-      openingCash: '++id, date, month, year, branchId, ownerId'
+      openingCash: '++id, date, month, year, branchId, ownerId',
+      supplierOpeningBalances: '++id, supplierId, date, branchId, ownerId',
+      loans: '++id, type, partyName, date, parentLoanId, status, branchId, ownerId'
     });
   }
 }

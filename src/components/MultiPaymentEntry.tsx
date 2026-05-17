@@ -34,7 +34,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Entity, LedgerEntry } from '../db';
 import { firebaseService } from '../services/firebaseService';
-import { formatNumberWithCommas, parseFormattedNumber, safeFormatDate } from '../lib/formatters';
+import { formatNumberWithCommas, parseFormattedNumber, safeFormatDate, getSupplierTypeLabel } from '../lib/formatters';
 
 interface MultiPaymentRow {
   id: string;
@@ -296,7 +296,7 @@ export function MultiPaymentEntry({
                                 <div className="flex justify-between items-center w-full gap-8">
                                   <span>{entity.name}</span>
                                   <Badge variant="outline" className="text-[9px] font-black uppercase py-0 leading-none h-4">
-                                    {entity.type === 'office' ? 'مكتب' : 'مذخر'}
+                                    {getSupplierTypeLabel(entity.type)}
                                   </Badge>
                                 </div>
                               </SelectItem>

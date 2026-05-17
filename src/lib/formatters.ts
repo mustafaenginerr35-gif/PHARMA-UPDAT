@@ -187,3 +187,33 @@ export const parseFormattedNumber = (value: string): number => {
   const num = parseFloat(cleanStr);
   return isNaN(num) ? 0 : num;
 };
+
+/**
+ * Localization mapping for supplier types
+ */
+export const SUPPLIER_TYPE_MAPPING: Record<string, string> = {
+  office: 'مكتب',
+  warehouse: 'مذخر',
+  company: 'شركة',
+  supplier: 'مورد',
+  vendor: 'مورد عام',
+  other: 'أخرى',
+};
+
+/**
+ * Returns the Arabic label for a given supplier type value.
+ */
+export const getSupplierTypeLabel = (type: string | undefined | null): string => {
+  if (!type) return 'غير محدد';
+  const typeLower = type.toString().toLowerCase().trim();
+  return SUPPLIER_TYPE_MAPPING[typeLower] || type;
+};
+
+/**
+ * Returns the internal value for a given Arabic label.
+ */
+export const getSupplierTypeValue = (label: string | undefined | null): string => {
+  if (!label) return 'other';
+  const entry = Object.entries(SUPPLIER_TYPE_MAPPING).find(([_, v]) => v === label);
+  return entry ? entry[0] : 'other';
+};

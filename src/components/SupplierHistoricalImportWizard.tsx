@@ -30,7 +30,7 @@ import { Entity, LedgerEntry } from '../db';
 import { firebaseService } from '../services/firebaseService';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { cn, fileToBase64 } from '@/lib/utils';
-import { safeFormatDate } from '@/src/lib/formatters';
+import { safeFormatDate, toValidDate } from '@/src/lib/formatters';
 
 interface SupplierHistoricalImportWizardProps {
   entity: Entity;
@@ -122,6 +122,8 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
   const handleRemoveRow = (index: number) => {
     setInvoices(invoices.filter((_, i) => i !== index));
   };
+
+  const [isSaving, setIsSaving] = useState(false);
 
   const handleUpdateRow = (index: number, data: Partial<InvoiceRow>) => {
     const newInvoices = [...invoices];
@@ -298,9 +300,13 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
   };
 
   const handleFinalSave = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+
+    console.trace("INVOICE HISTORICAL SAVE CALLED");
+    const toastId = toast.loading('جاري رفع الصور وحفظ الفواتير...');
+    
     try {
-      toast.loading('جاري رفع الصور وحفظ الفواتير...');
-      
       let totalDebtToUpdate = 0;
 
       for (const inv of invoices) {
@@ -335,11 +341,15 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
           accountId: entity.id!,
           accountName: entity.name,
           accountType: entity.type,
-          date: new Date(inv.date),
+          date: toValidDate(inv.date),
+          invoiceDate: toValidDate(inv.date),
           operationType: 'invoice',
+          type: 'purchase_invoice',
+          subtype: 'historical',
           purchaseType: inv.purchaseType,
           invoiceNumber: inv.invoiceNumber,
           amount: inv.amount,
+          totalAmount: inv.amount,
           discount: inv.discount,
           discountType: inv.discountType,
           discountValue: inv.discountPercentage,
@@ -347,24 +357,30 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
           paidAmount: inv.paidAmount,
           remainingAmount: remaining,
           paymentStatus: inv.status,
-          dueDate: inv.dueDate ? new Date(inv.dueDate) : undefined,
+          dueDate: inv.dueDate ? toValidDate(inv.dueDate) : undefined,
           notes: inv.notes + (inv.paymentDate ? ` | تاريخ التسديد: ${inv.paymentDate}` : '') + ' (فاتورة قديمة / مرحّلة)',
           imageUrls: uploadedInvoiceImages,
           imageUrl: uploadedInvoiceImages[0] || '',
           isHistorical: true,
+          isCommitted: true,
+          source: 'historical',
           branchId,
-          createdAt: new Date()
+          createdAt: new Date(),
+          updatedAt: new Date()
         };
 
-        const invoiceId = await firebaseService.addDocument('ledgerEntries', entry);
-
+        const result = await firebaseService.saveInvoice(entry);
+        const invoiceId = result?.id;
+        
         if (inv.paidAmount > 0) {
           const paymentEntry: Partial<LedgerEntry> = {
             accountId: entity.id!,
             accountName: entity.name,
             accountType: entity.type,
-            date: inv.paymentDate ? new Date(inv.paymentDate) : new Date(inv.date),
+            date: inv.paymentDate ? toValidDate(inv.paymentDate) : toValidDate(inv.date),
             operationType: 'payment',
+            type: 'payment',
+            subtype: 'historical',
             amount: inv.paidAmount,
             discount: 0,
             netAmount: inv.paidAmount,
@@ -374,10 +390,19 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
             imageUrls: uploadedReceiptImages,
             imageUrl: uploadedReceiptImages[0] || '',
             isHistorical: true,
+            isCommitted: true,
             branchId,
-            createdAt: new Date()
+            createdAt: new Date(),
+            updatedAt: new Date()
           };
           await firebaseService.addDocument('ledgerEntries', paymentEntry);
+          
+          // Sync payment to transactions
+          await firebaseService.syncTransaction({
+            ...paymentEntry,
+            sourceId: invoiceId + '_pay',
+            sourceType: 'payment'
+          });
         }
       }
 
@@ -386,23 +411,27 @@ export const SupplierHistoricalImportWizard: React.FC<SupplierHistoricalImportWi
         await firebaseService.updateDocument('entities', entity.id!, {
           balance: (entity.balance || 0) + totalDebtToUpdate,
           totalInvoices: (entity.totalInvoices || 0) + invoices.length,
-          totalPayments: (entity.totalPayments || 0) + invoices.reduce((acc, i) => acc + i.paidAmount, 0)
+          totalPayments: (entity.totalPayments || 0) + invoices.reduce((acc, i) => acc + i.paidAmount, 0),
+          updatedAt: new Date()
         });
       } else {
-        // Just update counts if balance didn't change (all were fully paid)
         await firebaseService.updateDocument('entities', entity.id!, {
           totalInvoices: (entity.totalInvoices || 0) + invoices.length,
-          totalPayments: (entity.totalPayments || 0) + invoices.reduce((acc, i) => acc + i.paidAmount, 0)
+          totalPayments: (entity.totalPayments || 0) + invoices.reduce((acc, i) => acc + i.paidAmount, 0),
+          updatedAt: new Date()
         });
       }
 
-      toast.dismiss();
+      toast.dismiss(toastId);
       toast.success('تم استيراد الفواتير القديمة بنجاح وتحديث الرصيد');
       onComplete();
       onOpenChange(false);
     } catch (err) {
-      toast.dismiss();
+      toast.dismiss(toastId);
       toast.error('حدث خطأ أثناء الحفظ');
+      console.error(err);
+    } finally {
+      setIsSaving(false);
     }
   };
 

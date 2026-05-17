@@ -134,5 +134,168 @@ export const DataPersistenceService = {
     } catch (error) {
       toast.error('فشل في مسح البيانات');
     }
+  },
+
+  /**
+   * Reset all test data across Local (IndexedDB) and Remote (Firebase)
+   * while preserving user account and settings.
+   */
+  async resetTestData() {
+    try {
+      // 1. Clear Local Tables (IndexedDB)
+      const tables = [
+        'transactions', 'entities', 'ledgerEntries', 'notifications', 
+        'systemLogs', 'customerDebts', 'deadlines', 'bonuses', 
+        'employees', 'employeeAttendance', 'branches', 'historicalRecords', 
+        'medicineRequests', 'expiredDamagedLosses', 'entityActivities', 
+        'openingCash', 'supplierOpeningBalances', 'announcementReads'
+      ];
+      
+      console.log(`[Reset] Starting cleanup for ${tables.length} tables...`);
+      
+      for (const tableName of tables) {
+        const table = (db as any)[tableName];
+        if (table) {
+          await table.clear();
+          console.log(`[Persistence] Cleared local table: ${tableName}`);
+        }
+      }
+
+      // 2. Clear Firebase Collections
+      try {
+        const { firebaseService } = await import('./firebaseService');
+        
+        // Before deleting, try to collect image URLs for storage cleanup
+        const collectionsWithImages = ['ledgerEntries', 'entities', 'expiredDamagedLosses'];
+        for (const col of collectionsWithImages) {
+          const docs = await firebaseService.queryDocuments(col);
+          for (const d of docs) {
+            const docData = d as any;
+            if (docData.imageUrl) await firebaseService.deleteImage(docData.imageUrl);
+            if (docData.attachments && Array.isArray(docData.attachments)) {
+              for (const att of docData.attachments) {
+                if ((att as any).url) await firebaseService.deleteImage((att as any).url);
+              }
+            }
+          }
+        }
+
+        // Clear all collections in Firebase
+        await firebaseService.clearCollections(tables);
+        
+        // 3. Create default branch "الفرع الرئيسي"
+        const defaultBranchId = await firebaseService.addDocument('branches', {
+          name: 'الفرع الرئيسي',
+          status: 'active',
+          type: 'main',
+          isDefault: true,
+          createdAt: new Date().toISOString()
+        });
+
+        // Add to Local DB as well for immediate sync
+        if ((db as any).branches) {
+           await (db as any).branches.add({
+             id: defaultBranchId,
+             name: 'الفرع الرئيسي',
+             status: 'active',
+             type: 'main',
+             isDefault: true,
+             createdAt: new Date().toISOString()
+           });
+        }
+        
+      } catch (fbError) {
+        console.warn("[Reset] Firebase clear failed or not authenticated:", fbError);
+      }
+
+      // 4. Partial LocalStorage cleanup
+      const keysToKeep = [
+        'pharma-is-authenticated', 
+        'pharma-auth-user', 
+        'pharma-theme', 
+        'pharma-access-code', 
+        'firebase:auth:host',
+        'pharma-active-tab'
+      ];
+      Object.keys(localStorage).forEach(key => {
+        if (!keysToKeep.some(k => key.includes(k))) {
+          localStorage.removeItem(key);
+        }
+      });
+
+      console.log("[Reset] All test data has been cleared successfully.");
+      return true;
+    } catch (error) {
+      console.error('Reset failed:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Financial Reset (Requirement: Clear transactions/ledger but keep entity names)
+   */
+  async resetFinancialAccounts() {
+    try {
+      const financialTables = [
+        'transactions', 'ledgerEntries', 'historicalRecords', 
+        'expiredDamagedLosses', 'openingCash', 'supplierOpeningBalances', 
+        'employeeAttendance', 'customerDebts', 'bonuses', 
+        'entityActivities', 'notifications', 'systemLogs',
+        'deadlines', 'medicineRequests'
+      ];
+      
+      console.log(`[Financial Reset] Clearing ${financialTables.length} financial tables...`);
+      
+      // 1. Clear Local Tables
+      for (const tableName of financialTables) {
+        const table = (db as any)[tableName];
+        if (table) await table.clear();
+      }
+
+      // 2. Clear Firebase Collections
+      try {
+        const { firebaseService } = await import('./firebaseService');
+        await firebaseService.clearCollections(financialTables);
+        
+        // 3. Reset balances for all entities (Suppliers/Customers)
+        const entities = await firebaseService.queryDocuments('entities');
+        for (const entity of entities) {
+          await firebaseService.updateDocument('entities', entity.id!, { 
+            balance: 0,
+            openingBalance: 0,
+            remainingBalance: 0
+          });
+        }
+
+        // 4. Update local entities as well
+        if ((db as any).entities) {
+          const localEntities = await (db as any).entities.toArray();
+          for (const le of localEntities) {
+            await (db as any).entities.update(le.id, { 
+              balance: 0,
+              openingBalance: 0,
+              remainingBalance: 0
+            });
+          }
+        }
+
+      } catch (fbError) {
+        console.warn("[Financial Reset] Firebase operations failed:", fbError);
+      }
+
+      // 5. Clear specific LocalStorage keys related to reports
+      const reportKeys = ['stats-cache', 'report-last-result'];
+      Object.keys(localStorage).forEach(key => {
+        if (reportKeys.some(rk => key.includes(rk))) {
+          localStorage.removeItem(key);
+        }
+      });
+
+      console.log("[Financial Reset] Completed successfully.");
+      return true;
+    } catch (error) {
+      console.error('Financial Reset failed:', error);
+      throw error;
+    }
   }
 };

@@ -67,6 +67,7 @@ interface MultiInvoiceEntryProps {
   appUser?: any;
   onSuccess?: () => void;
   onImportExcel?: () => void;
+  preselectedEntityId?: string;
 }
 
 export function MultiInvoiceEntry({ 
@@ -76,41 +77,79 @@ export function MultiInvoiceEntry({
   currentBranchId, 
   appUser,
   onSuccess,
-  onImportExcel
+  onImportExcel,
+  preselectedEntityId
 }: MultiInvoiceEntryProps) {
-  const [rows, setRows] = useState<MultiInvoiceRow[]>([createEmptyRow()]);
+  const [rows, setRows] = useState<MultiInvoiceRow[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const tableRef = useRef<HTMLTableElement>(null);
+
+  const selectedEntity = useMemo(() => 
+    preselectedEntityId ? entities.find(e => e.id === preselectedEntityId) : null
+  , [preselectedEntityId, entities]);
+
+  // Initialize rows correctly
+  useEffect(() => {
+    if (open && rows.length === 0) {
+      setRows([createEmptyRow()]);
+    }
+  }, [open]);
+
+  // Update existing rows if preselected entity changes
+  useEffect(() => {
+    if (open && preselectedEntityId && selectedEntity) {
+      setRows(prev => prev.map(row => ({
+        ...row,
+        entityId: selectedEntity.id,
+        entityName: selectedEntity.name,
+        isValid: !!row.invoiceNumber && !!row.invoiceDate && !!selectedEntity.id && parseFormattedNumber(row.totalAmount) > 0
+      })));
+    }
+  }, [preselectedEntityId, selectedEntity, open]);
 
   // Reset states when dialog opens
   useEffect(() => {
     if (open) {
       setIsSaving(false);
-      setRows(prev => prev.map(r => ({
-        ...r,
-        saveStatus: r.saveStatus === 'success' ? 'success' : 'idle',
-        uploadProgress: r.saveStatus === 'success' ? 100 : 0
-      })));
+      setRows(prev => {
+        const updated = prev.map(r => ({
+          ...r,
+          saveStatus: r.saveStatus === 'success' ? 'success' : 'idle',
+          uploadProgress: r.saveStatus === 'success' ? 100 : 0
+        }));
+        if (updated.length === 0) return [createEmptyRow()];
+        return updated;
+      });
     }
   }, [open]);
 
   function createEmptyRow(): MultiInvoiceRow {
     const today = new Date();
-    const nextMonth = new Date();
-    nextMonth.setMonth(today.getMonth() + 1);
+    
+    // Use preselected entity if available
+    let initialEntityName = '';
+    let initialEntityId = '';
+    if (preselectedEntityId) {
+      const entity = entities.find(e => e.id === preselectedEntityId);
+      if (entity) {
+        initialEntityName = entity.name;
+        initialEntityId = entity.id || '';
+      }
+    }
 
     return {
       id: Math.random().toString(36).substr(2, 9),
       invoiceNumber: '',
       invoiceDate: safeFormatDate(today, 'yyyy-MM-dd'),
-      dueDate: safeFormatDate(nextMonth, 'yyyy-MM-dd'),
-      entityName: '',
+      dueDate: '', // Default empty (optional)
+      entityName: initialEntityName,
+      entityId: initialEntityId,
       totalAmount: '',
       discount: '0',
       paidAmount: '0',
       bonus: '',
       notes: '',
-      isValid: false,
+      isValid: !!initialEntityId,
       imageFiles: [],
       saveStatus: 'idle'
     };
@@ -134,8 +173,13 @@ export function MultiInvoiceEntry({
       const updatedRow = { ...row, [field]: value };
       
       // Auto-validate and link entity
-      const entity = entities.find(e => e.name.trim() === updatedRow.entityName.trim());
-      updatedRow.entityId = entity?.id;
+      if (preselectedEntityId && selectedEntity) {
+        updatedRow.entityId = selectedEntity.id;
+        updatedRow.entityName = selectedEntity.name;
+      } else {
+        const entity = entities.find(e => e.name.trim() === updatedRow.entityName.trim());
+        updatedRow.entityId = entity?.id;
+      }
       
       const total = parseFormattedNumber(updatedRow.totalAmount);
       const discount = parseFormattedNumber(updatedRow.discount);
@@ -174,8 +218,13 @@ export function MultiInvoiceEntry({
       if (parts[8]) row.notes = parts[8].trim();
 
       // Recalculate validity
-      const entity = entities.find(e => e.name.trim() === row.entityName);
-      row.entityId = entity?.id;
+      if (preselectedEntityId && selectedEntity) {
+        row.entityId = selectedEntity.id;
+        row.entityName = selectedEntity.name;
+      } else {
+        const entity = entities.find(e => e.name.trim() === row.entityName);
+        row.entityId = entity?.id;
+      }
       const total = parseFormattedNumber(row.totalAmount);
       row.isValid = !!row.invoiceNumber && !!row.invoiceDate && !!row.entityId && total > 0;
       
@@ -228,6 +277,7 @@ export function MultiInvoiceEntry({
   }, [rows]);
 
   const handleSaveAll = async () => {
+    console.trace("INVOICE SAVE ALL CALLED");
     const validRows = rows.filter(r => r.isValid && r.saveStatus !== 'success');
     if (validRows.length === 0) {
       toast.error('يرجى التأكد من صحة البيانات أو أن القوائم لم يتم حفظها مسبقاً');
@@ -258,6 +308,9 @@ export function MultiInvoiceEntry({
         const net = total - discount;
         const remaining = net - paid;
 
+        // Determine if dueDate is valid
+        const validDueDate = row.dueDate && !isNaN(new Date(row.dueDate).getTime()) ? new Date(row.dueDate) : null;
+
         // 1. Prepare Ledger Entry (initially without imageUrls)
         const newEntry: Omit<LedgerEntry, 'id'> = {
           accountId: entity.id!,
@@ -265,7 +318,7 @@ export function MultiInvoiceEntry({
           accountType: entity.type,
           date: new Date(row.invoiceDate),
           invoiceDate: new Date(row.invoiceDate),
-          dueDate: new Date(row.dueDate),
+          dueDate: validDueDate,
           operationType: 'invoice',
           purchaseType: 'credit',
           invoiceNumber: row.invoiceNumber,
@@ -277,47 +330,77 @@ export function MultiInvoiceEntry({
           paidAmount: paid,
           remainingAmount: remaining,
           paymentStatus: remaining === 0 ? 'paid' : (paid > 0 ? 'partially_paid' : 'pending'),
-          balanceAfterOperation: (entity.balance || 0) + remaining,
           ownerId: userId,
           branchId: branchId as any,
           imageUrls: [], // Empty initially
           notes: row.notes,
           source: 'multi_entry',
+          isCommitted: true,
           createdAt: new Date(),
           updatedAt: new Date()
         } as any;
 
-        console.log(`[SaveAll] Saving invoice data first: ${row.invoiceNumber}`);
+        console.log(`[SaveAll] Saving invoice data: ${row.invoiceNumber}`);
 
-        // 2. Save to Firebase (Ledger)
-        docId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry) || null;
+        // 2. Save via unified saveInvoice (handles deduplication)
+        const result = await firebaseService.saveInvoice(newEntry);
+        docId = result?.id || null;
+        const isUpdate = result?.isUpdate;
+        const blocked = (result as any)?.blocked;
+
+        if (blocked) {
+           setRows(prev => prev.map(r => r.id === row.id ? { ...r, saveStatus: 'success' } : r));
+           return { id: row.id, status: 'success', blocked: true };
+        }
         
         if (docId) {
-          // 3. Add transaction
-          await firebaseService.addDocument('transactions', {
+          // 3. Add transaction/sync (saveInvoice might only handle ledgerEntry, let's keep syncTransaction)
+          await firebaseService.syncTransaction({
             type: 'invoice',
             category: 'invoice',
             amount: net,
             date: new Date(row.invoiceDate),
             invoiceDate: new Date(row.invoiceDate),
-            dueDate: new Date(row.dueDate),
+            dueDate: validDueDate,
             description: `إدخال متعدد: ${entity.name} - ${row.invoiceNumber}`,
             entityId: entity.id!,
             entityName: entity.name,
             invoiceNumber: row.invoiceNumber,
             branchId: branchId as any,
             ownerId: userId,
+            createdBy: userId,
             source: 'multi_entry',
+            sourceId: docId,
             createdAt: new Date(),
             updatedAt: new Date()
           } as Transaction);
 
-          // 4. Update entity balance
-          await firebaseService.updateDocument('entities', entity.id!, {
-            balance: (entity.balance || 0) + remaining,
-            totalInvoices: (entity.totalInvoices || 0) + 1,
-            updatedAt: new Date()
-          });
+          // 4. Update entity balance (Only if not updating existing invoice)
+          if (!isUpdate) {
+            await firebaseService.updateDocument('entities', entity.id!, {
+              balance: (entity.balance || 0) + remaining,
+              totalInvoices: (entity.totalInvoices || 0) + 1,
+              updatedAt: new Date()
+            });
+          }
+
+          // 4.1 Add deadline if due date is set and there's a remaining amount
+          if (validDueDate && remaining > 0 && !isUpdate) {
+            await firebaseService.addDocument('deadlines', {
+              accountId: entity.id!,
+              accountName: entity.name,
+              invoiceId: docId as string,
+              invoiceNumber: row.invoiceNumber,
+              amount: total,
+              requiredPayment: remaining,
+              dueDate: validDueDate,
+              status: 'pending',
+              ownerId: userId,
+              branchId: branchId as any,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            } as any);
+          }
 
           // Mark as success in UI (the invoice is saved!)
           setRows(prev => prev.map(r => r.id === row.id ? { ...r, saveStatus: 'success' } : r));
@@ -423,7 +506,9 @@ export function MultiInvoiceEntry({
             <div>
               <DialogTitle className="text-2xl font-black text-primary flex items-center gap-2">
                 <TableIcon className="h-6 w-6" />
-                إدخال متعدد للقوائم
+                {preselectedEntityId && selectedEntity 
+                  ? `إدخال قوائم للمورد: ${selectedEntity.name}` 
+                  : 'إدخال متعدد للقوائم'}
               </DialogTitle>
               <DialogDescription className="font-bold">
                 أدخل البيانات يدوياً، انتقل بـ Enter، أو الصق مباشرة من Excel
@@ -434,7 +519,7 @@ export function MultiInvoiceEntry({
                 <FileUp className="h-4 w-4" />
                 استيراد ملف Excel
               </Button>
-              <Button disabled={isSaving} onClick={handleSaveAll} className="font-black px-8 gap-2 shadow-lg shadow-primary/20">
+              <Button type="button" disabled={isSaving} onClick={handleSaveAll} className="font-black px-8 gap-2 shadow-lg shadow-primary/20">
                 {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 حفظ الكل ({totals.count})
               </Button>
@@ -450,8 +535,8 @@ export function MultiInvoiceEntry({
                   <TableHead className="text-right font-black w-10 text-center">الحالة</TableHead>
                   <TableHead className="text-right font-black w-32">رقم القائمة</TableHead>
                   <TableHead className="text-right font-black w-32">تاريخ الفاتورة</TableHead>
-                  <TableHead className="text-right font-black w-32">تاريخ الاستحقاق</TableHead>
-                  <TableHead className="text-right font-black w-60">المورد / الجهة</TableHead>
+                  <TableHead className="text-right font-black w-32">تاريخ الاستحقاق (اختياري)</TableHead>
+                  {!preselectedEntityId && <TableHead className="text-right font-black w-60">المورد / الجهة</TableHead>}
                   <TableHead className="text-right font-black w-32">المبلغ الكلي</TableHead>
                   <TableHead className="text-right font-black w-24">الخصم</TableHead>
                   <TableHead className="text-right font-black w-32">المسدد</TableHead>
@@ -510,32 +595,35 @@ export function MultiInvoiceEntry({
                       </TableCell>
                       <TableCell className="p-2">
                          <div className="relative">
-                          <Clock className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-rose-400 opacity-50" />
+                          <Clock className={`absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 ${row.dueDate ? 'text-rose-400' : 'text-muted-foreground'} opacity-50`} />
                           <Input 
                             type="date"
                             value={row.dueDate}
                             disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
                             onChange={e => updateRow(row.id, 'dueDate', e.target.value)}
                             onKeyDown={e => handleKeyDown(e, row.id, 'dueDate')}
-                            className="border-none bg-transparent h-9 pr-7 text-[10px] font-bold text-rose-600 focus:ring-1 focus:ring-primary/20"
+                            className={`border-none bg-transparent h-9 pr-7 text-[10px] font-bold ${row.dueDate ? 'text-rose-600' : 'text-muted-foreground'} focus:ring-1 focus:ring-primary/20`}
+                            placeholder="اختر تاريخ الاستحقاق"
                           />
                         </div>
                       </TableCell>
-                      <TableCell className="p-2">
-                        <div className="relative">
-                          <Input 
-                            value={row.entityName}
-                            disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
-                            onChange={e => updateRow(row.id, 'entityName', e.target.value)}
-                            onKeyDown={e => handleKeyDown(e, row.id, 'entityName')}
-                            className={`border-none bg-transparent h-9 text-xs font-black focus:ring-1 focus:ring-primary/20 ${!row.entityId && row.entityName ? 'text-red-500' : ''}`}
-                            placeholder="اسم المورد"
-                          />
-                          {!row.entityId && row.entityName && (
-                            <AlertCircle className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-red-500" />
-                          )}
-                        </div>
-                      </TableCell>
+                      {!preselectedEntityId && (
+                        <TableCell className="p-2">
+                          <div className="relative">
+                            <Input 
+                              value={row.entityName}
+                              disabled={row.saveStatus === 'success' || row.saveStatus === 'saving'}
+                              onChange={e => updateRow(row.id, 'entityName', e.target.value)}
+                              onKeyDown={e => handleKeyDown(e, row.id, 'entityName')}
+                              className={`border-none bg-transparent h-9 text-xs font-black focus:ring-1 focus:ring-primary/20 ${!row.entityId && row.entityName ? 'text-red-500' : ''}`}
+                              placeholder="اسم المورد"
+                            />
+                            {!row.entityId && row.entityName && (
+                              <AlertCircle className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-red-500" />
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
                       <TableCell className="p-2">
                         <Input 
                           value={row.totalAmount ? formatNumberWithCommas(parseFormattedNumber(row.totalAmount)) : ''}
@@ -692,8 +780,8 @@ export function MultiInvoiceEntry({
         </div>
 
         <DialogFooter className="p-6 border-t bg-card">
-           <Button variant="ghost" onClick={() => onOpenChange(false)} className="font-bold">إلغاء</Button>
-           <Button disabled={isSaving} onClick={handleSaveAll} className="font-black px-12 h-12 text-lg shadow-xl shadow-primary/20">
+           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} className="font-bold">إلغاء</Button>
+           <Button type="button" disabled={isSaving} onClick={handleSaveAll} className="font-black px-12 h-12 text-lg shadow-xl shadow-primary/20">
              اعتمد وحفظ القوائم ({totals.count})
            </Button>
         </DialogFooter>

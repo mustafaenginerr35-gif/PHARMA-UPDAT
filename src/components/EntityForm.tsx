@@ -5,7 +5,8 @@ import {
   MapPin, 
   Info,
   DollarSign,
-  Image as ImageIcon
+  Image as ImageIcon,
+  X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,11 +20,11 @@ import {
 } from '@/components/ui/select';
 import { format } from 'date-fns';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
-import { parseFormattedNumber } from '@/src/lib/formatters';
+import { parseFormattedNumber, SUPPLIER_TYPE_MAPPING } from '@/src/lib/formatters';
 import { ImageCapture } from './ImageCapture';
 
 interface EntityFormProps {
-  onSubmit: (data: any) => void;
+  onSubmit: (data: any) => Promise<string | void>;
   onClose: () => void;
   entity?: any;
   onImagesChange?: (files: File[]) => void;
@@ -31,26 +32,63 @@ interface EntityFormProps {
 
 export const EntityForm = ({ onSubmit, onClose, entity, onImagesChange }: EntityFormProps) => {
   const [imageFiles, setImageFiles] = React.useState<File[]>([]);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const formRef = React.useRef<HTMLFormElement>(null);
 
-  const handleImagesResult = (files: File[]) => {
-    setImageFiles(files);
-    if (onImagesChange) onImagesChange(files);
+  const removeImage = (index: number) => {
+    const updated = imageFiles.filter((_, i) => i !== index);
+    setImageFiles(updated);
+    if (onImagesChange) onImagesChange(updated);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleImageCaptured = (file: File) => {
+    const updated = [...imageFiles, file];
+    setImageFiles(updated);
+    if (onImagesChange) onImagesChange(updated);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData.entries());
-    onSubmit({
-      ...data,
-      initialBalance: parseFormattedNumber(data.initialBalance as string || entity?.initialBalance?.toString() || '0'),
-      limit: parseFormattedNumber(data.limit as string || entity?.limit?.toString() || '0'),
-      updatedAt: new Date()
-    });
+    
+    setIsSubmitting(true);
+    try {
+      await onSubmit({
+        ...data,
+        initialBalance: parseFormattedNumber(data.initialBalance as string || entity?.initialBalance?.toString() || '0'),
+        initialBalanceDate: data.initialBalanceDate ? new Date(data.initialBalanceDate as string) : new Date(),
+        initialBalanceNotes: data.initialBalanceNotes as string || '',
+        limit: parseFormattedNumber(data.limit as string || entity?.limit?.toString() || '0'),
+        updatedAt: new Date()
+      });
+      
+      // Reset form on success
+      if (!entity) {
+        formRef.current?.reset();
+        setImageFiles([]);
+        if (onImagesChange) onImagesChange([]);
+      }
+
+      // Automatically close the dialog on success
+      if (onClose) {
+        onClose();
+        // Give a small delay to ensure any parent state updates complete
+        setTimeout(() => {
+           if (onClose) onClose(); 
+        }, 100);
+      }
+    } catch (error) {
+      console.error("EntityForm submission error:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
       <div className="space-y-6">
         {/* Name: Full Width on top */}
         <div className="space-y-2 p-5 bg-muted/20 border border-border rounded-2xl">
@@ -76,10 +114,11 @@ export const EntityForm = ({ onSubmit, onClose, entity, onImagesChange }: Entity
                 <SelectValue placeholder="اختر النوع" />
               </SelectTrigger>
               <SelectContent className="bg-card border-border text-foreground" align="end">
-                <SelectItem value="office" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">مكتب</SelectItem>
-                <SelectItem value="scientific_office" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">مذخر</SelectItem>
-                <SelectItem value="personal" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">شخصي</SelectItem>
-                <SelectItem value="warehouse" className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">مذخر / مستودع</SelectItem>
+                {Object.entries(SUPPLIER_TYPE_MAPPING).map(([value, label]) => (
+                  <SelectItem key={value} value={value} className="py-4 font-bold text-right cursor-pointer hover:bg-primary/10 transition-colors">
+                    {label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -111,18 +150,42 @@ export const EntityForm = ({ onSubmit, onClose, entity, onImagesChange }: Entity
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-card border border-border rounded-2xl shadow-inner group">
-          <div className="space-y-2">
-            <Label className="text-emerald-600 font-black text-[10px] uppercase tracking-widest flex items-center gap-2">
-              <DollarSign className="h-3 w-3" />
-              {entity ? 'تعديل الرصيد الافتتاحي' : 'رصيد الافتتاح (المبلغ المطلوب حالياً)'}
-            </Label>
-            <CurrencyInput 
-              name="initialBalance" 
-              defaultValue={entity?.initialBalance || 0} 
-              className="bg-muted border-emerald-500/20 text-emerald-600 h-14 rounded-xl font-mono text-xl font-black shadow-sm" 
-            />
+          <div className="space-y-4 col-span-1 md:col-span-2">
+             <div className="flex items-center gap-2 mb-2">
+               <DollarSign className="h-5 w-5 text-emerald-600" />
+               <h3 className="font-black text-emerald-600 text-sm">بيانات الرصيد الافتتاحي</h3>
+             </div>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               <div className="space-y-2">
+                  <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">المبلغ المتبقي بذمتك للمورد حالياً</Label>
+                  <CurrencyInput 
+                    name="initialBalance" 
+                    defaultValue={entity?.initialBalance || 0} 
+                    className="bg-muted border-emerald-500/20 text-emerald-600 h-14 rounded-xl font-mono text-xl font-black shadow-sm" 
+                  />
+               </div>
+               <div className="space-y-2">
+                  <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">تاريخ هذا الرصيد</Label>
+                  <Input 
+                    name="initialBalanceDate" 
+                    type="date"
+                    defaultValue={entity?.initialBalanceDate ? format(new Date(entity.initialBalanceDate), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')}
+                    className="bg-muted border-border text-foreground h-14 rounded-xl font-bold"
+                  />
+               </div>
+             </div>
+             <div className="space-y-2">
+                <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">ملاحظات الرصيد الافتتاحي</Label>
+                <Input 
+                  name="initialBalanceNotes"
+                  defaultValue={entity?.initialBalanceNotes}
+                  placeholder="مثلاً: رصيد مرحل من الدفاتر القديمة..."
+                  className="bg-muted border-border text-foreground h-12 rounded-xl font-bold"
+                />
+             </div>
           </div>
-          <div className="space-y-2">
+          
+          <div className="space-y-2 col-span-1 md:col-span-2 pt-4 border-t border-border/50">
             <Label className="text-rose-500 font-black text-[10px] uppercase tracking-widest">تحذير سقف الدين (الحد الائتماني)</Label>
             <CurrencyInput 
               name="limit" 
@@ -137,7 +200,43 @@ export const EntityForm = ({ onSubmit, onClose, entity, onImagesChange }: Entity
               <ImageIcon className="h-4 w-4" />
               صور المرفقات أو عقد التوريد
            </Label>
-           <ImageCapture onImagesChange={handleImagesResult} maxImages={3} />
+           
+           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+             {imageFiles.map((file, index) => (
+               <div key={index} className="relative aspect-square rounded-xl overflow-hidden border border-border group">
+                 <img 
+                   src={URL.createObjectURL(file)} 
+                   alt={`Attachment ${index + 1}`} 
+                   className="w-full h-full object-cover" 
+                 />
+                 <button
+                   type="button"
+                   onClick={() => removeImage(index)}
+                   className="absolute top-1 right-1 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                 >
+                   <X className="h-3 w-3" />
+                 </button>
+               </div>
+             ))}
+             
+             {imageFiles.length < 3 && (
+               <ImageCapture 
+                 id="entity-image-upload"
+                 label=""
+                 onImageCaptured={handleImageCaptured}
+                 renderTrigger={(open) => (
+                   <button
+                     type="button"
+                     onClick={open}
+                     className="aspect-square rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 hover:bg-muted/50 transition-all text-muted-foreground hover:text-primary"
+                   >
+                     <ImageIcon className="h-6 w-6" />
+                     <span className="text-[10px] font-bold">إضافة صورة</span>
+                   </button>
+                 )}
+               />
+             )}
+           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -172,9 +271,17 @@ export const EntityForm = ({ onSubmit, onClose, entity, onImagesChange }: Entity
       <div className="flex flex-col sm:flex-row gap-4 pt-8 border-t border-border">
         <Button 
           type="submit" 
-          className="flex-3 font-black text-2xl h-16 rounded-3xl shadow-2xl transition-all scale-100 hover:scale-[1.02] active:scale-[0.98] bg-purple-600 hover:bg-purple-700 shadow-purple-500/30"
+          disabled={isSubmitting}
+          className="flex-3 font-black text-2xl h-16 rounded-3xl shadow-2xl transition-all scale-100 hover:scale-[1.02] active:scale-[0.98] bg-purple-600 hover:bg-purple-700 shadow-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {entity ? 'تحديث السجل المالي' : 'تأسيس حساب مورد جديد'}
+          {isSubmitting ? (
+            <div className="flex items-center gap-2">
+              <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <span>جاري الحفظ...</span>
+            </div>
+          ) : (
+            entity ? 'تحديث السجل المالي' : 'تأسيس حساب مورد جديد'
+          )}
         </Button>
         <Button 
           type="button" 

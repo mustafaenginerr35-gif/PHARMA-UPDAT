@@ -281,7 +281,7 @@ export function ExcelImportWizard({
                         !!updated.invoiceNumber && 
                         updated.amount > 0 && 
                         !!updated.date && 
-                        !isNaN(new Date(updated.date).getTime());
+                        !isNaN(toValidDate(updated.date).getTime());
       
       return updated;
     }));
@@ -306,6 +306,7 @@ export function ExcelImportWizard({
   }, [mappings]);
 
   const handleImport = async () => {
+    console.trace("INVOICE EXCEL IMPORT CALLED");
     const validData = editableData.filter(d => d.isValid);
     if (validData.length === 0) {
       toast.error('لا توجد فواتير صالحة للاستيراد');
@@ -318,7 +319,7 @@ export function ExcelImportWizard({
     let failedInvoices = 0;
 
     try {
-      const targetBranchId = currentBranchId || (entities.length > 0 ? entities[0].branchId : 'main');
+      const targetBranchId = currentBranchId || (entities.length > 0 ? entities.find(e => e.id === validData[0].entityId)?.branchId : 'main');
       const userId = appUser?.userId || 'system';
       
       const localBalances: Record<string, number> = {};
@@ -334,22 +335,12 @@ export function ExcelImportWizard({
 
           const currentEntityBalance = localBalances[entity.id!] || 0;
           
-          // 1. Double check for duplicates in database before adding
-          const existingInvoices = await firebaseService.queryDocuments('ledgerEntries', [
-            { field: 'invoiceNumber', operator: '==', value: String(data.invoiceNumber) },
-            { field: 'accountId', operator: '==', value: entity.id! }
-          ]);
-
-          if (existingInvoices.length > 0) {
-            skippedDuplicates++;
-            continue;
-          }
-
           const newEntry: Omit<LedgerEntry, 'id'> = {
             accountId: entity.id!,
             accountName: entity.name,
             accountType: entity.type,
             date: data.date,
+            invoiceDate: data.date,
             operationType: 'invoice',
             purchaseType: data.purchaseType as any,
             invoiceNumber: String(data.invoiceNumber),
@@ -362,67 +353,79 @@ export function ExcelImportWizard({
             paidAmount: Number(data.paidAmount) || 0,
             remainingAmount: Number(data.remainingAmount) || 0,
             paymentStatus: data.paymentStatus as any,
-            balanceAfterOperation: currentEntityBalance + data.remainingAmount,
             ownerId: userId,
             branchId: targetBranchId as any,
             notes: data.notes,
             images: data.images,
             source: "excel_import",
+            isCommitted: true,
             isHistorical: true,
             createdAt: new Date(),
             updatedAt: new Date()
           } as any;
 
-          const addedId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
+          // Use unified saveInvoice for deduplication
+          const result = await firebaseService.saveInvoice(newEntry);
+          const addedId = result?.id;
+          const isUpdate = result?.isUpdate;
+          const blocked = (result as any)?.blocked;
           
-          if (addedId) {
+          if (addedId && addedId !== 'blocked') {
             const newTx: Omit<Transaction, 'id'> = {
               type: 'invoice',
               category: 'invoice',
               amount: data.amount,
               date: data.date,
+              invoiceDate: data.date,
               description: `استيراد Excel: ${entity.name} - ${data.invoiceNumber}`,
               entityId: entity.id!,
               entityName: entity.name,
               invoiceNumber: String(data.invoiceNumber),
               branchId: targetBranchId as any,
-              createdBy: userId,
               ownerId: userId,
               source: "excel_import",
+              sourceId: addedId,
+              isCommitted: true,
               isHistorical: true,
               createdAt: new Date(),
               updatedAt: new Date()
             } as any;
             
-            await firebaseService.addDocument('transactions', newTx as Transaction);
+            await firebaseService.syncTransaction(newTx);
 
-            const newBalanceValue = currentEntityBalance + data.remainingAmount;
-            await firebaseService.updateDocument('entities', entity.id!, {
-              balance: newBalanceValue,
-              totalInvoices: (entity.totalInvoices || 0) + 1,
-              updatedAt: new Date()
-            } as any);
-
-            localBalances[entity.id!] = newBalanceValue;
-
-            if (data.dueDate && data.remainingAmount > 0) {
-              await firebaseService.addDocument('deadlines', {
-                accountId: entity.id!,
-                accountName: entity.name,
-                invoiceId: addedId,
-                invoiceNumber: String(data.invoiceNumber),
-                amount: data.amount,
-                requiredPayment: data.remainingAmount,
-                dueDate: data.dueDate,
-                status: 'pending',
-                ownerId: userId,
-                branchId: targetBranchId as any,
-                createdAt: new Date(),
+            // Update entity ONLY if new and not blocked
+            if (!isUpdate && !blocked) {
+              const newBalanceValue = currentEntityBalance + data.remainingAmount;
+              await firebaseService.updateDocument('entities', entity.id!, {
+                balance: newBalanceValue,
+                totalInvoices: (entity.totalInvoices || 0) + 1,
                 updatedAt: new Date()
               } as any);
-            }
 
-            importedInvoices++;
+              localBalances[entity.id!] = newBalanceValue;
+
+              if (data.dueDate && data.remainingAmount > 0) {
+                await firebaseService.addDocument('deadlines', {
+                  accountId: entity.id!,
+                  accountName: entity.name,
+                  invoiceId: addedId,
+                  invoiceNumber: String(data.invoiceNumber),
+                  amount: data.amount,
+                  requiredPayment: data.remainingAmount,
+                  dueDate: data.dueDate,
+                  status: 'pending',
+                  ownerId: userId,
+                  branchId: targetBranchId as any,
+                  createdAt: new Date(),
+                  updatedAt: new Date()
+                } as any);
+              }
+              importedInvoices++;
+            } else {
+              skippedDuplicates++;
+            }
+          } else if (blocked) {
+             skippedDuplicates++;
           } else {
             failedInvoices++;
           }
@@ -432,7 +435,7 @@ export function ExcelImportWizard({
         }
       }
 
-      toast.success(`تم الاستيراد بنجاح: ${importedInvoices} فاتورة (تخطي ${skippedDuplicates} مكررة)`);
+      toast.success(`تم الاستيراد بنجاح: ${importedInvoices} فاتورة (تخطي/تحديث ${skippedDuplicates} مكررة)`);
       onImportComplete?.();
       onOpenChange(false);
       reset();
@@ -641,7 +644,7 @@ export function ExcelImportWizard({
                              type="date"
                              value={row.date instanceof Date && !isNaN(row.date.getTime()) ? row.date.toISOString().split('T')[0] : ''}
                              onChange={(e) => {
-                               const newDate = e.target.value ? new Date(e.target.value) : undefined;
+                               const newDate = e.target.value ? toValidDate(e.target.value) : undefined;
                                updateRow(row.id, { date: newDate });
                              }}
                              className={`bg-transparent border-none h-8 text-xs focus:ring-0 ${!row.date ? 'text-red-500 font-bold' : ''}`}
@@ -694,7 +697,7 @@ export function ExcelImportWizard({
                              type="date"
                              value={row.dueDate instanceof Date && !isNaN(row.dueDate.getTime()) ? row.dueDate.toISOString().split('T')[0] : ''}
                              onChange={(e) => {
-                               const newDate = e.target.value ? new Date(e.target.value) : undefined;
+                               const newDate = e.target.value ? toValidDate(e.target.value) : undefined;
                                updateRow(row.id, { dueDate: newDate });
                              }}
                              className="bg-transparent border-none h-8 text-xs focus:ring-0"
@@ -764,11 +767,11 @@ export function ExcelImportWizard({
               </div>
 
               <DialogFooter className="gap-2 pt-4 border-t mt-auto">
-                <Button size="lg" onClick={handleImport} disabled={isLoading || summary.validCount === 0} className="h-14 px-12 rounded-xl font-black text-lg shadow-xl shadow-primary/20">
+                <Button type="button" size="lg" onClick={handleImport} disabled={isLoading || summary.validCount === 0} className="h-14 px-12 rounded-xl font-black text-lg shadow-xl shadow-primary/20">
                   {isLoading ? <Loader2 className="w-5 h-5 animate-spin ml-2" /> : <CheckCircle2 className="w-5 h-5 ml-2" />}
                   اعتماد القوائم المستوردة ({summary.validCount})
                 </Button>
-                <Button size="lg" variant="outline" onClick={() => setStep(2)} disabled={isLoading} className="h-14 px-8 rounded-xl font-bold">
+                <Button type="button" size="lg" variant="outline" onClick={() => setStep(2)} disabled={isLoading} className="h-14 px-8 rounded-xl font-bold">
                   تعديل مطابقة الأعمدة
                 </Button>
               </DialogFooter>

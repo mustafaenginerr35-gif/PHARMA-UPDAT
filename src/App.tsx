@@ -1,4 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { calculateReportsFromRecords } from './services/reportCalculator';
+import { ReportsSystem } from './components/ReportsSystem';
+import { FinancialAggregationService } from './services/FinancialAggregationService';
 import { 
   LayoutDashboard, 
   Receipt, 
@@ -6,6 +9,7 @@ import {
   History, 
   Bell, 
   Search, 
+  ShieldCheck,
   Plus, 
   ArrowUpCircle, 
   ArrowDownCircle, 
@@ -26,12 +30,14 @@ import {
   AlertCircle,
   AlertTriangle,
   Clock,
+  Zap,
+  XCircle,
   RefreshCcw,
   ChevronRight,
   ChevronLeft,
   ChevronDown,
-  ShieldCheck,
   Calendar,
+  RefreshCw,
   FileText,
   CreditCard,
   DollarSign,
@@ -47,6 +53,7 @@ import {
   FileUp,
   Package,
   PackageSearch,
+  Store,
   Info,
   Sun,
   Moon,
@@ -65,12 +72,18 @@ import {
   MoreHorizontal,
   PlusCircle,
   Bug,
+  Activity,
   Pencil,
   Table as TableIcon,
   Database,
-  Layers
+  Layers,
+  CalendarClock
 } from 'lucide-react';
 import { SupplierHistoricalImportWizard } from './components/SupplierHistoricalImportWizard';
+import { LoanForm } from './components/LoanForm';
+import { PaymentDeadlinesPage } from './components/PaymentDeadlinesPage';
+import { PaymentDeadlineForm } from './components/PaymentDeadlineForm';
+import { ExecutePaymentModal } from './components/ExecutePaymentModal';
 
 import {
   Card,
@@ -116,7 +129,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { 
-  format, 
   startOfDay, 
   endOfDay, 
   startOfWeek, 
@@ -127,11 +139,12 @@ import {
   endOfYear, 
   subMonths, 
   isWithinInterval, 
-  subDays 
+  subDays,
+  isValid 
 } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { useFirebaseQuery } from './hooks/useFirebaseQuery';
-import { firebaseService } from './services/firebaseService';
+import { firebaseService, getEffectiveUserInfo } from './services/firebaseService';
 import { auth, db } from './lib/firebase';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, signInAnonymously } from 'firebase/auth';
 import { query, where, orderBy } from 'firebase/firestore';
@@ -157,7 +170,9 @@ import {
   type MedicineRequest,
   type ExpiredDamagedLoss,
   type EntityActivity,
-  type OpeningCash
+  type OpeningCash,
+  type SupplierOpeningBalance,
+  type Loan
 } from './db';
 import { 
   AreaChart, 
@@ -185,8 +200,8 @@ import { EntityForm } from './components/EntityForm';
 import { SupplierAccountPage } from './components/SupplierAccountPage';
 import { BonusForm } from './components/BonusForm';
 import { InvoiceDetailsPage } from './components/InvoiceDetailsPage';
-import { FinancialPeriodReport } from './components/FinancialPeriodReport';
 import { EmployeesPage } from './components/EmployeesPage';
+import { DeadlineModal } from './components/DeadlineModal';
 import { EmployeeForm } from './components/EmployeeForm';
 import { AttendanceForm } from './components/AttendanceForm';
 import { BranchesPage } from './components/BranchesPage';
@@ -197,7 +212,8 @@ import { ExcelImportWizard } from './components/ExcelImportWizard';
 import { MultiInvoiceEntry } from './components/MultiInvoiceEntry';
 import { MultiPaymentEntry } from './components/MultiPaymentEntry';
 import { DataPersistenceService } from './services/dataPersistenceService';
-import { formatIQD, formatNumberWithCommas, parseFormattedNumber, safeFormatDate, toValidDate } from './lib/formatters';
+import { formatIQD, formatNumberWithCommas, parseFormattedNumber, safeFormatDate, toValidDate, getSupplierTypeLabel } from './lib/formatters';
+import { ensureArray } from './lib/arrayUtils';
 import { CurrencyInput } from '@/components/ui/CurrencyInput';
 import { LossesPage } from './components/LossesPage';
 import { LossForm } from './components/LossForm';
@@ -457,132 +473,6 @@ const AddOpeningCashDialog = ({
   );
 };
 
-const DiagnosisPage = ({ 
-  ledger, 
-  transactions, 
-  entities, 
-  onMigrate,
-  stats
-}: { 
-  ledger: any[]; 
-  transactions: any[]; 
-  entities: any[]; 
-  onMigrate: () => Promise<void>;
-  stats: any;
-}) => {
-  const [isMigrating, setIsMigrating] = React.useState(false);
-
-  const handleMigrate = async () => {
-    setIsMigrating(true);
-    try {
-      await onMigrate();
-      toast.success('تمت عملية المزامنة بنجاح');
-    } catch (e) {
-      toast.error('فشلت عملية المزامنة');
-    } finally {
-      setIsMigrating(false);
-    }
-  };
-
-  const revenueCount = ledger.filter(e => e.sourceType === 'revenue' && !e.isDeleted).length;
-  const expenseCount = ledger.filter(e => e.sourceType === 'expense' && !e.isDeleted).length;
-  const salaryCount = ledger.filter(e => e.sourceType === 'employee_salary' && !e.isDeleted).length;
-  const invoicesCount = ledger.filter(e => e.sourceType === 'invoice' && !e.isDeleted).length;
-  const paymentsCount = ledger.filter(e => e.sourceType === 'payment' && !e.isDeleted).length;
-
-  return (
-    <div className="space-y-8 animate-in fade-in duration-700">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-        <div>
-          <h2 className="text-3xl font-black text-foreground mb-2">تشخيص الحسابات والنظام</h2>
-          <p className="text-muted-foreground font-bold tracking-tight">أدوات فحص سلامة البيانات والمزامنة مع الأستاذ العام الموحد</p>
-        </div>
-        <Button 
-          onClick={handleMigrate} 
-          disabled={isMigrating}
-          className="bg-primary hover:bg-primary/90 text-white font-black h-14 px-8 rounded-2xl shadow-xl shadow-primary/20 gap-3"
-        >
-          {isMigrating ? <RefreshCcw className="h-5 w-5 animate-spin" /> : <Database className="h-5 w-5" />}
-          مزامنة كافة السجلات مع الأستاذ العام
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          { label: 'سجلات الأستاذ العام', value: ledger.length, color: 'text-primary' },
-          { label: 'سجلات الإيرادات', value: revenueCount, color: 'text-emerald-500' },
-          { label: 'سجلات المصاريف', value: expenseCount, color: 'text-rose-500' },
-          { label: 'سجلات الرواتب', value: salaryCount, color: 'text-blue-500' },
-          { label: 'سجلات الفواتير', value: invoicesCount, color: 'text-amber-500' },
-          { label: 'سجلات المدفوعات', value: paymentsCount, color: 'text-purple-500' },
-          { label: 'موردون نشطون', value: entities.length, color: 'text-foreground' },
-          { label: 'العمليات المحذوفة', value: ledger.filter(e => e.isDeleted).length, color: 'text-muted-foreground' }
-        ].map((item, idx) => (
-          <Card key={idx} className="bg-card border-border p-6 rounded-2xl flex flex-col items-center justify-center text-center shadow-sm">
-            <div className={`text-4xl font-black mb-2 font-mono ${item.color}`}>{item.value}</div>
-            <div className="text-xs font-black text-muted-foreground uppercase tracking-widest">{item.label}</div>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="bg-card border-border rounded-2xl overflow-hidden">
-        <CardHeader className="bg-muted/20 border-b border-border p-8">
-          <CardTitle className="text-xl font-black">حالة الأستاذ العام الموحد</CardTitle>
-          <CardDescription className="text-muted-foreground font-bold">ملخص سلامة الحسابات وتطابق الأرقام</CardDescription>
-        </CardHeader>
-        <CardContent className="p-8 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="space-y-4">
-              <h3 className="font-black text-foreground border-r-4 border-primary pr-4">فحص التوازن المالي</h3>
-              <div className="space-y-3">
-                <div className="flex justify-between p-4 bg-muted/30 rounded-xl">
-                  <span className="font-bold text-muted-foreground">رصيد الصندوق الحالي:</span>
-                  <span className="font-black font-mono text-emerald-600">{formatIQD(stats.cashBalance)}</span>
-                </div>
-                <div className="flex justify-between p-4 bg-muted/30 rounded-xl">
-                  <span className="font-bold text-muted-foreground">إجمالي ديون الموردين:</span>
-                  <span className="font-black font-mono text-rose-500">{formatIQD(stats.supplierDues)}</span>
-                </div>
-                <div className="flex justify-between p-4 bg-muted/30 rounded-xl">
-                  <span className="font-bold text-muted-foreground">الرصيد النقدي الافتتاحي:</span>
-                  <span className="font-black font-mono text-blue-500">{formatIQD(stats.openingCashBalance)}</span>
-                </div>
-              </div>
-            </div>
-            
-            <div className="space-y-4">
-              <h3 className="font-black text-foreground border-r-4 border-amber-500 pr-4">آخر العمليات</h3>
-              <div className="space-y-2">
-                {ledger.slice(0, 5).map((entry, idx) => (
-                  <div key={idx} className="flex items-center gap-3 p-3 bg-muted/20 rounded-xl border border-border text-xs">
-                    <span className="font-mono text-muted-foreground font-bold">{safeFormatDate(entry.date, 'yyyy/MM/dd')}</span>
-                    <span className="font-black text-foreground flex-1 truncate">{entry.description}</span>
-                    <span className={`font-black font-mono ${entry.credit > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {entry.credit > 0 ? '+' : '-'}{formatNumberWithCommas(entry.amount)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="p-6 bg-primary/5 border border-primary/10 rounded-2xl">
-            <div className="flex items-start gap-4">
-              <AlertCircle className="h-6 w-6 text-primary shrink-0 mt-1" />
-              <div>
-                <h4 className="font-black text-primary mb-1">ملاحظات حول المزامنة</h4>
-                <p className="text-sm font-bold text-muted-foreground leading-relaxed">
-                  عند الضغط على "مزامنة كافة السجلات"، سيقوم النظام بفحص جميع الفواتير والمصاريف والإيرادات والرواتب، والتأكد من وجود سجل مطابق لها في الأستاذ العام. 
-                  هذا الإجراء آمن ولا يحذف البيانات، بل يقوم فقط بتحديث الأستاذ العام لضمان دقة التقارير.
-                </p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
 const DeleteInvoiceConfirmDialog = ({ 
   isOpen, 
   onOpenChange, 
@@ -707,20 +597,16 @@ export default function App() {
   // States from hooks.txt
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('pharma-active-tab') || 'finance');
+  const [showFinancialResetModal, setShowFinancialResetModal] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [isFinancialResetting, setIsFinancialResetting] = useState(false);
   const [isHistoricalWizardOpen, setIsHistoricalWizardOpen] = useState(false);
-  
-  // Firebase connection check
-  useEffect(() => {
-    const testFirebase = async () => {
-      try {
-        console.log("Firebase initialized and ready");
-      } catch (err) {
-        console.error("Firebase connection failed:", err);
-        toast.error('حدث خطأ في الاتصال بالسيرفر السحابي');
-      }
-    };
-    testFirebase();
-  }, []);
+  const [isResetting, setIsResetting] = useState(false);
+  const [isDeadlineModalOpen, setIsDeadlineModalOpen] = useState(false);
+  const [deadlineTarget, setDeadlineTarget] = useState<{ id: string; number: string; amount: number; accountId: string; accountName: string } | null>(null);
+  const [currentDeadline, setCurrentDeadline] = useState<Deadline | null>(null);
+  const [isExecutePaymentOpen, setIsExecutePaymentOpen] = useState(false);
+  const [selectedDeadlineForPayment, setSelectedDeadlineForPayment] = useState<Deadline | null>(null);
 
   useEffect(() => {
     localStorage.setItem('pharma-active-tab', activeTab);
@@ -833,36 +719,45 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [globalSearch, setGlobalSearch] = useState('');
 
-  const branchesQuery = useMemo(() => [], []);
-  const transactionsQuery = useMemo(() => [], []);
-  const entitiesQuery = useMemo(() => [], []);
-  const customerDebtsQuery = useMemo(() => [], []);
-  const notificationsQuery = useMemo(() => [], []);
-  const bonusesQuery = useMemo(() => [], []);
-  const employeesQuery = useMemo(() => [], []);
-  const attendanceQuery = useMemo(() => [], []);
-  const ledgerEntriesQuery = useMemo(() => [], []);
-  const historicalQuery = useMemo(() => [], []);
-  const entityActivitiesQuery = useMemo(() => [], []);
+  // Report Details State
+  const [isReportDetailOpen, setIsReportDetailOpen] = useState(false);
+  const [reportDetailTitle, setReportDetailTitle] = useState('');
+  const [reportDetailData, setReportDetailData] = useState<any[]>([]);
+
+  // Queries
+  const ownerQuery = useMemo(() => [where('ownerId', '==', user?.uid || 'demo-user')], [user?.uid]);
+  const branchesQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const transactionsQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const entitiesQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const customerDebtsQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const notificationsQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const bonusesQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const employeesQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const attendanceQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const ledgerEntriesQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const historicalQuery = useMemo(() => ownerQuery, [ownerQuery]);
+  const entityActivitiesQuery = useMemo(() => ownerQuery, [ownerQuery]);
 
   // Firebase Real-time Queries
-  const { data: expiredDamagedLosses = [] } = useFirebaseQuery<ExpiredDamagedLoss>('expiredDamagedLosses');
-  const { data: rawBranches = [] } = useFirebaseQuery<PharmacyBranch>('branches', branchesQuery);
-  const { data: rawTransactions = [] } = useFirebaseQuery<Transaction>('transactions', transactionsQuery);
-  const { data: rawEntities = [] } = useFirebaseQuery<Entity>('entities', entitiesQuery);
-  const { data: rawCustomerDebts = [] } = useFirebaseQuery<CustomerDebt>('customerDebts', customerDebtsQuery);
-  const { data: rawNotifications = [] } = useFirebaseQuery<Notification>('notifications', notificationsQuery);
-  const { data: rawBonuses = [] } = useFirebaseQuery<Bonus>('bonuses', bonusesQuery);
-  const { data: rawEmployees = [] } = useFirebaseQuery<Employee>('employees', employeesQuery);
-  const { data: rawEmployeeAttendance = [] } = useFirebaseQuery<EmployeeAttendance>('employeeAttendance', attendanceQuery);
-  const { data: rawAllLedgerEntries = [] } = useFirebaseQuery<LedgerEntry>('ledgerEntries', ledgerEntriesQuery);
-  const { data: rawHistoricalRecords = [] } = useFirebaseQuery<HistoricalRecord>('historicalRecords', historicalQuery);
-  const { data: rawEntityActivities = [] } = useFirebaseQuery<EntityActivity>('entityActivities', entityActivitiesQuery);
-  const { data: rawOpeningCash = [] } = useFirebaseQuery<OpeningCash>('openingCash');
-  const { data: deadlines = [] } = useFirebaseQuery<Deadline>('deadlines');
+  const { data: expiredDamagedLosses = [], loading: loadingLosses } = useFirebaseQuery<ExpiredDamagedLoss>('expiredDamagedLosses', ownerQuery);
+  const { data: rawBranches = [], loading: loadingBranches } = useFirebaseQuery<PharmacyBranch>('branches', branchesQuery);
+  const { data: rawTransactions = [], loading: loadingTransactions } = useFirebaseQuery<Transaction>('transactions', transactionsQuery);
+  const { data: rawEntities = [], loading: loadingEntities } = useFirebaseQuery<Entity>('entities', entitiesQuery);
+  const { data: rawCustomerDebts = [], loading: loadingDebts } = useFirebaseQuery<CustomerDebt>('customerDebts', customerDebtsQuery);
+  const { data: rawNotifications = [], loading: loadingNotifications } = useFirebaseQuery<Notification>('notifications', notificationsQuery);
+  const { data: rawBonuses = [], loading: loadingBonuses } = useFirebaseQuery<Bonus>('bonuses', bonusesQuery);
+  const { data: rawEmployees = [], loading: loadingEmployees } = useFirebaseQuery<Employee>('employees', employeesQuery);
+  const { data: rawEmployeeAttendance = [], loading: loadingAttendance } = useFirebaseQuery<EmployeeAttendance>('employeeAttendance', attendanceQuery);
+  const { data: rawAllLedgerEntries = [], loading: loadingLedger } = useFirebaseQuery<LedgerEntry>('ledgerEntries', ledgerEntriesQuery);
+  const { data: rawHistoricalRecords = [], loading: loadingHistorical } = useFirebaseQuery<HistoricalRecord>('historicalRecords', historicalQuery);
+  const { data: rawEntityActivities = [], loading: loadingActivities } = useFirebaseQuery<EntityActivity>('entityActivities', entityActivitiesQuery);
+  const { data: rawOpeningCash = [], loading: loadingOpeningCash } = useFirebaseQuery<OpeningCash>('openingCash', ownerQuery);
+  const { data: rawLoans = [], loading: loadingLoans } = useFirebaseQuery<Loan>('loans', ownerQuery);
+  const { data: rawSupplierOpeningBalances = [], loading: loadingSupplierOpening } = useFirebaseQuery<SupplierOpeningBalance>('supplierOpeningBalances', ownerQuery);
+  const { data: deadlines = [], loading: loadingDeadlines } = useFirebaseQuery<Deadline>('deadlines', ownerQuery);
   const { data: activationCodes = [] } = useFirebaseQuery<ActivationCode>('activationCodes');
-  const { data: activationRequests = [] } = useFirebaseQuery<ActivationRequest>('activationRequests');
-  const { data: recoveryRequests = [] } = useFirebaseQuery<RecoveryRequest>('recoveryRequests');
+  const { data: activationRequests = [] } = useFirebaseQuery<ActivationRequest>('activationRequests', ownerQuery);
+  const { data: recoveryRequests = [] } = useFirebaseQuery<RecoveryRequest>('recoveryRequests', ownerQuery);
   
   const announcementsConstraints = useMemo(() => [where('isActive', '==', 1)], []);
   const readAnnouncementsConstraints = useMemo(() => [where('userId', '==', user?.uid || 'none')], [user?.uid]);
@@ -878,7 +773,7 @@ export default function App() {
     // 2. If there are duplicates by NAME that are both "Main Branch", we should probably only show one.
     // However, unique ID is the primary key. If the user has two "Main Branch" with different IDs, they will show.
     // The previous logic fixed NEW creations, but for cleanup:
-    return [...uniqueById].sort((a, b) => {
+    return [...uniqueById].sort((a: any, b: any) => {
       // Prioritize isMain branches
       if (a.isMain && !b.isMain) return -1;
       if (!a.isMain && b.isMain) return 1;
@@ -892,17 +787,80 @@ export default function App() {
   }, [rawBranches]);
 
   const transactions = useMemo(() => {
-    return [...rawTransactions]
-      .filter(tx => !tx.isDeleted && !tx.deletedAt)
+    // Collect from both sources for backward compatibility
+    const all = [...rawTransactions.map(tx => ({ ...tx, _col: 'transactions' })), 
+                 ...rawAllLedgerEntries.map(le => ({
+      ...le,
+      type: le.operationType || le.type,
+      amount: le.amount || (le.debit > 0 ? le.debit : le.credit),
+      sourceId: le.id,
+      _col: 'ledgerEntries'
+    }))];
+
+    const uniqueMap = new Map();
+    all.forEach(tx => {
+      if (tx.isDeleted || tx.deletedAt) return;
+      
+      // Use unified key strategy for correct deduplication
+      const key = tx.sourceId || tx.id;
+      
+      if (uniqueMap.has(key)) {
+        const existing = uniqueMap.get(key);
+        // Prefer newer or ledger entries (as they usually have more data)
+        const isBetter = tx._col === 'ledgerEntries' || 
+                        ((tx as any).updatedAt >= (existing as any).updatedAt);
+        if (isBetter) {
+          uniqueMap.set(key, tx);
+        }
+        return;
+      }
+      
+      uniqueMap.set(key, tx);
+    });
+
+    return Array.from(uniqueMap.values())
       .sort((a, b) => {
-        const da = toValidDate(a.date || a.createdAt || Date.now());
-        const db = toValidDate(b.date || b.createdAt || Date.now());
+        const da = toValidDate((a as any).date || (a as any).createdAt || Date.now());
+        const db = toValidDate((b as any).date || (b as any).createdAt || Date.now());
         const ta = isNaN(da.getTime()) ? 0 : da.getTime();
         const tb = isNaN(db.getTime()) ? 0 : db.getTime();
         return tb - ta;
       });
-  }, [rawTransactions]);
-  const entities = useMemo(() => [...rawEntities].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')), [rawEntities]);
+  }, [rawTransactions, rawAllLedgerEntries]);
+  const entities = useMemo(() => {
+    const activeLedger = rawAllLedgerEntries.filter(e => !e.isDeleted);
+    return [...rawEntities].map(entity => {
+      // Calculate real balance from ledger entries
+      const entityEntries = activeLedger.filter(e => e.accountId === entity.id || e.entityId === entity.id);
+      const totalDebits = entityEntries.reduce((sum, e) => {
+        const val = Number(e.debit);
+        if (!isNaN(val) && val > 0) return sum + val;
+        // Fallback for invoices that didn't have debit set
+        if ((e.operationType === 'invoice' || e.type === 'purchase_invoice' || e.sourceType === 'invoice') && !e.credit) {
+           return sum + Number(e.netAmount || e.amount || 0);
+        }
+        return sum;
+      }, 0);
+      
+      const totalCredits = entityEntries.reduce((sum, e) => {
+        const val = Number(e.credit);
+        if (!isNaN(val) && val > 0) return sum + val;
+        // Fallback for payments that didn't have credit set
+        if (e.operationType === 'payment' || e.sourceType === 'payment') {
+           return sum + Number(e.amount || 0);
+        }
+        return sum;
+      }, 0);
+      
+      // balance = debits - credits
+      const calculatedBalance = totalDebits - totalCredits;
+      
+      return {
+        ...entity,
+        balance: calculatedBalance
+      };
+    }).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
+  }, [rawEntities, rawAllLedgerEntries]);
   const entityActivities = useMemo(() => {
     return [...rawEntityActivities].sort((a, b) => {
       const da = toValidDate(a.createdAt || Date.now());
@@ -910,6 +868,16 @@ export default function App() {
       return db.getTime() - da.getTime();
     });
   }, [rawEntityActivities]);
+
+  const loans = useMemo(() => {
+    return [...rawLoans]
+      .filter(l => !l.deletedAt && (!currentBranchId || currentBranchId === 'all' || l.branchId === currentBranchId))
+      .sort((a, b) => {
+        const da = toValidDate(a.date || a.createdAt);
+        const db = toValidDate(b.date || b.createdAt);
+        return db.getTime() - da.getTime();
+      });
+  }, [rawLoans, currentBranchId]);
 
   const filteredEntities = useMemo(() => {
     let filtered = [...entities];
@@ -926,7 +894,11 @@ export default function App() {
     // Search Filter
     if (entitySearch) {
       const s = entitySearch.toLowerCase();
-      filtered = filtered.filter(e => e.name.toLowerCase().includes(s) || (e.phone && e.phone.toLowerCase().includes(s)));
+      filtered = filtered.filter(e => 
+        e.name.toLowerCase().includes(s) || 
+        (e.phone && e.phone.toLowerCase().includes(s)) ||
+        getSupplierTypeLabel(e.type).toLowerCase().includes(s)
+      );
     }
 
     return filtered;
@@ -1080,27 +1052,35 @@ export default function App() {
     };
   }, [appUser]);
 
+  useEffect(() => {
+    const testFirebase = async () => {
+      try {
+        console.log("Firebase initialized and ready");
+      } catch (err) {
+        console.error("Firebase connection failed:", err);
+      }
+    };
+    testFirebase();
+  }, []);
+
   const navItems = [
     { id: 'finance', label: 'الرئيسية', icon: LayoutDashboard },
-    { id: 'daily-entry', label: 'الإدخال اليومي', icon: PlusCircle },
     { id: 'revenues', label: 'الإيرادات', icon: CreditCard },
     { id: 'entities', label: 'الموردون والمذاخر', icon: Building2 },
     { id: 'employees', label: 'الموظفون', icon: Users },
     { id: 'invoices', label: 'الفواتير', icon: FileText },
+    { id: 'payment-deadlines', label: 'مواعيد التسديد', icon: CalendarClock },
     { id: 'payments', label: 'التسديدات', icon: Receipt },
     { id: 'losses', label: 'التالف والإكسباير', icon: AlertTriangle },
     { id: 'transactions', label: 'المصاريف العامة', icon: ArrowUpCircle },
     { id: 'notifications', label: 'الإشعارات', icon: Bell, badge: (notifications || []).filter(n => !n.read).length },
     { id: 'reports', label: 'التقارير', icon: PieChart },
-    { id: 'diagnosis', label: 'تشخيص الحسابات', icon: ShieldCheck },
     { id: 'medicine-requests', label: 'طلبات الأدوية', icon: PackageSearch },
     { id: 'branches', label: 'إدارة الصيدليات', icon: Building2 },
-    { id: 'historical', label: 'الأرصدة والترحيل التاريخي', icon: History },
     { id: 'settings', label: 'الإعدادات', icon: Settings },
   ].filter(item => {
     if (item.id === 'branches') return userPermissions.canManageBranches;
     if (item.id === 'reports') return userPermissions.canViewReports;
-    if (item.id === 'diagnosis') return appUser?.role === 'admin';
     return true;
   });
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
@@ -1151,13 +1131,16 @@ export default function App() {
   
   const [isAddRevenueOpen, setIsAddRevenueOpen] = useState(false);
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
+  const [isAddLoanOpen, setIsAddLoanOpen] = useState(false);
   const [isAddOpeningCashOpen, setIsAddOpeningCashOpen] = useState(false);
   const [isAddBonusOpen, setIsAddBonusOpen] = useState(false);
   const [isAddLossOpen, setIsAddLossOpen] = useState(false);
+  const [loanImageFiles, setLoanImageFiles] = useState<File[]>([]);
   const [incomeType, setIncomeType] = useState<'cash' | 'credit'>('cash');
   const [expenseType, setExpenseType] = useState<'fixed_expense' | 'variable_expense' | 'spoiled_expiration'>('fixed_expense');
   const [spoiledType, setSpoiledType] = useState<'linked' | 'unlinked'>('unlinked');
   const [isAddEntityOpen, setIsAddEntityOpen] = useState(false);
+  const [isAddingFromInvoice, setIsAddingFromInvoice] = useState(false);
   const [isAddDeadlineOpen, setIsAddDeadlineOpen] = useState(false);
   const [deadlineFormEntityId, setDeadlineFormEntityId] = useState<string>('');
   const [dashboardPeriod, setDashboardPeriod] = useState<'day' | 'week' | 'month' | 'year' | 'custom'>('month');
@@ -1165,6 +1148,12 @@ export default function App() {
     start: startOfMonth(new Date()),
     end: endOfMonth(new Date())
   });
+
+  useEffect(() => {
+    if (!isAddEntityOpen && isAddingFromInvoice) {
+      setIsAddingFromInvoice(false);
+    }
+  }, [isAddEntityOpen, isAddingFromInvoice]);
 
   const [saleAmount, setSaleAmount] = useState<string>('');
   const [saleNetProfit, setSaleNetProfit] = useState<string>('');
@@ -1181,7 +1170,7 @@ export default function App() {
   const [payDiscountPercentage, setPayDiscountPercentage] = useState<number>(0);
   const [payRefund, setPayRefund] = useState<string>('0');
   const [payLinkedInvoice, setPayLinkedInvoice] = useState<string>('');
-  const [paySource, setPaySource] = useState<'invoice' | 'opening_balance'>('invoice');
+  const [paySource, setPaySource] = useState<'general' | 'invoice' | 'opening_balance'>('general');
 
   const [deadlineAmount, setDeadlineAmount] = useState<string>('');
   const [deadlineDiscount, setDeadlineDiscount] = useState<string>('0');
@@ -1206,7 +1195,32 @@ export default function App() {
   const [authAccessCode, setAuthAccessCode] = useState('');
   const [authStep, setAuthStep] = useState<'register' | 'waiting' | 'setup-password' | 'login-password' | 'forgot-password' | 'security-reset' | 'recovery-request' | 'access-code' | 'authenticated'>('access-code');
 
+  // One-time Admin Reset Trigger
+  useEffect(() => {
+    const hasReset = localStorage.getItem('pharma-one-time-reset-v2');
+    const { authenticated, uid } = getEffectiveUserInfo();
+    
+    if (!hasReset && authenticated) {
+      console.log(`[Reset] One-time reset v2 triggered for user: ${uid}`);
+      const performReset = async () => {
+        try {
+          const success = await DataPersistenceService.resetTestData();
+          if (success) {
+            localStorage.setItem('pharma-one-time-reset-v2', 'true');
+            toast.success("تم تصفير البيانات بنجاح وبدء اختبار جديد...");
+            setTimeout(() => window.location.reload(), 2000);
+          }
+        } catch (err) {
+          console.error("Reset trigger failed:", err);
+          toast.error("فشل تصفير البيانات. يرجى مراجعة الصلاحيات.");
+        }
+      };
+      performReset();
+    }
+  }, [branches.length, isAppAuthenticated]); // Trigger when data is ready or auth changes
+
   const [isEditInvoiceOpen, setIsEditInvoiceOpen] = useState(false);
+  const [isDeleteInvoiceOpen, setIsDeleteInvoiceOpen] = useState(false);
   const [isDeleteInvoiceConfirmOpen, setIsDeleteInvoiceConfirmOpen] = useState(false);
   const [isRefundInvoiceOpen, setIsRefundInvoiceOpen] = useState(false);
   const [viewingInvoice, setViewingInvoice] = useState<LedgerEntry | null>(null);
@@ -1284,7 +1298,7 @@ export default function App() {
     const initDefaultBranch = async () => {
       // Only run if we are definitely authenticated and we have checked branches
       // We use rawBranches to check the actual data from metadata hook or query
-      if (authStep === 'authenticated' && user?.uid) {
+      if (authStep === 'authenticated' && user?.uid && !loadingBranches) {
         // Find if a main branch exists by looking for name or isMain flag
         const mainBranch = rawBranches.find(b => b.isMain === true || b.name === 'الفرع الرئيسي');
         
@@ -1316,7 +1330,7 @@ export default function App() {
       }
     };
     initDefaultBranch();
-  }, [rawBranches.length, authStep, user?.uid]);
+  }, [rawBranches, authStep, user?.uid, loadingBranches]);
 
   // Requirement: Auto-select first branch if none selected and branches exist
   useEffect(() => {
@@ -1334,291 +1348,162 @@ export default function App() {
     }
   }, [branches.length, currentBranchId]);
 
-  // Stats logic
+  useEffect(() => {
+    refreshFinancialData();
+  }, [rawTransactions, rawAllLedgerEntries, rawOpeningCash, employeeAttendance, expiredDamagedLosses, rawEntities, customerDebts]);
+
+  // Data reactivity and synchronization logic
+  const [refreshKey, setRefreshKey] = useState(0);
+  const recalculateReports = () => {
+    if (typeof lastResultRef !== 'undefined') {
+      (lastResultRef as any).current = null;
+    }
+    setRefreshKey(prev => prev + 1);
+    console.log("[Stats] Manual recalculation triggered at:", new Date().toLocaleTimeString());
+    toast.success("تم تصفير ذاكرة التقارير وإعادة الحساب بنجاح (Live)");
+  };
+
+  const refreshFinancialData = () => {
+    recalculateReports();
+  };
+
+  // Stats logic using Central FinancialAggregationService
+  const lastResultRef = useRef<any>(null);
+
   const stats = useMemo(() => {
     const today = startOfDay(new Date());
     const monthStart = startOfMonth(new Date());
+    const monthEnd = endOfMonth(new Date());
     
-    // Filter out deleted entries
-    const activeLedger = allLedgerEntries.filter(e => !e.isDeleted);
-    const bLedger = currentBranchId ? activeLedger.filter(e => e.branchId === currentBranchId) : activeLedger;
+    // LOGGING AS REQUESTED BY USER
+    console.log(`[Finance-Check] Total Nodes: 
+      - Transactions: ${rawTransactions.length}
+      - Ledger Collections: ${rawAllLedgerEntries.length}
+      - Merged List (transactions memo): ${transactions.length}
+      - Historical: ${historicalRecords.length}
+      - Entities: ${entities.length}
+    `);
 
-    // Helper to safely get date
-    const getDate = (d: any) => toValidDate(d);
+    // Current Month Aggregation
+    const reportResult = calculateReportsFromRecords({
+      allRecords: transactions,
+      historicalRecords,
+      attendance: employeeAttendance,
+      loans: rawLoans,
+      openingCash: rawOpeningCash,
+      expiredLosses: expiredDamagedLosses,
+      entities,
+      filters: {
+        startDate: monthStart,
+        endDate: monthEnd,
+        branchId: currentBranchId
+      }
+    });
 
-    // Daily revenue (Income today)
-    const dailyRevenue = bLedger
-      .filter(e => e.sourceType === 'revenue' && startOfDay(getDate(e.date)).getTime() === today.getTime())
-      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
+    const s = reportResult;
+    lastResultRef.current = s;
 
-    // Monthly stats
-    const monthlyRevenue = bLedger
-      .filter(e => e.sourceType === 'revenue' && getDate(e.date) >= monthStart)
-      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
+    // Daily revenue
+    const dailyRevenueResult = calculateReportsFromRecords({
+      allRecords: transactions,
+      historicalRecords,
+      attendance: employeeAttendance,
+      loans: rawLoans,
+      openingCash: rawOpeningCash,
+      expiredLosses: expiredDamagedLosses,
+      entities,
+      filters: {
+        startDate: today,
+        endDate: today,
+        branchId: currentBranchId
+      }
+    });
 
-    // GROSS Profit from sales this month
-    // We need to calculate profit from the source transactions for now if not in ledger
-    // But user says: "Ledger entries count... revenues count..."
-    // I'll use transactions for profit for now until I ensure ledger has profit field
-    const monthlyGrossProfit = transactions
-      .filter(tx => !tx.isDeleted && (tx.type === 'revenue') && (!currentBranchId || tx.branchId === currentBranchId) && getDate(tx.date) >= monthStart)
-      .reduce((acc, tx) => acc + Number(tx.profitAmount || tx.netProfit || 0), 0);
+    // All-Time
+    const allTimeResult = calculateReportsFromRecords({
+      allRecords: transactions,
+      historicalRecords,
+      attendance: employeeAttendance,
+      loans: rawLoans,
+      openingCash: rawOpeningCash,
+      expiredLosses: expiredDamagedLosses,
+      entities,
+      filters: { 
+        startDate: new Date(2000, 0, 1), 
+        endDate: new Date(2100, 0, 1), 
+        branchId: currentBranchId 
+      }
+    });
 
-    // Monthly Salaries from Ledger
-    const monthlySalary = bLedger
-      .filter(e => e.sourceType === 'employee_salary' && getDate(e.date) >= monthStart)
-      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
-
-    // Monthly Expense (General + Salaries)
-    const monthlyExpense = bLedger
-      .filter(e => e.sourceType === 'expense' && getDate(e.date) >= monthStart)
-      .reduce((acc, e) => acc + Number(e.amount || 0), 0) + monthlySalary;
-
-    // Opening Cash Balance from dedicated collection
-    const bOpeningCash = currentBranchId ? rawOpeningCash.filter(o => o.branchId === currentBranchId) : rawOpeningCash;
-    const openingCashTotal = bOpeningCash
-      .filter(o => o.month === monthStart.getMonth() + 1 && o.year === monthStart.getFullYear())
-      .reduce((acc, o) => acc + Number(o.amount || 0), 0);
-
-    // Opening Cash Balance from Ledger (Legacy/fallback)
-    const ledgerOpeningCash = bLedger
-      .filter(e => e.sourceType === 'opening_cash' && getDate(e.date) >= monthStart)
-      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
-    
-    const openingCashBalance = openingCashTotal || ledgerOpeningCash;
-
-    // Net Profit (Monthly) = Gross Profit from Sales - Expenses
-    const netProfit = monthlyGrossProfit - monthlyExpense;
-    const profitPercentage = monthlyRevenue > 0 ? (netProfit / monthlyRevenue) * 100 : 0;
-
-    // Supplier Dues
-    const supplierDues = entities
-      .filter(e => !e.deletedAt && (!currentBranchId || e.branchId === currentBranchId))
-      .reduce((acc, e) => acc + Number(e.balance || 0), 0);
-
-    // Due Invoices
-    const dueInvoicesCount = bLedger
-      .filter(e => e.sourceType === 'invoice' && !(e as any).isPaid) // Using simplified check for now
-      .length;
-
-    // Total Revenue (All time)
-    const showHistorical = reportTypeFilter === 'all' || reportTypeFilter === 'historical';
-    const showCurrent = reportTypeFilter === 'all' || reportTypeFilter === 'current';
-
-    const histRevenue = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalSales || 0), 0) : 0;
-    const currentRevenue = showCurrent ? bLedger.filter(e => e.sourceType === 'revenue').reduce((acc, e) => acc + Number(e.amount || 0), 0) : 0;
-    const totalRevenue = currentRevenue + histRevenue;
-    
-    // Total Expense (All time)
-    const histExpense = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalExpenses || 0), 0) : 0;
-    const currentExpense = showCurrent ? (bLedger.filter(e => e.sourceType === 'expense' || e.sourceType === 'employee_salary' || e.sourceType === 'damaged_expired').reduce((acc, e) => acc + Number(e.amount || 0), 0)) : 0;
-    const totalExpense = currentExpense + histExpense;
-
-    // Total Net Profit
-    const histProfits = showHistorical ? historicalRecords.filter(r => !currentBranchId || r.branchId === currentBranchId).reduce((acc, r) => acc + Number(r.totalProfits || 0), 0) : 0;
-    const currentGrossProfit = showCurrent ? transactions.filter(tx => !tx.isDeleted && tx.type === 'revenue' && (!currentBranchId || tx.branchId === currentBranchId)).reduce((acc, tx) => acc + Number(tx.profitAmount || tx.netProfit || 0), 0) : 0;
-    const totalNetProfit = (currentGrossProfit + histProfits) - totalExpense;
-
-    // Cash Balance = Opening Cash + Sales Cash - Expenses Paid - Supplier Payments
-    // This is a simplified cash flow
-    const cashSales = bLedger.filter(e => e.sourceType === 'revenue').reduce((acc, e) => acc + Number(e.amount || 0), 0); // Assuming all sales for now or filter by cash
-    const totalSupplierPayments = bLedger.filter(e => e.sourceType === 'payment' || e.sourceType === 'supplier_opening_payment').reduce((acc, e) => acc + Number(e.amount || 0), 0);
-    const cashBalance = openingCashBalance + cashSales - currentExpense - totalSupplierPayments;
-
-    const totals = {
-      dailyRevenue,
-      monthlyRevenue,
-      monthlyExpense,
-      netProfit,
-      profitPercentage,
-      supplierDues: (showCurrent ? supplierDues : 0),
-      dueInvoices: dueInvoicesCount,
-      totalRevenue,
-      totalExpense,
-      totalNetProfit,
-      cashBalance,
-      openingCashBalance
+    return {
+      dailyRevenue: dailyRevenueResult.totalRevenue,
+      monthlyRevenue: s.totalRevenue,
+      monthlyGrossProfit: s.totalProfit,
+      monthlyGeneralExpense: s.totalExpenses,
+      monthlySalary: s.totalSalaries,
+      monthlyLosses: s.totalLosses,
+      netProfit: s.netResult,
+      profitPercentage: s.totalRevenue > 0 ? (s.netResult / s.totalRevenue) * 100 : 0,
+      supplierDues: s.supplierDebt,
+      dueInvoices: s.counts.purchases,
+      totalRevenue: allTimeResult.totalRevenue,
+      totalExpense: allTimeResult.totalExpenses + allTimeResult.totalSalaries + allTimeResult.totalLosses,
+      totalNetProfit: allTimeResult.netResult,
+      cashBalance: s.remainingCash,
+      monthlyNonOperatingRevenue: s.totalNonOperatingRevenue,
+      totalNonOperatingRevenue: allTimeResult.totalNonOperatingRevenue,
+      openLoansInAmount: s.openLoansInAmount,
+      loansDueToMe: allTimeResult.totalLoansDueToMe,
+      monthlySupplierPayments: s.totalPayments,
+      openingCashBalance: s.openingCash
     };
-
-    console.log("Unified Ledger Stats:", totals);
-    return totals;
-  }, [allLedgerEntries, transactions, entities, historicalRecords, currentBranchId, reportTypeFilter]);
+  }, [allLedgerEntries, transactions, entities, historicalRecords, currentBranchId, expiredDamagedLosses, rawOpeningCash, employeeAttendance, customerDebts, refreshKey]);
 
   const [reportsMonth, setReportsMonth] = useState(new Date().getMonth());
   const [reportsYear, setReportsYear] = useState(new Date().getFullYear());
-  const [reportsSupplierId, setReportsSupplierId] = useState<string>('all');
-  const [reportsSupplierType, setReportsSupplierType] = useState<'all' | 'office' | 'warehouse'>('all');
-  const [reportSubTab, setReportSubTab] = useState<'monthly' | 'period'>('monthly');
-
-  // Aggregate stats for ALL months in the selected year for the table and charts
-  const monthlyTimelineData = useMemo(() => {
-    const data = [];
-    const showHistorical = reportTypeFilter === 'all' || reportTypeFilter === 'historical';
-    const showCurrent = reportTypeFilter === 'all' || reportTypeFilter === 'current';
-
-    for (let m = 0; m < 12; m++) {
-      const mStart = startOfMonth(new Date(reportsYear, m));
-      const mEnd = endOfMonth(mStart);
-      
-      // Current data
-      const mTx = showCurrent ? transactions.filter(t => (!currentBranchId || t.branchId === currentBranchId) && toValidDate(t.date) >= mStart && toValidDate(t.date) <= mEnd) : [];
-      const mLosses = showCurrent ? expiredDamagedLosses.filter(l => (!currentBranchId || l.branchId === currentBranchId) && toValidDate(l.date) >= mStart && toValidDate(l.date) <= mEnd) : [];
-      const mInvoices = showCurrent ? (allLedgerEntries?.filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'invoice' && toValidDate(e.date) >= mStart && toValidDate(e.date) <= mEnd) || []) : [];
-      
-      // Filter invoices by supplier type and supplier ID if needed
-      const filteredMInvoices = mInvoices.filter(inv => {
-        if (reportsSupplierId !== 'all' && inv.accountId !== reportsSupplierId) return false;
-        if (reportsSupplierType !== 'all') {
-            const entity = entities.find(e => e.id === inv.accountId);
-            if (reportsSupplierType === 'office' && entity?.type !== 'office') return false;
-            if (reportsSupplierType === 'warehouse' && entity?.type !== 'warehouse') return false;
-        }
-        return true;
-      });
-
-      const mPayments = showCurrent ? (allLedgerEntries?.filter(e => (!currentBranchId || e.branchId === currentBranchId) && e.operationType === 'payment' && toValidDate(e.date) >= mStart && toValidDate(e.date) <= mEnd) || []) : [];
-      const mSalaries = showCurrent ? (employeeAttendance.filter(r => (!currentBranchId || r.branchId === currentBranchId) && toValidDate(r.date) >= mStart && toValidDate(r.date) <= mEnd).reduce((acc, r) => acc + Number(r.dailyWage || 0), 0)) : 0;
-
-      // Historical data (Monthly summaries matching this year and month)
-      const hSummaries = showHistorical ? historicalRecords.filter(r => 
-        (!currentBranchId || r.branchId === currentBranchId) && 
-        r.type === 'monthly_summary' && 
-        r.year === reportsYear && 
-        r.month === (m + 1)
-      ) : [];
-
-      // Historical data (Single entries matching this timeframe)
-      const hSingleEntries = showHistorical ? historicalRecords.filter(r => 
-        (!currentBranchId || r.branchId === currentBranchId) && 
-        r.type === 'single_entry' && 
-        r.date && toValidDate(r.date) >= mStart && toValidDate(r.date) <= mEnd
-      ) : [];
-
-      const currentRevenue = mTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.saleAmount || t.amount || 0), 0);
-      const histMonthlyRevenue = hSummaries.reduce((acc, h) => acc + Number(h.totalRevenueCash || 0) + Number(h.totalRevenueCredit || 0), 0);
-      const histSingleRevenue = hSingleEntries.filter(e => e.entryType === 'revenue').reduce((acc, e) => acc + Number(e.amount || 0), 0);
-
-      const currentProfit = mTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.profitAmount || t.netProfit || 0), 0);
-      const histMonthlyProfit = hSummaries.reduce((acc, h) => acc + Number(h.totalProfits || 0), 0);
-      const histSingleProfit = histSingleRevenue; // Simplified
-
-      const currentLossAmount = mLosses.reduce((acc, l) => acc + Number(l.totalLoss || 0), 0);
-      const currentExpenses = mTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + Number(t.amount || 0), 0) + mSalaries + currentLossAmount;
-      const histMonthlyExpenses = hSummaries.reduce((acc, h) => acc + Number(h.totalExpenses || 0), 0);
-      const histSingleExpenses = hSingleEntries.filter(e => e.entryType === 'expense').reduce((acc, e) => acc + Number(e.amount || 0), 0);
-
-      const invoiceTotal = filteredMInvoices.reduce((acc, i) => acc + Number(i.amount || 0), 0) + hSummaries.reduce((acc, h) => acc + Number(h.totalPurchases || 0), 0);
-      const paymentTotal = mPayments.reduce((acc, p) => acc + Number(p.amount || 0), 0) + hSummaries.reduce((acc, h) => acc + Number(h.totalPaidDebt || 0), 0);
-      const remainingDebt = mTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.remainingAmount || 0), 0) + hSummaries.reduce((acc, h) => acc + Number(h.totalRevenueCredit || 0), 0);
-
-      data.push({
-        month: m + 1,
-        monthName: safeFormatDate(mStart, 'MMMM'),
-        revenue: currentRevenue + histMonthlyRevenue + histSingleRevenue,
-        profit: currentProfit + histMonthlyProfit + histSingleProfit,
-        expenses: currentExpenses + histMonthlyExpenses + histSingleExpenses,
-        losses: currentLossAmount,
-        invoices: invoiceTotal,
-        payments: paymentTotal,
-        remaining: remainingDebt,
-        net: (currentProfit + histMonthlyProfit + histSingleProfit) - (currentExpenses + histMonthlyExpenses + histSingleExpenses),
-        hasHistorical: hSummaries.length > 0 || hSingleEntries.length > 0
-      });
-    }
-    return data;
-  }, [transactions, entities, allLedgerEntries, employeeAttendance, historicalRecords, expiredDamagedLosses, reportTypeFilter, reportsYear, reportsSupplierId, reportsSupplierType, currentBranchId]);
-
-  // Selected month vs Previous month comparison
-  const monthlyComparison = useMemo(() => {
-    const current = monthlyTimelineData[reportsMonth];
-    const prevMonthIdx = reportsMonth === 0 ? 11 : reportsMonth - 1;
-    const prevYear = reportsMonth === 0 ? reportsYear - 1 : reportsYear;
-    
-    // If we need data from prev year, we might need to fetch/calculate it. 
-    // For now, let's assume we use the current year's indices if possible, or dummy zero if not available in current view.
-    const previous = monthlyTimelineData[prevMonthIdx];
-
-    const calcChange = (cur: number, prev: number) => {
-      if (prev === 0) return cur > 0 ? 100 : 0;
-      return ((cur - prev) / prev) * 100;
-    };
-
-    return {
-      current,
-      previous,
-      changes: {
-        revenue: calcChange(current.revenue, previous.revenue),
-        profit: calcChange(current.profit, previous.profit),
-        invoices: calcChange(current.invoices, previous.invoices),
-        payments: calcChange(current.payments, previous.payments),
-        remaining: calcChange(current.remaining, previous.remaining),
-        losses: calcChange(current.losses, previous.losses),
-        net: calcChange(current.net, previous.net)
-      }
-    };
-  }, [monthlyTimelineData, reportsMonth, reportsYear]);
+  const [reportSubTab, setReportSubTab] = useState('period');
   
-  const supplierPurchaseStats = useMemo(() => {
-    if (reportsSupplierId === 'all') return null;
-    
-    const mStart = startOfMonth(new Date(reportsYear, reportsMonth));
-    const mEnd = endOfMonth(mStart);
-    
-    const mInvoices = allLedgerEntries?.filter(e => 
-      e.accountId === reportsSupplierId && 
-      e.operationType === 'invoice' && 
-      toValidDate(e.date) >= mStart && 
-      toValidDate(e.date) <= mEnd
-    ) || [];
-    
-    // For payments, we might want to check payments linked to these invoices or just payments to this supplier in this month
-    const mPayments = allLedgerEntries?.filter(e => 
-      e.accountId === reportsSupplierId && 
-      e.operationType === 'payment' && 
-      toValidDate(e.date) >= mStart && 
-      toValidDate(e.date) <= mEnd
-    ) || [];
-
-    const totalPurchases = mInvoices.reduce((acc, i) => acc + Number(i.amount || 0), 0);
-    const totalPaid = mPayments.reduce((acc, p) => acc + Number(p.amount || 0), 0);
-    const count = mInvoices.length;
-    
-    const highestInvoice = mInvoices.length > 0 ? Math.max(...mInvoices.map(i => Number(i.amount || 0))) : 0;
-    const lastInvoice = mInvoices.length > 0 ? mInvoices.sort((a,b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime())[0] : null;
-    
-    const entity = entities.find(e => e.id === reportsSupplierId);
-    
-    return {
-      totalPurchases,
-      totalPaid,
-      totalRemaining: totalPurchases - totalPaid,
-      count,
-      highestInvoice,
-      lastInvoice,
-      entity,
-      invoices: mInvoices
-    };
-  }, [allLedgerEntries, reportsSupplierId, reportsMonth, reportsYear, entities]);
-
+  const monthlyTimelineData = useMemo(() => {
+    return FinancialAggregationService.generateMonthlyTimeline({
+      transactions,
+      ledgerEntries: allLedgerEntries,
+      historicalRecords,
+      expiredLosses: expiredDamagedLosses,
+      openingCash: rawOpeningCash,
+      entities,
+      attendance: employeeAttendance,
+      customerDebts
+    }, currentBranchId);
+  }, [transactions, allLedgerEntries, historicalRecords, expiredDamagedLosses, rawOpeningCash, entities, employeeAttendance, customerDebts, currentBranchId]);
+  
+  // Branch comparison logic
   const branchComparison = useMemo(() => {
     if (branches.length === 0) return [];
     
     return branches.map(branch => {
-      const bTx = transactions.filter(t => t.branchId === branch.id);
-      const bEntities = entities.filter(e => e.branchId === branch.id);
-      
-      const revenue = bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.saleAmount || t.amount || 0), 0);
-      const grossProfit = bTx.filter(t => t.type === 'income' || t.type === 'revenue').reduce((acc, t) => acc + Number(t.profitAmount || t.netProfit || 0), 0);
-      const expense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + Number(t.amount || 0), 0);
-      const dues = bEntities.reduce((acc, e) => acc + Number(e.balance || 0), 0);
+      const res = FinancialAggregationService.calculateStats({
+        startDate: new Date(2000, 0, 1),
+        endDate: new Date(2100, 0, 1),
+        branchId: branch.id,
+        transactions,
+        ledgerEntries: allLedgerEntries,
+        historicalRecords,
+        expiredLosses: expiredDamagedLosses,
+        openingCash: rawOpeningCash,
+        entities,
+        attendance: employeeAttendance,
+        customerDebts,
+        loans: rawLoans
+      });
+      const s = res.stats;
       
       return {
         id: branch.id,
         name: branch.name,
-        revenue,
-        expense,
-        profit: grossProfit - expense,
-        dues
+        revenue: s.totalRevenue,
+        expense: s.totalExpenses + s.totalSalaries + s.totalLosses,
+        profit: s.netResult,
+        dues: s.supplierDebt
       };
     });
   }, [branches, transactions, entities]);
@@ -1647,7 +1532,7 @@ export default function App() {
         .reduce((acc, tx) => acc + Number(tx.amount || 0), 0) + daySalary;
 
       return {
-        name: safeFormatDate(new Date(dateStr), 'EEE'),
+        name: safeFormatDate(toValidDate(dateStr), 'EEE'),
         income: dayIncome,
         expense: dayExpense,
         profit: dayGrossProfit - dayExpense
@@ -1665,7 +1550,147 @@ export default function App() {
     setViewingEntityDetail(entity);
   };
 
-  const handleAddEntity = async (data: any) => {
+  const handleReportCardClick = (type: string, label: string) => {
+    const baseDate = new Date(reportsYear, reportsMonth);
+    const mStart = isValid(baseDate) ? startOfMonth(baseDate) : startOfMonth(new Date());
+    const mEnd = endOfMonth(mStart);
+    
+    // Use the central service to get the exact records for this period/branch
+    const result = FinancialAggregationService.calculateStats({
+      startDate: mStart,
+      endDate: mEnd,
+      branchId: currentBranchId,
+      transactions,
+      ledgerEntries: allLedgerEntries,
+      historicalRecords,
+      expiredLosses: expiredDamagedLosses,
+      openingCash: rawOpeningCash,
+      entities,
+      attendance: employeeAttendance,
+      customerDebts,
+      loans: rawLoans
+    });
+
+    const { groups } = result;
+    let details: any[] = [];
+
+    const mapToDetail = (item: any, entryType: string) => ({
+      id: item.id || Math.random().toString(),
+      sourceType: item.sourceType || entryType,
+      date: toValidDate(item.date || item.invoiceDate || item.saleDate || item.createdAt),
+      type: entryType,
+      description: item.description || item.notes || item.itemName || 'سجل مالي',
+      party: item.accountName || item.entityName || item.customerName || '-',
+      amount: Number(item.amount || item.saleAmount || item.invoiceAmount || item.totalLoss || item.dailyWage || item.paidAmount || 0),
+      branch: branches.find(b => b.id === (item.branchId || item.branch))?.name || 'الرئيسي'
+    });
+
+    switch (type) {
+      case 'opening_cash_balance':
+      case 'opening_cash':
+        details = groups.openingCash.map(i => mapToDetail(i, 'رصيد نقدية'));
+        break;
+      case 'revenue':
+      case 'monthly_revenue':
+        details = groups.revenue.map(i => mapToDetail(i, 'وارد'));
+        break;
+      case 'non_operating_revenue':
+        details = groups.nonOperating.map(i => mapToDetail(i, `وارد غير تشغيلي: ${i.nonOperatingType || ''}`));
+        break;
+      case 'loans_due_to_me':
+        details = groups.loansDueToMe.map(i => {
+           const isPay = i.expenseClassification === 'pay_loan';
+           return {
+              ...mapToDetail(i, isPay ? 'دفع سلفة (زيادة رصيد)' : 'استلام سلفة (نقص رصيد)'),
+              amount: isPay ? i.amount : -i.amount
+           };
+        });
+        break;
+      case 'profit':
+      case 'monthly_gross_profit':
+        details = groups.revenue.map(i => ({
+             ...mapToDetail(i, 'ربح بيع'),
+             amount: Number(i.profitAmount || i.netProfit || 0)
+        }));
+        break;
+      case 'expense':
+      case 'expenses':
+      case 'monthly_general_expense':
+        details = groups.expenses.map(i => mapToDetail(i, 'مصاريف'));
+        break;
+      case 'salary':
+      case 'salaries':
+      case 'monthly_salary':
+        details = groups.salaries.map(i => mapToDetail(i, 'راتب'));
+        break;
+      case 'net_profit':
+        {
+          const profits = (stats.profitDetails?.salesProfits || []).map(i => ({
+            ...mapToDetail(i, i._label || 'ربح مبيعات (+)'),
+            amount: Number(i._amount || i.profitAmount || 0)
+          }));
+          const deductions = (stats.profitDetails?.deductions || []).map(i => ({
+            ...mapToDetail(i, i._label || 'خصم من الربح (-)'),
+            amount: Number(i._amount || 0)
+          }));
+          
+          details = [...profits, ...deductions].sort((a,b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime());
+        }
+        break;
+      case 'payment':
+      case 'payments':
+      case 'monthly_supplier_payments':
+        details = groups.payments.map(i => {
+           const d = mapToDetail(i, 'تسديد');
+           return {
+             ...d,
+             description: i.paymentSource === 'opening_balance' ? 'تسديد رصيد افتتاحي' : (i.description || `تسديد مورد`)
+           };
+        });
+        break;
+      case 'debts':
+      case 'customer_debt':
+      case 'due_invoices':
+        details = groups.customerDebts.map(i => mapToDetail(i, 'دين زبون'));
+        break;
+      case 'supplier_dues':
+      case 'supplier_debt':
+        details = groups.supplierDebts.map(i => ({
+             ...mapToDetail(i, 'مستحقات للمورد'),
+             description: `رصيد المورد: ${i.name}`,
+             amount: i.balance
+        }));
+        break;
+      case 'losses':
+      case 'damaged':
+      case 'monthly_losses':
+        details = groups.losses.map(i => mapToDetail(i, 'خسارة'));
+        break;
+      case 'cash_balance':
+      case 'cash_on_hand':
+        {
+          const inflows = (stats.cashDetails?.inflows || []).map(i => ({
+            ...mapToDetail(i, i._label || 'داخل نقدي (+)'),
+            amount: Number(i._amount || i.amount || 0)
+          }));
+          const outflows = (stats.cashDetails?.outflows || []).map(i => ({
+            ...mapToDetail(i, i._label || 'خارج نقدي (-)'),
+            amount: -Number(i._amount || i.amount || 0)
+          }));
+          const opCashDetail = groups.openingCash.map(i => mapToDetail(i, 'رصيد افتتاحي (+)'));
+          
+          details = [...opCashDetail, ...inflows, ...outflows].sort((a,b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime());
+        }
+        break;
+    }
+
+    setReportDetailTitle(label);
+    setReportDetailData(details);
+    setIsReportDetailOpen(true);
+  };
+  (window as any).handleReportCardClick = handleReportCardClick;
+
+  const handleAddEntity = async (data: any): Promise<string | void> => {
     console.log("Adding entity...");
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
     const initialBalance = Number(data.initialBalance) || 0;
@@ -1691,6 +1716,9 @@ export default function App() {
       address: data.address as string,
       balance: initialBalance,
       initialBalance: initialBalance,
+      initialBalanceDate: data.initialBalanceDate as Date,
+      initialBalanceNotes: data.initialBalanceNotes as string,
+      initialBalancePaid: 0,
       totalInvoices: 0,
       totalPayments: 0,
       limit: Number(data.limit) || 0,
@@ -1705,27 +1733,7 @@ export default function App() {
     } as any;
     
     try {
-      const docRef = await firebaseService.addDocument('entities', newEntity as Entity);
-      const entityId = (docRef as any);
-
-      // Create Ledger Entry for Opening Balance
-      if (initialBalance !== 0) {
-        await firebaseService.syncLedger({
-          sourceType: 'supplier_opening_balance',
-          sourceId: entityId,
-          userId: appUser?.userId || 'demo-user',
-          branchId: targetBranchId as string,
-          date: new Date(),
-          debit: initialBalance, // Debt increases (positive balance for suppliers usually means we owe them)
-          credit: 0,
-          amount: initialBalance,
-          category: 'أرصدة افتتاحية',
-          entityId: entityId,
-          entityName: data.name,
-          description: `رصيد افتتاحي للمورد: ${data.name}`,
-          ownerId: appUser?.userId || 'demo-user'
-        });
-      }
+      const entityId = await firebaseService.addDocument('entities', newEntity as Entity);
       
       // Activity
       await firebaseService.addDocument('entityActivities', {
@@ -1741,10 +1749,18 @@ export default function App() {
 
       setIsAddEntityOpen(false);
       setEntityImageFiles([]);
-      toast.success('تم إضافة المورد بنجاح');
+      toast.success('تم إنشاء المورد بنجاح');
+
+      if (isAddingFromInvoice) {
+        setSelectedEntity({ id: entityId, name: data.name, ...newEntity } as any);
+        setIsAddingFromInvoice(false);
+      }
+
+      return entityId;
     } catch (err) {
       console.error("[App] Error adding entity:", err);
       toast.error('حدث خطأ أثناء إضافة المورد');
+      throw err; // Allow EntityForm to handle it
     }
   };
 
@@ -1754,7 +1770,7 @@ export default function App() {
     const nameChanged = prevEntity && prevEntity.name !== data.name;
 
     let imageUrl = prevEntity?.imageUrl || '';
-    const imageUrls = [...(prevEntity?.imageUrls || [])];
+    const imageUrls = [...ensureArray(prevEntity?.imageUrls)];
 
     if (entityImageFiles && entityImageFiles.length > 0) {
       try {
@@ -1785,6 +1801,36 @@ export default function App() {
         isArchived: data.status === 'مؤرشف',
         updatedAt: new Date()
       });
+
+      // Update opening balance record and ledger if initialBalance changed
+      if (prevEntity && Number(data.initialBalance) !== prevEntity.initialBalance) {
+        const newInitialBalance = Number(data.initialBalance);
+        const existingOP = rawSupplierOpeningBalances.find(op => op.supplierId === id);
+        
+        if (existingOP) {
+          await firebaseService.updateDocument('supplierOpeningBalances', existingOP.id!, {
+            openingAmount: newInitialBalance,
+            remainingAmount: newInitialBalance - (existingOP.paidAmount || 0),
+            updatedAt: new Date()
+          });
+        } else if (newInitialBalance !== 0) {
+          await firebaseService.addDocument('supplierOpeningBalances', {
+            supplierId: id,
+            supplierName: data.name,
+            supplierType: data.type,
+            openingAmount: newInitialBalance,
+            paidAmount: 0,
+            remainingAmount: newInitialBalance,
+            date: new Date(),
+            branchId: prevEntity.branchId || 'main',
+            userId: appUser?.userId || 'demo-user',
+            ownerId: appUser?.userId || 'demo-user',
+            notes: 'رصيد افتتاحي (تمت إضافته لاحقاً)',
+            createdAt: new Date(),
+            updatedAt: new Date()
+          });
+        }
+      }
 
       // Propagate name change to ledger entries if name changed
       if (nameChanged) {
@@ -1985,25 +2031,17 @@ export default function App() {
           updatedAt: new Date()
         };
 
-        // 2. Sync Ledger Entry
-        await firebaseService.syncLedger({
+        // Unified Save
+        await firebaseService.saveFinancialRecordOnce({
           ...commonData,
+          type: 'expense',
+          operationType: 'expense',
           sourceType: 'employee_salary',
           userId: appUser.userId,
           debit: commonData.amount,
           credit: 0,
           category: 'رواتب الموظفين',
-          description: `راتب موظف: ${data.employeeName} - ${data.notes || ''}`
-        });
-
-        // 3. Sync Transaction
-        await firebaseService.syncTransaction({
-          ...commonData,
-          type: 'expense',
-          category: 'salaries',
-          description: `راتب موظف: ${data.employeeName} (${data.month}/${data.year})`,
-          employeeName: data.employeeName,
-          createdBy: appUser.userId
+          description: `راتب موظف: ${data.employeeName} (${data.month}/${data.year}) - ${data.notes || ''}`
         });
       }
 
@@ -2040,25 +2078,17 @@ export default function App() {
           updatedAt: new Date()
         };
 
-        // Sync Ledger
-        await firebaseService.syncLedger({
+        // Unified Save
+        await firebaseService.saveFinancialRecordOnce({
           ...commonData,
+          type: 'expense',
+          operationType: 'expense',
           sourceType: 'employee_salary',
           userId: appUser.userId,
           debit: commonData.amount,
           credit: 0,
           category: 'رواتب الموظفين',
-          description: `تعديل راتب موظف: ${data.employeeName} - ${data.notes || ''}`
-        });
-
-        // Sync Transaction
-        await firebaseService.syncTransaction({
-          ...commonData,
-          type: 'expense',
-          category: 'salaries',
-          description: `تعديل راتب موظف: ${data.employeeName} (${data.month}/${data.year})`,
-          employeeName: data.employeeName,
-          createdBy: appUser.userId
+          description: `تعديل راتب موظف: ${data.employeeName} (${data.month}/${data.year}) - ${data.notes || ''}`
         });
       }
       
@@ -2203,113 +2233,151 @@ export default function App() {
     );
   };
 
-  const handleAddInvoice = async (data: any) => {
-    console.log("Saving operation (Invoice):", data);
-    const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+  const handleAddLoan = async (loanData: Partial<Loan>) => {
+    if (!user || !currentBranchId) return;
 
-    const entityToInvoice = entities.find(e => e.id === data.accountId) || selectedEntity;
-    if (!entityToInvoice?.id) return;
-    
-    const amount = Number(data.amount);
-    const discount = Number(data.discount) || 0;
-    const bonus = Number(data.bonus) || 0;
-    const netAmount = amount - discount;
-    const purchaseType = data.purchaseType;
-    
-    let imageUrl = '';
-    const imageUrls: string[] = [];
-    if (invImageFiles && invImageFiles.length > 0) {
-      try {
-        imageUrl = await fileToBase64(invImageFiles[0]);
-        for (const file of invImageFiles) {
+    try {
+      const imageUrls: string[] = [];
+      if (loanImageFiles && loanImageFiles.length > 0) {
+        for (const file of loanImageFiles) {
           const b64 = await fileToBase64(file);
           imageUrls.push(b64);
         }
-      } catch (e) {
-        console.error('Error converting images to base64', e);
       }
+
+      const finalLoan: Partial<Loan> = {
+        ...loanData,
+        branchId: currentBranchId,
+        ownerId: user.uid,
+        createdBy: appUser?.username || user.email || 'unknown',
+        imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
+        imageUrl: imageUrls.length > 0 ? imageUrls[0] : undefined,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const loanId = await firebaseService.addDocument('loans', finalLoan);
+
+      // If it's a return, update the parent loan status
+      if (loanData.type === 'returned' && loanData.parentLoanId) {
+        const parentLoan = rawLoans.find(l => l.id === loanData.parentLoanId);
+        if (parentLoan) {
+          const returns = rawLoans.filter(l => l.parentLoanId === parentLoan.id && !l.deletedAt);
+          const totalReturnedSoFar = returns.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+          const totalReturnedIncludingCurrent = totalReturnedSoFar + Number(loanData.amount || 0);
+          
+          let newStatus: any = 'partially_returned';
+          if (totalReturnedIncludingCurrent >= parentLoan.amount) {
+            newStatus = 'fully_returned';
+          }
+          
+          await firebaseService.updateDocument('loans', parentLoan.id!, { 
+            status: newStatus,
+            updatedAt: new Date()
+          });
+        }
+      }
+
+      toast.success("تم تسجيل السلفة/الأمانة بنجاح");
+      setIsAddLoanOpen(false);
+      setLoanImageFiles([]);
+    } catch (err) {
+      console.error("Failed to add loan:", err);
+      toast.error("فشل في تسجيل العملية");
     }
+  };
 
-    const newEntry: Omit<LedgerEntry, 'id'> = {
-      accountId: entityToInvoice.id,
-      accountName: entityToInvoice.name,
-      accountType: entityToInvoice.type,
-      date: data.date ? new Date(data.date) : new Date(),
-      operationType: 'invoice',
-      purchaseType: purchaseType,
-      invoiceNumber: data.invoiceNumber as string,
-      amount,
-      discount,
-      discountType: data.discountType,
-      discountValue: data.discountPercentage,
-      bonus,
-      bonusArrivalDate: data.bonusArrivalDate,
-      dueDate: data.dueDate,
-      netAmount,
-      paidAmount: purchaseType === 'cash' ? netAmount : 0,
-      remainingAmount: purchaseType === 'cash' ? 0 : netAmount,
-      paymentStatus: purchaseType === 'cash' ? 'paid' : 'pending',
-      balanceAfterOperation: entityToInvoice.balance + netAmount,
-      imageUrl,
-      imageUrls,
-      notes: data.notes as string,
-      ownerId: appUser?.userId || 'demo-user',
-      branchId: (targetBranchId as string) || undefined,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    } as any;
-    
-    // Add updatedAt
-    (newEntry as any).updatedAt = new Date();
+  const [isSavingRecord, setIsSavingRecord] = useState(false);
 
-    // Unified Transaction entry
-    const newTx: Omit<Transaction, 'id'> = {
-      type: 'invoice',
-      category: 'invoice',
-      amount: netAmount,
-      date: data.date ? new Date(data.date) : new Date(),
-      description: `فاتورة شراء: ${entityToInvoice.name} - ${data.invoiceNumber || ''}`,
-      entityId: entityToInvoice.id,
-      entityName: entityToInvoice.name,
-      invoiceNumber: data.invoiceNumber as string,
-      branchId: targetBranchId as string | undefined,
-      createdBy: appUser?.userId || 'demo-user',
-      ownerId: appUser?.userId || 'demo-user',
-      userId: appUser?.userId || 'demo-user',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    } as any;
+  const handleAddInvoice = async (data: any) => {
+    if (isSavingRecord) return;
+    setIsSavingRecord(true);
 
     try {
-      const addedId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
+      console.trace("INVOICE SAVE CALLED", data.invoiceNumber);
+      const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+
+      const entityToInvoice = entities.find(e => e.id === data.accountId) || selectedEntity;
+      if (!entityToInvoice?.id) {
+        setIsSavingRecord(false);
+        return;
+      }
       
-      // Sync to unified ledger
-      await firebaseService.syncLedger({
-        sourceType: 'invoice',
-        sourceId: addedId as string,
-        userId: appUser?.userId || 'demo-user',
-        branchId: (targetBranchId as string) || 'main',
+      const amount = Number(data.amount);
+      const discount = Number(data.discount) || 0;
+      const bonus = Number(data.bonus) || 0;
+      const netAmount = amount - discount;
+      const purchaseType = data.purchaseType;
+      
+      let imageUrl = '';
+      const imageUrls: string[] = [];
+      if (invImageFiles && invImageFiles.length > 0) {
+        try {
+          imageUrl = await fileToBase64(invImageFiles[0]);
+          for (const file of invImageFiles) {
+            const b64 = await fileToBase64(file);
+            imageUrls.push(b64);
+          }
+        } catch (e) {
+          console.error('Error converting images to base64', e);
+        }
+      }
+
+      const newEntry: Omit<LedgerEntry, 'id'> = {
+        accountId: entityToInvoice.id,
+        accountName: entityToInvoice.name,
+        accountType: entityToInvoice.type,
         date: data.date ? new Date(data.date) : new Date(),
-        debit: netAmount,
-        credit: 0,
-        amount: netAmount,
-        category: 'المشتريات',
-        entityId: entityToInvoice.id,
-        entityName: entityToInvoice.name,
-        description: `فاتورة شراء: ${entityToInvoice.name} - ${data.invoiceNumber || ''}`,
-        ownerId: appUser?.userId || 'demo-user'
-      });
-
-      await firebaseService.addDocument('transactions', newTx as Transaction);
-      console.log("Operations after save:", transactions);
-
-      await firebaseService.updateDocument('entities', entityToInvoice.id, {
-        balance: entityToInvoice.balance + netAmount,
-        totalInvoices: entityToInvoice.totalInvoices + 1,
+        invoiceDate: data.date ? new Date(data.date) : new Date(),
+        operationType: 'invoice',
+        purchaseType: purchaseType,
+        invoiceNumber: data.invoiceNumber as string,
+        amount,
+        discount,
+        discountType: data.discountType,
+        discountValue: data.discountPercentage,
+        bonus,
+        bonusArrivalDate: data.bonusArrivalDate,
+        dueDate: data.dueDate,
+        netAmount,
+        paidAmount: purchaseType === 'cash' ? netAmount : 0,
+        remainingAmount: purchaseType === 'cash' ? 0 : netAmount,
+        paymentStatus: purchaseType === 'cash' ? 'paid' : 'pending',
+        imageUrl,
+        imageUrls,
+        notes: data.notes as string,
+        ownerId: appUser?.userId || 'demo-user',
+        branchId: (targetBranchId as string) || undefined,
+        isCommitted: true,
+        createdAt: new Date(),
         updatedAt: new Date()
-      } as any);
+      } as any;
 
-      if (newEntry.dueDate && addedId) {
+      // Use the unified saveInvoice method which handles deduplication and syncing internally
+      const result = await firebaseService.saveInvoice(newEntry);
+      const addedId = result?.id;
+      const isUpdate = result?.isUpdate;
+      const blocked = (result as any)?.blocked;
+      
+      if (blocked) {
+         toast.success("تم الحفظ مسبقاً (تم تخطي التكرار)");
+         setIsAddInvoiceOpen(false);
+         setIsSavingRecord(false);
+         return;
+      }
+
+      // NO RE-SYNC HERE. Service already calls syncTransaction.
+
+      // Update entity balance - ONLY IF IT'S A NEW INVOICE
+      if (addedId && !isUpdate) {
+        await firebaseService.updateDocument('entities', entityToInvoice.id, {
+          balance: (entityToInvoice.balance || 0) + netAmount,
+          totalInvoices: (entityToInvoice.totalInvoices || 0) + 1,
+          updatedAt: new Date()
+        } as any);
+      }
+
+      if (newEntry.dueDate && addedId && !isUpdate) {
         await firebaseService.addDocument('deadlines', {
           accountId: entityToInvoice.id,
           accountName: entityToInvoice.name,
@@ -2319,7 +2387,7 @@ export default function App() {
           requiredPayment: newEntry.netAmount,
           dueDate: newEntry.dueDate,
           status: 'pending',
-          ownerId: user?.uid || 'guest',
+          ownerId: appUser?.userId || 'demo-user',
           branchId: targetBranchId as string | undefined,
           createdAt: new Date(),
           updatedAt: new Date()
@@ -2334,16 +2402,9 @@ export default function App() {
       toast.success('تم إضافة الفاتورة بنجاح');
     } catch (err) {
       console.error("Failed to save invoice:", err);
-      // Fallback
-      try {
-        const localOps = JSON.parse(localStorage.getItem('pharma-offline-ops') || '[]');
-        localOps.push({ ...newTx, id: 'local-' + Date.now(), isOffline: true });
-        localStorage.setItem('pharma-offline-ops', JSON.stringify(localOps));
-        toast.info('تم الحفظ محلياً لعدم توفر الاتصال');
-        setIsAddInvoiceOpen(false);
-      } catch (lsErr) {
-        toast.error('حدث خطأ أثناء إضافة الفاتورة');
-      }
+      toast.error('حدث خطأ أثناء إضافة الفاتورة');
+    } finally {
+      setIsSavingRecord(false);
     }
   };
 
@@ -2387,6 +2448,151 @@ export default function App() {
     } catch (err) {
       console.error("[App] Failed to add deadline:", err);
       toast.error('حدث خطأ أثناء إضافة موعد السداد');
+    }
+  };
+
+  const handleSaveDeadline = async (data: Partial<Deadline>) => {
+    if (!appUser) return;
+    try {
+      const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+      if (data.id) {
+        await firebaseService.updateDocument('deadlines', data.id, {
+          ...data,
+          branchId: targetBranchId as string,
+          updatedAt: new Date()
+        });
+        toast.success('تم تحديث موعد التسديد');
+      } else {
+        await firebaseService.addDocument('deadlines', {
+          ...data,
+          ownerId: appUser.userId,
+          branchId: targetBranchId as string,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as Deadline);
+        toast.success('تم تحديد موعد التسديد');
+      }
+    } catch (error) {
+      console.error('Failed to save deadline:', error);
+      toast.error('فشل في حفظ الموعد');
+      throw error;
+    }
+  };
+
+  const handleDeleteDeadline = async (id: string) => {
+    try {
+      await firebaseService.deleteDocument('deadlines', id);
+      toast.success('تم حذف موعد التسديد');
+    } catch (error) {
+      console.error('Failed to delete deadline:', error);
+      toast.error('فشل في حذف الموعد');
+      throw error;
+    }
+  };
+
+  const handleExecuteDeadlinePayment = async (data: { amount: number; date: Date; notes: string; images: File[] }) => {
+    if (!selectedDeadlineForPayment || !appUser) return;
+    
+    setIsSavingRecord(true);
+    try {
+      const deadline = selectedDeadlineForPayment;
+      const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
+      
+      // 1. Process images
+      const imageUrls: string[] = [];
+      for (const file of data.images) {
+        const b64 = await fileToBase64(file);
+        imageUrls.push(b64);
+      }
+      
+      // 2. Create Ledger Entry (Payment)
+      const newEntry: Omit<LedgerEntry, 'id'> = {
+        accountId: deadline.accountId,
+        accountName: deadline.accountName,
+        accountType: 'office', // Default if not found
+        date: data.date,
+        operationType: 'payment',
+        sourceType: 'payment',
+        paymentSource: 'invoice',
+        amount: data.amount,
+        discount: 0,
+        discountType: 'amount',
+        discountValue: 0,
+        refundAmount: 0,
+        netAmount: data.amount,
+        linkedInvoiceNumber: deadline.invoiceNumber,
+        linkedInvoiceId: deadline.invoiceId,
+        receiptImageUrl: imageUrls[0] || '',
+        imageUrls: imageUrls,
+        notes: data.notes,
+        ownerId: appUser.userId,
+        branchId: (targetBranchId as string) || undefined,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as any;
+
+      // 3. Create Transaction
+      const newTx: Omit<Transaction, 'id'> = {
+        type: 'payment',
+        category: 'payment',
+        amount: data.amount,
+        date: data.date,
+        description: `تسديد موعد: ${deadline.accountName} - فاتورة ${deadline.invoiceNumber}`,
+        entityId: deadline.accountId,
+        entityName: deadline.accountName,
+        invoiceNumber: deadline.invoiceNumber,
+        branchId: targetBranchId as string | undefined,
+        createdBy: appUser.userId,
+        ownerId: appUser.userId,
+        userId: appUser.userId,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as any;
+
+      // 4. Save to Firebase via unified service (to ensure atomicity/deduplication)
+      await firebaseService.saveFinancialRecordOnce({
+        ...newEntry,
+        ...newTx,
+        sourceType: 'payment',
+        type: 'payment',
+        operationType: 'payment',
+        debit: 0,
+        credit: data.amount,
+        amount: data.amount,
+        category: 'التسديدات',
+        description: newTx.description || '',
+      });
+
+      // 5. Update linked invoice remaining amount
+      const invoice = allLedgerEntries.find(e => e.id === deadline.invoiceId);
+      if (invoice) {
+        const totalPaid = (invoice.paidAmount || 0) + data.amount;
+        const totalNet = invoice.netAmount || invoice.amount;
+        const remaining = Math.max(0, totalNet - totalPaid);
+        
+        await firebaseService.updateDocument('ledgerEntries', invoice.id!, {
+          paidAmount: totalPaid,
+          remainingAmount: remaining,
+          paymentStatus: remaining <= 0 ? 'paid' : 'partial',
+          updatedAt: new Date()
+        });
+      }
+
+      // 6. Update deadline status
+      await firebaseService.updateDocument('deadlines', deadline.id!, {
+        status: 'paid',
+        updatedAt: new Date()
+      });
+
+      toast.success('تم تنفيذ عملية التسديد بنجاح');
+      setIsExecutePaymentOpen(false);
+      setSelectedDeadlineForPayment(null);
+    } catch (error) {
+      console.error('Failed to execute deadline payment:', error);
+      toast.error('حدث خطأ أثناء تنفيذ التسديد');
+      throw error;
+    } finally {
+      setIsSavingRecord(false);
     }
   };
 
@@ -2448,8 +2654,14 @@ export default function App() {
 
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingRecord) return;
+    setIsSavingRecord(true);
+    
     console.log("Saving record... (Payment)");
-    if (!selectedEntity?.id || !appUser) return;
+    if (!selectedEntity?.id || !appUser) {
+      setIsSavingRecord(false);
+      return;
+    }
     
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
     const form = e.target as HTMLFormElement;
@@ -2465,96 +2677,146 @@ export default function App() {
     const linkedInvoiceNumber = formData.get('linkedInvoice') as string;
 
     // Validation
+    if (paymentSource === 'invoice' && !viewingInvoice) {
+      toast.error('يرجى اختيار الفاتورة المطلوب تسديدها');
+      setIsSavingRecord(false);
+      return;
+    }
+
     if (paymentSource === 'invoice' && viewingInvoice) {
       const remaining = viewingInvoice.remainingAmount || 0;
       if (amount > remaining) {
         toast.error(`المبلغ المدخل (${formatNumberWithCommas(amount)}) أكبر من المتبقي في الفاتورة (${formatNumberWithCommas(remaining)})`);
+        setIsSavingRecord(false);
         return;
       }
     } else if (paymentSource === 'opening_balance') {
-      const supplierOpeningPaid = (allLedgerEntries || [])
-        .filter(e => e.accountId === selectedEntity.id && e.paymentSource === 'opening_balance' && !e.isDeleted)
-        .reduce((sum, e) => sum + (e.amount || 0), 0);
+      const supplierOpeningPaid = selectedEntity.initialBalancePaid || 0;
       const remainingOpening = (selectedEntity.initialBalance || 0) - supplierOpeningPaid;
       if (amount > remainingOpening) {
         toast.error(`المبلغ المدخل (${formatNumberWithCommas(amount)}) أكبر من المتبقي في الرصيد الافتتاحي (${formatNumberWithCommas(remainingOpening)})`);
+        setIsSavingRecord(false);
         return;
       }
     }
 
-    let receiptImageUrl = '';
-    if (payImageFile) {
-      try {
-        receiptImageUrl = await fileToBase64(payImageFile);
-      } catch (e) {
-        console.error('Error converting receipt image to base64', e);
-      }
-    }
-
-    const newEntry: Omit<LedgerEntry, 'id'> = {
-      accountId: selectedEntity.id,
-      accountName: selectedEntity.name,
-      accountType: selectedEntity.type,
-      date: new Date(formData.get('date') as string),
-      operationType: 'payment',
-      sourceType: paymentSource === 'opening_balance' ? 'supplier_opening_payment' : 'payment',
-      paymentSource: paymentSource,
-      amount,
-      discount,
-      discountType: payDiscountType,
-      discountValue: payDiscountPercentage,
-      refundAmount: refund,
-      netAmount: amount,
-      linkedInvoiceNumber,
-      linkedInvoiceId,
-      balanceAfterOperation: selectedEntity.balance - totalEffect,
-      receiptImageUrl,
-      notes: formData.get('notes') as string,
-      ownerId: appUser.userId,
-      branchId: (targetBranchId as string) || undefined,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    } as any;
-    
-    // Unified Transaction entry
-    const newTx: Omit<Transaction, 'id'> = {
-      type: 'payment',
-      category: 'payment',
-      amount: totalEffect,
-      date: new Date(formData.get('date') as string),
-      description: paymentSource === 'opening_balance' 
-        ? `تسديد من الرصيد الافتتاحي: ${selectedEntity.name}`
-        : `تسديد فاتورة: ${selectedEntity.name} - ${linkedInvoiceNumber || ''}`,
-      entityId: selectedEntity.id,
-      entityName: selectedEntity.name,
-      invoiceNumber: linkedInvoiceNumber,
-      branchId: targetBranchId as string | undefined,
-      createdBy: appUser.userId,
-      ownerId: appUser.userId,
-      userId: appUser.userId,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    } as any;
-
     try {
-      const addedId = await firebaseService.addDocument('ledgerEntries', newEntry as LedgerEntry);
-      
-      // Update entity balance
-      await firebaseService.updateDocument('entities', selectedEntity.id, {
-        balance: selectedEntity.balance - totalEffect,
-        totalPayments: selectedEntity.totalPayments + 1,
-        totalPaidAmount: (selectedEntity.totalPaidAmount || 0) + totalEffect,
-        initialBalancePaid: paymentSource === 'opening_balance' 
-          ? (selectedEntity.initialBalancePaid || 0) + amount 
-          : (selectedEntity.initialBalancePaid || 0),
-        updatedAt: new Date()
-      } as any);
+      let receiptImageUrl = '';
+      if (payImageFile) {
+        try {
+          receiptImageUrl = await fileToBase64(payImageFile);
+        } catch (e) {
+          console.error('Error converting receipt image to base64', e);
+        }
+      }
 
-      // If invoice payment, update invoice status
-      if (paymentSource === 'invoice' && linkedInvoiceId) {
+      const newEntry: Omit<LedgerEntry, 'id'> = {
+        accountId: selectedEntity.id,
+        accountName: selectedEntity.name,
+        accountType: selectedEntity.type,
+        date: new Date(formData.get('date') as string),
+        operationType: 'payment',
+        sourceType: paymentSource === 'opening_balance' ? 'supplier_opening_payment' : 'payment',
+        paymentSource: paymentSource,
+        amount,
+        discount,
+        discountType: payDiscountType,
+        discountValue: payDiscountPercentage,
+        refundAmount: refund,
+        netAmount: amount,
+        linkedInvoiceNumber: paymentSource === 'invoice' ? linkedInvoiceNumber : '',
+        linkedInvoiceId: paymentSource === 'invoice' ? linkedInvoiceId : '',
+        balanceAfterOperation: (selectedEntity.balance || 0) - totalEffect,
+        receiptImageUrl,
+        notes: formData.get('notes') as string,
+        ownerId: appUser.userId,
+        branchId: (targetBranchId as string) || undefined,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as any;
+      
+      const newTx: Omit<Transaction, 'id'> = {
+        type: 'payment',
+        category: 'payment',
+        amount: totalEffect,
+        date: new Date(formData.get('date') as string),
+        description: paymentSource === 'opening_balance' 
+          ? `تسديد من الرصيد الافتتاحي: ${selectedEntity.name}`
+          : paymentSource === 'invoice'
+          ? `تسديد فاتورة: ${selectedEntity.name} - ${linkedInvoiceNumber || ''}`
+          : `تسديد عام (FIFO): ${selectedEntity.name}`,
+        entityId: selectedEntity.id,
+        entityName: selectedEntity.name,
+        invoiceNumber: paymentSource === 'invoice' ? linkedInvoiceNumber : '',
+        branchId: targetBranchId as string | undefined,
+        createdBy: appUser.userId,
+        ownerId: appUser.userId,
+        userId: appUser.userId,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as any;
+
+      const result = await firebaseService.saveFinancialRecordOnce({
+        ...newEntry,
+        ...newTx,
+        sourceType: paymentSource === 'opening_balance' ? 'supplier_opening_payment' : 'payment',
+        type: 'payment',
+        operationType: 'payment',
+        debit: 0,
+        credit: totalEffect,
+        amount: totalEffect,
+        category: 'التسديدات',
+        description: newTx.description || '',
+      });
+      
+      if (result?.blocked) {
+        toast.info('هذا التسديد مسجل بالفعل');
+        setIsSavingRecord(false);
+        return;
+      }
+
+      // SIDE EFFECTS
+      let remainingToApply = amount + discount;
+      let currentInitialBalancePaid = selectedEntity.initialBalancePaid || 0;
+
+      // FIFO or Explicit Opening Balance Payment
+      if (paymentSource === 'opening_balance' || paymentSource === 'general') {
+        const remainingOpening = (selectedEntity.initialBalance || 0) - currentInitialBalancePaid;
+        const appliedToOpening = Math.min(remainingToApply, remainingOpening);
+        currentInitialBalancePaid += appliedToOpening;
+        remainingToApply -= appliedToOpening;
+      }
+
+      // Apply to invoices if general (FIFO)
+      if (paymentSource === 'general' && remainingToApply > 0) {
+        const unpaidInvoices = allLedgerEntries
+          .filter(e => e.accountId === selectedEntity.id && e.operationType === 'invoice' && e.paymentStatus !== 'paid' && !e.isDeleted)
+          .sort((a,b) => toValidDate(a.date).getTime() - toValidDate(b.date).getTime());
+          
+        for (const inv of unpaidInvoices) {
+          if (remainingToApply <= 0) break;
+          const invRemaining = inv.remainingAmount || 0;
+          const appliedToInv = Math.min(remainingToApply, invRemaining);
+          
+          const newPaidAmount = (inv.paidAmount || 0) + appliedToInv;
+          const newRemaining = Math.max(0, (inv.netAmount || 0) - newPaidAmount);
+          
+          await firebaseService.updateDocument('ledgerEntries', inv.id!, {
+            paidAmount: newPaidAmount,
+            remainingAmount: newRemaining,
+            paymentStatus: newRemaining <= 0 ? 'paid' : 'partial',
+            updatedAt: new Date()
+          } as any);
+          
+          remainingToApply -= appliedToInv;
+        }
+      }
+
+      // Explicit Invoice Payment
+      if (paymentSource === 'invoice' && linkedInvoiceId && remainingToApply > 0) {
         const inv = allLedgerEntries.find(i => i.id === linkedInvoiceId);
         if (inv) {
-          const newPaidAmount = (inv.paidAmount || 0) + amount + discount;
+          const newPaidAmount = (inv.paidAmount || 0) + remainingToApply;
           const newRemaining = Math.max(0, (inv.netAmount || 0) - newPaidAmount);
           await firebaseService.updateDocument('ledgerEntries', linkedInvoiceId, {
             paidAmount: newPaidAmount,
@@ -2565,24 +2827,27 @@ export default function App() {
         }
       }
 
-      // Sync to unified ledger
-      await firebaseService.syncLedger({
-        sourceType: paymentSource === 'opening_balance' ? 'supplier_opening_payment' : 'payment',
-        sourceId: addedId as string,
-        userId: appUser.userId,
-        branchId: (targetBranchId as string) || 'main',
-        date: new Date(formData.get('date') as string),
-        debit: 0,
-        credit: totalEffect,
-        amount: totalEffect,
-        category: 'التسديدات',
-        entityId: selectedEntity.id,
-        entityName: selectedEntity.name,
-        description: newTx.description || '',
-        ownerId: appUser.userId
-      });
+      // Final Entity Update
+      await firebaseService.updateDocument('entities', selectedEntity.id, {
+        balance: (selectedEntity.balance || 0) - totalEffect,
+        totalPayments: (selectedEntity.totalPayments || 0) + 1,
+        totalPaidAmount: (selectedEntity.totalPaidAmount || 0) + totalEffect,
+        initialBalancePaid: currentInitialBalancePaid,
+        updatedAt: new Date()
+      } as any);
 
-      await firebaseService.addDocument('transactions', newTx as Transaction);
+      // Update opening balance tracking if applicable
+      if (paymentSource === 'opening_balance') {
+        const openingRecord = rawSupplierOpeningBalances.find(ob => ob.supplierId === selectedEntity.id);
+        if (openingRecord) {
+          const newOpPaid = (openingRecord.paidAmount || 0) + amount;
+          await firebaseService.updateDocument('supplierOpeningBalances', openingRecord.id!, {
+            paidAmount: newOpPaid,
+            remainingAmount: Math.max(0, (openingRecord.openingAmount || 0) - newOpPaid),
+            updatedAt: new Date()
+          });
+        }
+      }
       
       setIsAddPaymentOpen(false);
       setPayAmount(0);
@@ -2597,6 +2862,8 @@ export default function App() {
     } catch (err) {
       console.error("Failed to save payment:", err);
       toast.error('حدث خطأ أثناء حفظ التسديد');
+    } finally {
+      setIsSavingRecord(false);
     }
   };
 
@@ -2613,7 +2880,7 @@ export default function App() {
 
     const updatedInvoice: LedgerEntry = {
       ...viewingInvoice,
-      date: data.date instanceof Date ? data.date : new Date(data.date),
+      date: toValidDate(data.date),
       invoiceNumber: data.invoiceNumber as string,
       amount,
       discount,
@@ -2621,8 +2888,8 @@ export default function App() {
       discountValue: data.discountPercentage,
       netAmount,
       bonus: Number(data.bonus) || 0,
-      bonusArrivalDate: data.bonusArrivalDate ? (data.bonusArrivalDate instanceof Date ? data.bonusArrivalDate : new Date(data.bonusArrivalDate)) : undefined,
-      dueDate: data.dueDate ? (data.dueDate instanceof Date ? data.dueDate : new Date(data.dueDate)) : undefined,
+      bonusArrivalDate: data.bonusArrivalDate ? toValidDate(data.bonusArrivalDate) : undefined,
+      dueDate: data.dueDate ? toValidDate(data.dueDate) : undefined,
       purchaseType: data.purchaseType as 'cash' | 'credit',
       notes: data.notes as string,
       updatedAt: new Date()
@@ -2641,7 +2908,7 @@ export default function App() {
     }
     
     // Check overdue
-    if (updatedInvoice.paymentStatus !== 'paid' && updatedInvoice.dueDate && new Date(updatedInvoice.dueDate) < new Date()) {
+    if (updatedInvoice.paymentStatus !== 'paid' && updatedInvoice.dueDate && toValidDate(updatedInvoice.dueDate) < new Date()) {
       updatedInvoice.paymentStatus = 'overdue';
     }
 
@@ -2922,9 +3189,12 @@ export default function App() {
       accountType: selectedEntity.type,
       date,
       operationType: 'refund',
+      sourceType: 'return',
       amount: 0,
       discount: 0,
       refundAmount: refundAmount,
+      debit: 0,
+      credit: refundAmount,
       netAmount: 0,
       linkedInvoiceId: viewingInvoice.id,
       linkedInvoiceNumber: viewingInvoice.invoiceNumber,
@@ -2949,7 +3219,7 @@ export default function App() {
       if (currentRemaining <= 0) status = 'paid';
       else if (currentPaid === 0) status = 'pending';
       
-      if (status !== 'paid' && viewingInvoice.dueDate && new Date(viewingInvoice.dueDate) < new Date()) {
+      if (status !== 'paid' && viewingInvoice.dueDate && toValidDate(viewingInvoice.dueDate) < new Date()) {
         status = 'overdue';
       }
 
@@ -2975,82 +3245,71 @@ export default function App() {
   };
 
   const handleAddRevenue = async (data: any) => {
-    console.log("Saving operation:", data);
+    if (isSavingRecord) return;
+    setIsSavingRecord(true);
+    
+    console.log("[App] handleAddRevenue called with:", data);
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
-
-    let imageUrl = '';
-    const imageUrls: string[] = [];
-    if (revenueImageFiles && revenueImageFiles.length > 0) {
-      try {
-        for (const file of revenueImageFiles) {
-          const b64 = await fileToBase64(file);
-          imageUrls.push(b64);
-        }
-        imageUrl = imageUrls[0];
-      } catch (e) {
-        console.error('Error converting images to base64', e);
-      }
-    }
-
-    const newTx: Omit<Transaction, 'id'> = {
-      ...data,
-      type: 'revenue',
-      category: 'revenue',
-      description: `${data.incomeTypeCustom || 'مبيعات'} - ${data.incomeType === 'cash' ? 'نقدي' : 'دين'}`,
-      amount: Number(data.saleAmount || data.amount || 0),
-      saleAmount: Number(data.saleAmount || data.amount || 0),
-      profitAmount: Number(data.profitAmount || data.netProfit || 0),
-      branchId: targetBranchId as string | undefined,
-      createdBy: appUser?.userId || 'demo-user',
-      ownerId: appUser?.userId || 'demo-user',
-      userId: appUser?.userId || 'demo-user',
-      imageUrl,
-      imageUrls,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      date: data.date ? new Date(data.date) : new Date()
-    } as any;
     
     try {
-      const savedDocId = await firebaseService.addDocument('transactions', newTx as Transaction);
-      
-      // Sync to unified ledger
-      await firebaseService.syncLedger({
-        sourceType: 'revenue',
-        sourceId: savedDocId as string,
-        userId: appUser?.userId || 'demo-user',
-        branchId: targetBranchId as string,
-        date: data.date ? new Date(data.date) : new Date(),
-        debit: 0,
-        credit: Number(data.saleAmount || data.amount || 0),
-        amount: Number(data.saleAmount || data.amount || 0),
-        category: 'إيرادات مبيعات',
-        entityId: data.entityId,
-        entityName: data.customerName,
-        description: newTx.description!,
-        ownerId: appUser?.userId || 'demo-user'
-      });
-
-      console.log("Revenue saved:", { ...newTx, id: savedDocId });
-      console.log("Revenue records loaded:", transactions);
-      setIsAddRevenueOpen(false);
-      setRevenueImageFiles([]);
-      
-      if (typeof setSaleAmount === 'function') setSaleAmount('');
-      
-      toast.success('تم إضافة الوارد بنجاح');
-    } catch (err) {
-      console.error("[App] Failed to add revenue:", err);
-      // Fallback to localStorage
-      try {
-        const localOps = JSON.parse(localStorage.getItem('pharma-offline-ops') || '[]');
-        localOps.push({ ...newTx, id: 'local-' + Date.now(), isOffline: true });
-        localStorage.setItem('pharma-offline-ops', JSON.stringify(localOps));
-        toast.info('تم الحفظ محلياً لعدم توفر الاتصال');
-        setIsAddRevenueOpen(false);
-      } catch (lsErr) {
-        toast.error('حدث خطأ أثناء إضافة الوارد');
+      let imageUrl = '';
+      const imageUrls: string[] = [];
+      if (revenueImageFiles && revenueImageFiles.length > 0) {
+        try {
+          for (const file of revenueImageFiles) {
+            const b64 = await fileToBase64(file);
+            imageUrls.push(b64);
+          }
+          imageUrl = imageUrls[0];
+        } catch (e) {
+          console.error('Error converting images to base64', e);
+        }
       }
+
+      const txPayload = {
+        ...data,
+        branchId: targetBranchId as string,
+        createdBy: appUser?.userId || 'demo-user',
+        ownerId: appUser?.userId || 'demo-user',
+        userId: appUser?.userId || 'demo-user',
+        imageUrl,
+        imageUrls,
+        description: `${data.incomeTypeCustom || 'مبيعات'} - ${data.incomeType === 'cash' ? 'نقدي' : 'دين'}`
+      };
+
+      const result = await firebaseService.saveRevenue(txPayload);
+      
+      if (result?.blocked) {
+        toast.info('هذه العملية مسجلة بالفعل');
+      } else {
+        toast.success('تم حفظ الوارد بنجاح');
+      }
+
+      // Success actions: Reset files, Close modal, Refreshing happens via useFirebaseQuery
+      setRevenueImageFiles([]);
+      setIsAddRevenueOpen(false);
+      
+    } catch (err: any) {
+      console.error("[App] Failed to add revenue:", err);
+      // Determine error message in Arabic
+      let errorMsg = 'حدث خطأ أثناء حفظ الوارد';
+      if (err?.message) {
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed.error === 'Missing or insufficient permissions.') {
+            errorMsg = 'عذراً، ليس لديك صلاحية لإضافة وارد';
+          } else {
+            errorMsg = `فشل الحفظ: ${parsed.error}`;
+          }
+        } catch {
+          errorMsg = `فشل الحفظ: ${err.message}`;
+        }
+      }
+      toast.error(errorMsg);
+      // Re-throw to inform RevenueForm that it failed
+      throw err;
+    } finally {
+      setIsSavingRecord(false);
     }
   };
 
@@ -3083,19 +3342,21 @@ export default function App() {
   };
 
   const handleAddExpense = async (data: any) => {
-    console.log("Saving expense operation:", data);
+    if (isSavingRecord) return;
+    setIsSavingRecord(true);
+
+    console.log("[App] handleAddExpense called with:", data);
     const targetBranchId = currentBranchId || (branches.length > 0 ? branches[0].id : 'main');
 
     let detailedDescription = data.description;
     if (data.category === 'rent' || data.category === 'rent_pharmacy') {
       detailedDescription = `إيجار (${data.rentType || 'عام'}) - ${data.period || ''}: ${data.description || ''}`;
     } else if (data.category === 'salaries') {
-      detailedDescription = `راتب الموظف ${data.employeeName || ''} (${data.jobTitle || ''}) - ${data.period || ''} - ${data.salaryPaymentType === 'full' ? 'كامل' : data.salaryPaymentType === 'advance' ? 'سلفة' : 'مكافأة'}`;
+      detailedDescription = `راتب الموظف ${data.employeeName || ''} (${data.jobTitle || ''}) - ${data.period || ''}`;
     } else if (data.category === 'electricity') {
       detailedDescription = `${data.serviceType === 'national' ? 'كهرباء وطنية' : data.serviceType === 'generator' ? 'مولدة' : 'اشتراك'} - ${data.reading || ''}: ${data.description || ''}`;
     }
 
-    // Auto statement from category if empty as per requirements
     const categoryLabels: Record<string, string> = {
       'rent_pharmacy': 'إيجار صيدلية',
       'rent': 'إيجار',
@@ -3114,38 +3375,45 @@ export default function App() {
     
     const categoryLabel = data.category ? (categoryLabels[data.category] || data.category) : "مصروف عام";
 
-    const newTx: Omit<Transaction, 'id'> = {
-      type: 'expense',
-      category: data.category as string,
-      amount: Number(data.amount),
-      date: data.date ? new Date(data.date) : new Date(),
+    const txPayload = {
+      ...data,
       description: detailedDescription || categoryLabel,
       statement: data.statement || categoryLabel,
-      partyName: data.partyName || "",
-      notes: data.notes as string,
-      branchId: targetBranchId as string | undefined,
+      branchId: targetBranchId as string,
       createdBy: appUser?.userId || 'demo-user',
       ownerId: appUser?.userId || 'demo-user',
-      userId: appUser?.userId || 'demo-user',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    } as any;
+      userId: appUser?.userId || 'demo-user'
+    };
     
     try {
-      await firebaseService.addDocument('transactions', newTx as Transaction);
-      setIsAddExpenseOpen(false);
-      toast.success('تم إضافة المصروف بنجاح');
-    } catch (err) {
-      console.error("[App] Failed to add expense:", err);
-      try {
-        const localOps = JSON.parse(localStorage.getItem('pharma-offline-ops') || '[]');
-        localOps.push({ ...newTx, id: 'local-' + Date.now(), isOffline: true });
-        localStorage.setItem('pharma-offline-ops', JSON.stringify(localOps));
-        toast.info('تم الحفظ محلياً لعدم توفر الاتصال');
-        setIsAddExpenseOpen(false);
-      } catch (lsErr) {
-        toast.error('حدث خطأ أثناء إضافة المصروف');
+      const result = await firebaseService.saveExpense(txPayload);
+      
+      if (result?.blocked) {
+        toast.info('هذه العملية مسجلة بالفعل');
+      } else {
+        toast.success('تم حفظ المصروف بنجاح');
       }
+
+      setIsAddExpenseOpen(false);
+    } catch (err: any) {
+      console.error("[App] Failed to add expense:", err);
+      let errorMsg = 'حدث خطأ أثناء حفظ المصروف';
+      if (err?.message) {
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed.error === 'Missing or insufficient permissions.') {
+            errorMsg = 'عذراً، ليس لديك صلاحية لإضافة مصروف';
+          } else {
+            errorMsg = `فشل الحفظ: ${parsed.error}`;
+          }
+        } catch {
+          errorMsg = `فشل الحفظ: ${err.message}`;
+        }
+      }
+      toast.error(errorMsg);
+      throw err;
+    } finally {
+      setIsSavingRecord(false);
     }
   };
 
@@ -3264,22 +3532,20 @@ export default function App() {
     };
     
     try {
-      await firebaseService.updateDocument('transactions', selectedTransaction.id, updatedTx);
+      const col = (selectedTransaction as any)._col || 'transactions';
+      await firebaseService.updateDocument(col, selectedTransaction.id, updatedTx);
       
-      // Update associated ledger entry if it exists
-      await firebaseService.syncLedger({
-        sourceType: updatedTx.type === 'revenue' ? 'revenue' : 'expense',
-        sourceId: selectedTransaction.id,
-        userId: appUser?.userId || 'demo-user',
-        branchId: updatedTx.branchId || 'main',
-        date: updatedTx.date instanceof Date ? updatedTx.date : new Date(updatedTx.date),
-        debit: updatedTx.type === 'expense' ? updatedTx.amount : 0,
-        credit: updatedTx.type === 'revenue' ? updatedTx.amount : 0,
-        amount: updatedTx.amount,
-        category: updatedTx.category || (updatedTx.type === 'revenue' ? 'إيرادات مبيعات' : 'مصاريف'),
-        description: updatedTx.description || '',
-        ownerId: appUser?.userId || 'demo-user'
-      });
+      // If it also exists in ledger (old system sync), try to update it too but ignore errors
+      if (col === 'transactions') {
+         const relatedLedger = rawAllLedgerEntries.find(e => e.sourceId === selectedTransaction.id);
+         if (relatedLedger) {
+           await firebaseService.updateDocument('ledgerEntries', relatedLedger.id, {
+             ...updatedTx,
+             debit: updatedTx.type === 'expense' ? updatedTx.amount : 0,
+             credit: updatedTx.type === 'revenue' ? updatedTx.amount : 0,
+           });
+         }
+      }
 
       setIsEditTransactionOpen(false);
       setRevenueImageFiles([]);
@@ -3309,20 +3575,18 @@ export default function App() {
       // 1. Add to dedicated collection for management
       const cashId = await firebaseService.addDocument('openingCash', openingCashData);
       
-      // 2. Sync to unified ledger for accounting
-      await firebaseService.syncLedger({
+      // 2. Unified Ledger Save
+      await firebaseService.saveFinancialRecordOnce({
+        ...openingCashData,
         sourceType: 'opening_cash',
-        sourceId: cashId, // Link to the openingCash document
-        userId: appUser.userId,
-        branchId: openingCashData.branchId,
-        date: openingCashData.date,
+        sourceId: cashId,
+        type: 'opening_balance',
+        operationType: 'opening_balance',
         debit: 0,
         credit: openingCashData.amount,
         amount: openingCashData.amount,
         category: 'أرصدة افتتاحية',
         description: `رصيد مدور: ${openingCashData.notes || ''}`,
-        notes: openingCashData.notes,
-        ownerId: appUser.userId
       });
 
       setIsAddOpeningCashOpen(false);
@@ -3444,7 +3708,7 @@ export default function App() {
             sourceId: tx.id!,
             userId: appUser.userId,
             branchId: tx.branchId || 'main',
-            date: tx.date || tx.createdAt || new Date(),
+            date: toValidDate(tx.date || tx.createdAt || new Date()),
             debit: tx.type === 'expense' ? tx.amount : 0,
             credit: tx.type === 'revenue' ? tx.amount : 0,
             amount: tx.amount || 0,
@@ -3477,7 +3741,7 @@ export default function App() {
             sourceId: record.id!,
             userId: appUser.userId,
             branchId: record.branchId || 'main',
-            date: record.date || record.createdAt || new Date(),
+            date: toValidDate(record.date || record.createdAt || new Date()),
             debit: Number(record.dailyWage),
             credit: 0,
             amount: Number(record.dailyWage),
@@ -3746,8 +4010,79 @@ export default function App() {
     );
   }
 
+  const handleFinancialReset = async () => {
+    if (resetConfirmText !== 'تصفير') {
+      toast.error('كلمة التأكيد غير صحيحة');
+      return;
+    }
+
+    try {
+      setIsFinancialResetting(true);
+      await DataPersistenceService.resetFinancialAccounts();
+      toast.success('تم تصفير الحسابات المالية بنجاح');
+      setShowFinancialResetModal(false);
+      setResetConfirmText('');
+      // Force reload to clear all states and re-fetch clean data
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (error) {
+      toast.error('حدث خطأ أثناء تصفير الحسابات');
+    } finally {
+      setIsFinancialResetting(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen bg-background text-foreground font-sans overflow-x-hidden w-full" dir="rtl">
+      {/* Financial Reset Confirmation Modal */}
+      <Dialog open={showFinancialResetModal} onOpenChange={setShowFinancialResetModal}>
+        <DialogContent dir="rtl" className="bg-card border-border text-foreground space-y-4 rounded-3xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black text-rose-500 flex items-center gap-2">
+              <AlertTriangle className="h-6 w-6" />
+              تحذير أمان: تصفير الحسابات
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground font-bold pt-2 leading-relaxed">
+              سيتم حذف جميع العمليات والحسابات المالية نهائياً وإعادة البرنامج إلى صفر حسابات. هل أنت متأكد؟
+              <br />
+              <span className="text-rose-500 font-black underline">هذا الإجراء لا يمكن التراجع عنه.</span>
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label className="text-xs font-black text-muted-foreground uppercase tracking-widest">لتأكيد العملية، يرجى كتابة الكلمة التالية:</Label>
+              <div className="p-3 bg-rose-500/10 text-rose-600 font-black text-center rounded-xl border border-rose-500/20 text-xl tracking-[0.5em]">تصفير</div>
+              <Input 
+                placeholder="اكتب (تصفير) هنا..." 
+                className="h-14 rounded-2xl text-center font-black bg-muted/40 border-border"
+                value={resetConfirmText}
+                onChange={(e) => setResetConfirmText(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="flex flex-col sm:flex-row gap-3">
+            <Button 
+              variant="destructive" 
+              className="w-full h-14 rounded-2xl font-black gap-2 shadow-lg shadow-rose-500/20"
+              onClick={handleFinancialReset}
+              disabled={resetConfirmText !== 'تصفير' || isFinancialResetting}
+            >
+              {isFinancialResetting ? <RefreshCcw className="h-5 w-5 animate-spin" /> : <Zap className="h-5 w-5" />}
+              تأكيد تصفير كافة الحسابات
+            </Button>
+            <Button 
+              variant="ghost" 
+              className="w-full h-14 rounded-2xl font-bold"
+              onClick={() => setShowFinancialResetModal(false)}
+              disabled={isFinancialResetting}
+            >
+              إلغاء
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Sidebar Navigation */}
       <aside 
         className={`fixed top-0 right-0 z-50 h-screen bg-sidebar border-l border-border transition-all duration-300 flex flex-col ${
@@ -4005,6 +4340,11 @@ export default function App() {
                     <Gift className="h-4 w-4 text-amber-500" />
                     <span>إضافة بونص جديد</span>
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-border" />
+                  <DropdownMenuItem className="p-3 cursor-pointer hover:bg-muted rounded-lg gap-3" onClick={() => setIsAddLoanOpen(true)}>
+                    <ArrowLeftRight className="h-4 w-4 text-indigo-500" />
+                    <span>سلفة / أمانة</span>
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
 
@@ -4072,12 +4412,21 @@ export default function App() {
               {currentBranchId ? (
                 // Branch Specific Stats
                 [
-                  { label: 'الرصيد المرحّل', value: stats.openingCashBalance, icon: History, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-                  { label: 'دخل اليوم', value: stats.dailyRevenue, icon: DollarSign, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
-                  { label: 'دخل الشهر', value: stats.monthlyRevenue, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-500/10' },
-                  { label: 'ديون الموردين', value: stats.supplierDues, icon: Users, color: 'text-emerald-900 dark:text-emerald-400', bg: 'bg-emerald-900/10' },
+                  { id: 'opening_cash_balance', label: 'الرصيد الافتتاحي', value: stats.openingCashBalance, icon: History, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+                  { id: 'revenue', label: 'إجمالي الوارد', value: stats.monthlyRevenue, icon: BarChart3, color: 'text-blue-600', bg: 'bg-blue-500/10' },
+                  { id: 'monthly_gross_profit', label: 'إجمالي الربح الإجمالي', value: stats.monthlyGrossProfit, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
+                  { id: 'expense', label: 'المصاريف العامة', value: stats.monthlyGeneralExpense, icon: ArrowUpCircle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+                  { id: 'net_profit', label: 'صافي الربح', value: stats.netProfit, icon: DollarSign, color: stats.netProfit >= 0 ? 'text-emerald-500' : 'text-rose-600', bg: stats.netProfit >= 0 ? 'bg-emerald-500/10' : 'bg-rose-600/10' },
+                  { id: 'payment', label: 'تسديدات الموردين', value: stats.monthlySupplierPayments, icon: CheckCircle2, color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
+                  { id: 'non_operating_revenue', label: 'الوارد غير التشغيلي (الشهر)', value: stats.monthlyNonOperatingRevenue, icon: DollarSign, color: 'text-indigo-600', bg: 'bg-indigo-500/10' },
+                  { id: 'loans_due_to_me', label: 'السلف المستحقة لي', value: stats.loansDueToMe, icon: Users, color: 'text-amber-600', bg: 'bg-amber-500/10' },
+                  { id: 'cash_balance', label: 'الرصيد النقدي الحالي', value: stats.cashBalance, icon: Layers, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
+                  { id: 'supplier_dues', label: 'ديون الموردين المتبقية', value: stats.supplierDues, icon: Users, color: 'text-emerald-900 dark:text-emerald-400', bg: 'bg-emerald-900/10' },
                 ].map((stat, idx) => (
-                  <Card key={idx} className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl w-full">
+                  <Card key={idx} 
+                    onClick={() => handleReportCardClick(stat.id, stat.label)}
+                    className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl w-full cursor-pointer active:scale-95"
+                  >
                     <div className={`absolute top-0 right-0 w-32 h-32 ${stat.bg} blur-3xl -mr-16 -mt-16 opacity-30 group-hover:opacity-50 transition-opacity`} />
                     <CardHeader className="pb-1 md:pb-2 space-y-0 flex flex-row items-center justify-between relative z-10">
                       <stat.icon className={`h-4 w-4 md:h-5 md:w-5 ${stat.color}`} />
@@ -4097,12 +4446,18 @@ export default function App() {
               ) : (
                 // Unified Master Stats
                 [
-                  { label: 'الرصيد المرحّل المجمع', value: stats.openingCashBalance, icon: History, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-                  { label: 'إجمالي الوارد', value: stats.totalRevenue, icon: BarChart3, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
-                  { label: 'إجمالي المصروفات', value: stats.totalExpense, icon: ArrowDownCircle, color: 'text-rose-600', bg: 'bg-rose-500/10' },
-                  { label: 'إجمالي الأرباح', value: stats.totalNetProfit, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-500/10' },
+                  { id: 'opening_cash_balance', label: 'الرصيد الافتتاحي المجمع', value: stats.openingCashBalance, icon: History, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+                  { id: 'revenue', label: 'إجمالي الوارد (الكل)', value: stats.totalRevenue, icon: BarChart3, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
+                  { id: 'expense', label: 'المصاريف العامة (الكل)', value: stats.totalExpense, icon: ArrowUpCircle, color: 'text-rose-600', bg: 'bg-rose-500/10' },
+                  { id: 'profit', label: 'صافي الربح المجمع', value: stats.totalNetProfit, icon: DollarSign, color: stats.totalNetProfit >= 0 ? 'text-blue-600' : 'text-rose-600', bg: stats.totalNetProfit >= 0 ? 'bg-blue-500/10' : 'bg-rose-600/10' },
+                  { id: 'non_operating_revenue', label: 'الوارد غير التشغيلي المجمع', value: stats.totalNonOperatingRevenue, icon: DollarSign, color: 'text-indigo-600', bg: 'bg-indigo-500/10' },
+                  { id: 'loans_due_to_me', label: 'السلف المستحقة لي (الكل)', value: stats.loansDueToMe, icon: Users, color: 'text-amber-600', bg: 'bg-amber-500/10' },
+                  { id: 'cash_balance', label: 'الرصيد النقدي المجمع', value: stats.cashBalance, icon: Layers, color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
                 ].map((stat, idx) => (
-                  <Card key={idx} className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl w-full">
+                  <Card key={idx} 
+                    onClick={() => handleReportCardClick(stat.id, stat.label)}
+                    className="bg-card border-border overflow-hidden relative group hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 rounded-2xl w-full cursor-pointer active:scale-95"
+                  >
                     <div className={`absolute top-0 right-0 w-32 h-32 ${stat.bg} blur-3xl -mr-16 -mt-16 opacity-30 group-hover:opacity-50 transition-opacity`} />
                     <CardHeader className="pb-1 md:pb-2 space-y-0 flex flex-row items-center justify-between relative z-10">
                       <stat.icon className={`h-4 w-4 md:h-5 md:w-5 ${stat.color}`} />
@@ -4316,7 +4671,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {transactions.slice(0, 8).map((tx) => (
+                        {transactions.filter(tx => tx.isDeleted !== true).slice(0, 8).map((tx) => (
                           <tr key={tx.id} className="group cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => {
                             setSelectedTransaction(tx);
                             setIsEditTransactionOpen(true);
@@ -4429,7 +4784,7 @@ export default function App() {
                     <Calendar className="h-6 w-6 text-primary mb-4" />
                     <div className="text-[10px] font-black text-muted-foreground mb-1 tracking-widest uppercase text-center">تسديدات الشهر</div>
                     <div className="text-3xl font-black text-foreground font-mono tracking-tighter">
-                      {formatNumberWithCommas(allLedgerEntries.filter(e => e.operationType === 'payment' && new Date(e.date) >= startOfMonth(new Date())).reduce((acc, e) => acc + e.amount, 0))}
+                      {formatNumberWithCommas(allLedgerEntries.filter(e => e.operationType === 'payment' && toValidDate(e.date) >= startOfMonth(new Date())).reduce((acc, e) => acc + e.amount, 0))}
                       <span className="text-[10px] text-muted-foreground mr-2 font-sans font-bold italic tracking-normal">د.ع</span>
                     </div>
                  </div>
@@ -4440,7 +4795,7 @@ export default function App() {
                     <Hash className="h-6 w-6 text-blue-600 mb-4" />
                     <div className="text-[10px] font-black text-muted-foreground mb-1 tracking-widest uppercase text-center">عدد العمليات</div>
                     <div className="text-3xl font-black text-blue-600 font-mono tracking-tighter">
-                      {allLedgerEntries.filter(e => e.operationType === 'payment').length}
+                      {allLedgerEntries.filter(e => e.operationType === 'payment' && e.isDeleted !== true).length}
                     </div>
                  </div>
                </Card>
@@ -4487,7 +4842,7 @@ export default function App() {
                      </thead>
                      <tbody>
                        {allLedgerEntries
-                         .filter(e => e.operationType === 'payment')
+                         .filter(e => e.operationType === 'payment' && e.isDeleted !== true)
                          .filter(e => e.accountName.toLowerCase().includes(searchTerm.toLowerCase()) || (e.invoiceNumber || '').includes(searchTerm))
                          .slice(0, 50)
                          .map((entry) => (
@@ -4503,7 +4858,7 @@ export default function App() {
                              </td>
                            </tr>
                          ))}
-                       {allLedgerEntries.filter(e => e.operationType === 'payment').length === 0 && (
+                       {allLedgerEntries.filter(e => e.operationType === 'payment' && e.isDeleted !== true).length === 0 && (
                          <tr>
                            <td colSpan={4} className="py-20 text-center text-muted-foreground italic font-bold">لا توجد تسديدات مسجلة</td>
                          </tr>
@@ -4513,7 +4868,7 @@ export default function App() {
                    ) : (
                      <div className="divide-y divide-border">
                        {allLedgerEntries
-                        .filter(e => e.operationType === 'payment')
+                        .filter(e => e.operationType === 'payment' && e.isDeleted !== true)
                         .filter(e => e.accountName.toLowerCase().includes(searchTerm.toLowerCase()) || (e.invoiceNumber || '').includes(searchTerm))
                         .slice(0, 50)
                         .map((entry) => (
@@ -4544,34 +4899,6 @@ export default function App() {
                    )}
                 </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="daily-entry" className="space-y-6 animate-in fade-in duration-700">
-            <div className="max-w-4xl mx-auto">
-              <Card className="bg-card border-border rounded-3xl shadow-2xl overflow-hidden border-t-8 border-t-emerald-600">
-                <CardHeader className="px-8 py-10 bg-muted/20 border-b border-border">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 bg-emerald-600 rounded-2xl text-white shadow-lg shadow-emerald-600/20">
-                      <PlusCircle className="h-8 w-8" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-2xl font-black text-foreground">الإدخال اليومي للإيرادات</CardTitle>
-                      <CardDescription className="text-muted-foreground font-bold">سجل مبيعاتك وخدماتك اليومية لضمان دقة التقارير المالية</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-8">
-                  <RevenueForm 
-                    onSubmit={(data) => {
-                      handleAddRevenue(data);
-                      setActiveTab('revenues');
-                    }} 
-                    onClose={() => setActiveTab('finance')} 
-                    onImagesChange={setRevenueImageFiles}
-                  />
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
 
           <TabsContent value="revenues" className="space-y-6 animate-in fade-in duration-700">
@@ -4626,7 +4953,11 @@ export default function App() {
                       <p className="text-muted-foreground font-bold">متابعة تحصيلات الصيدلية الخارجية</p>
                     </div>
                     <div className="flex items-center gap-4 w-full md:w-auto">
-                      <Button onClick={() => setActiveTab('daily-entry')} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black h-12 px-6 rounded-xl shadow-lg shadow-emerald-600/10 whitespace-nowrap">
+                      <Button onClick={() => setIsAddLoanOpen(true)} className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black h-12 px-6 rounded-xl shadow-lg shadow-indigo-600/10 whitespace-nowrap">
+                        <Plus className="h-4 w-4" />
+                        سلفة / أمانة
+                      </Button>
+                      <Button onClick={() => setIsAddRevenueOpen(true)} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black h-12 px-6 rounded-xl shadow-lg shadow-emerald-600/10 whitespace-nowrap">
                         <Plus className="h-4 w-4" />
                         إضافة إيراد يومي
                       </Button>
@@ -4847,10 +5178,17 @@ export default function App() {
                 onBack={() => setViewingEntityDetail(null)}
                 ledgerEntries={allLedgerEntries.filter(e => e.accountId === viewingEntityDetail.id)}
                 bonuses={bonuses.filter(b => b.entityId === viewingEntityDetail.id)}
+                deadlines={deadlines.filter(d => d.accountId === viewingEntityDetail.id)}
+                onSetDeadline={(target) => {
+                  setDeadlineTarget(target);
+                  const existing = deadlines.find(d => d.invoiceId === target.id && d.status === 'pending');
+                  setCurrentDeadline(existing || null);
+                  setIsDeadlineModalOpen(true);
+                }}
                 activities={entityActivities.filter(a => a.entityId === viewingEntityDetail.id)}
+                supplierOpeningBalances={rawSupplierOpeningBalances.filter(o => o.supplierId === viewingEntityDetail.id)}
                 onAddInvoice={() => { setSelectedEntity(viewingEntityDetail); setIsAddInvoiceOpen(true); }}
                 onAddPayment={() => { setSelectedEntity(viewingEntityDetail); setViewingInvoice(null); setPaymentMode('normal'); setIsAddPaymentOpen(true); }}
-                onAddBonus={() => setIsAddBonusOpen(true)}
                 onEditEntity={() => { setSelectedEntity(viewingEntityDetail); setIsEditEntityOpen(true); }}
                 onViewInvoice={handleViewInvoice}
                 onEditInvoice={(invoice) => { setViewingInvoice(invoice); setIsEditInvoiceOpen(true); }}
@@ -4893,7 +5231,18 @@ export default function App() {
                 onDeleteAttachment={handleDeleteAttachment}
                 onShowImage={setLightboxImage}
                 onImportHistorical={() => setIsHistoricalWizardOpen(true)}
-                onImportExcel={() => setIsExcelImportOpen(true)}
+                onImportExcel={() => {
+                  setSelectedEntity(viewingEntityDetail);
+                  setIsExcelImportOpen(true);
+                }}
+                onMultiEntry={() => {
+                  setSelectedEntity(viewingEntityDetail);
+                  setIsMultiEntryOpen(true);
+                }}
+                onAddBonus={() => {
+                  setSelectedEntity(viewingEntityDetail);
+                  setIsAddBonusOpen(true);
+                }}
                 appMode={effectiveAppMode}
               />
             ) : (
@@ -4944,9 +5293,7 @@ export default function App() {
                                   entity.type === 'scientific_office' ? 'bg-purple-500/10 text-purple-600' :
                                   'bg-amber-500/10 text-amber-600'
                                 }`}>
-                                  {entity.type === 'office' ? 'مكتب' : 
-                                   entity.type === 'scientific_office' ? 'مذخر' : 
-                                   'شخصي'}
+                                  {getSupplierTypeLabel(entity.type)}
                                 </span>
                                 {entity.status === 'مؤرشف' && (
                                   <span className="bg-slate-500/10 text-slate-500 px-2.5 py-0.5 rounded-full text-[9px] font-black">مؤرشف</span>
@@ -5070,6 +5417,27 @@ export default function App() {
                         <FileUp className="h-4 w-4" />
                         استيراد من Excel
                       </Button>
+                      <Button 
+                        variant="outline" 
+                        onClick={async () => {
+                          if (confirm('هل أنت متأكد من تنظيف كافة الفواتير المكررة؟ سيتم الإبقاء على نسخة واحدة صحيحة لكل فاتورة.')) {
+                            try {
+                              const deletedCount = await firebaseService.cleanupDuplicateInvoices();
+                              if (deletedCount > 0) {
+                                toast.success(`تم حذف ${deletedCount} فاتورة مكررة بنجاح`);
+                              } else {
+                                toast.info('لم يتم العثور على فواتير مكررة');
+                              }
+                            } catch (e) {
+                              toast.error('فشل عملية التنظيف');
+                            }
+                          }
+                        }} 
+                        className="bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 gap-2 h-12 px-6 rounded-xl font-black shrink-0"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        تنظيف المتكرر
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
@@ -5088,7 +5456,7 @@ export default function App() {
                       </thead>
                       <tbody>
                         {allLedgerEntries
-                          .filter(e => e.operationType === 'invoice' && (e.invoiceNumber?.includes(searchTerm) || e.accountName.includes(searchTerm)))
+                          .filter(e => e.operationType === 'invoice' && e.isCommitted === true && e.isDeleted !== true && (e.invoiceNumber?.includes(searchTerm) || e.accountName.includes(searchTerm)))
                           .slice(0, 50)
                           .map((entry) => (
                             <tr key={entry.id} className="group hover:bg-primary/5 cursor-pointer transition-colors" onClick={() => handleViewInvoice(entry)}>
@@ -5099,7 +5467,7 @@ export default function App() {
                               </td>
                               <td className="px-8 py-6 text-xs text-muted-foreground font-mono font-bold">{safeFormatDate(entry.date, 'yyyy/MM/dd')}</td>
                               <td className="px-8 py-6 text-left">
-                                <div className="text-lg font-black text-emerald-600 font-mono tracking-tighter">{formatNumberWithCommas(entry.netAmount)}</div>
+                                <div className="text-lg font-black text-emerald-600 font-mono tracking-tighter">{formatNumberWithCommas(entry.amount || entry.netAmount)}</div>
                               </td>
                               <td className="px-8 py-6 text-center" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex items-center justify-center gap-2">
@@ -5119,7 +5487,7 @@ export default function App() {
                               </td>
                             </tr>
                           ))}
-                        {allLedgerEntries.filter(e => e.operationType === 'invoice').length === 0 && (
+                        {allLedgerEntries.filter(e => e.operationType === 'invoice' && e.isCommitted === true && e.isDeleted !== true).length === 0 && (
                           <tr>
                             <td colSpan={5} className="py-20 text-center text-muted-foreground italic font-bold">لا توجد فواتير مسجلة بعد</td>
                           </tr>
@@ -5130,7 +5498,7 @@ export default function App() {
                   ) : (
                     <div className="divide-y divide-border">
                       {allLedgerEntries
-                        .filter(e => e.operationType === 'invoice' && (e.invoiceNumber?.includes(searchTerm) || e.accountName.includes(searchTerm)))
+                        .filter(e => e.operationType === 'invoice' && e.isCommitted === true && e.isDeleted !== true && (e.invoiceNumber?.includes(searchTerm) || e.accountName.includes(searchTerm)))
                         .slice(0, 50)
                         .map((entry) => (
                           <div 
@@ -5144,7 +5512,7 @@ export default function App() {
                                 <div className="text-[10px] text-muted-foreground font-bold">{entry.accountName}</div>
                               </div>
                               <div className="text-lg font-black text-emerald-600 font-mono tracking-tighter">
-                                {formatNumberWithCommas(entry.netAmount)}
+                                {formatNumberWithCommas(entry.amount || entry.netAmount)}
                               </div>
                             </div>
                             <div className="flex justify-between items-center text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
@@ -5153,7 +5521,7 @@ export default function App() {
                             </div>
                           </div>
                         ))}
-                      {allLedgerEntries.filter(e => e.operationType === 'invoice').length === 0 && (
+                      {allLedgerEntries.filter(e => e.operationType === 'invoice' && e.isCommitted === true && e.isDeleted !== true).length === 0 && (
                         <div className="py-20 text-center text-muted-foreground italic font-bold">لا توجد فواتير مسجلة بعد</div>
                       )}
                     </div>
@@ -5162,42 +5530,28 @@ export default function App() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="deadlines" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in duration-700">
-              {deadlines.map(deadline => (
-                <Card key={deadline.id} className="bg-card border-border border-r-4 border-r-amber-500 relative group overflow-hidden rounded-2xl shadow-sm hover:shadow-xl hover:shadow-amber-500/5 transition-all duration-500">
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 blur-2xl -mr-12 -mt-12 group-hover:bg-amber-500/10 transition-colors" />
-                  <CardHeader className="p-6 pb-2 relative z-10">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <CardTitle className="text-lg text-foreground font-black tracking-tight">{deadline.accountName}</CardTitle>
-                        <div className="flex items-center gap-2 mt-2">
-                           <Clock className="h-3 w-3 text-amber-600" />
-                           <span className="text-[10px] text-amber-600 font-black uppercase tracking-widest">موعد الاستحقاق: {safeFormatDate(deadline.dueDate, 'yyyy/MM/dd')}</span>
-                        </div>
-                      </div>
-                      <div className="p-2 bg-amber-500/10 text-amber-600 rounded-xl">
-                        <AlertCircle className="h-4 w-4" />
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-6 relative z-10">
-                    <div className="text-2xl font-black text-amber-600 font-mono tracking-tighter">
-                      {formatNumberWithCommas(deadline.requiredPayment)}
-                      <span className="text-[10px] text-muted-foreground mr-2 font-sans font-bold italic tracking-normal">د.ع</span>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-border/50 flex items-center justify-between">
-                       <span className="text-[10px] text-muted-foreground font-bold">بذمة الصيدلية حالياً</span>
-                       <div className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-              {deadlines.length === 0 && (
-                <div className="col-span-full py-24 text-center text-muted-foreground bg-muted/10 rounded-3xl border-2 border-dashed border-border/50 flex flex-col items-center">
-                   <Clock className="h-12 w-12 opacity-20 mb-4" />
-                   <p className="font-black text-lg text-foreground/50">لا توجد مواعيد سداد قريبة</p>
-                </div>
-              )}
+            <TabsContent value="payment-deadlines" className="animate-in fade-in duration-700">
+               <PaymentDeadlinesPage 
+                 deadlines={deadlines}
+                 entities={entities}
+                 allLedgerEntries={allLedgerEntries}
+                 branches={branches}
+                 currentBranchId={currentBranchId}
+                 currentCash={stats.cashBalance}
+                 onAdd={() => {
+                   setCurrentDeadline(null);
+                   setIsDeadlineModalOpen(true);
+                 }}
+                 onEdit={(deadline) => {
+                   setCurrentDeadline(deadline);
+                   setIsDeadlineModalOpen(true);
+                 }}
+                 onDelete={(id) => handleDeleteDeadline(id)}
+                 onPayNow={(deadline) => {
+                   setSelectedDeadlineForPayment(deadline);
+                   setIsExecutePaymentOpen(true);
+                 }}
+               />
             </TabsContent>
 
             <TabsContent value="transactions" className="space-y-6 animate-in fade-in duration-700">
@@ -5434,318 +5788,21 @@ export default function App() {
               />
             </TabsContent>
 
-            <TabsContent value="diagnosis" className="space-y-4 outline-none">
-              <DiagnosisPage 
-                ledger={allLedgerEntries}
-                transactions={transactions}
-                entities={entities}
-                onMigrate={handleMigrateToLedger}
-                stats={stats}
-              />
-            </TabsContent>
-
           <TabsContent value="reports" className="space-y-8 animate-in fade-in duration-700">
-             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-               <div className="space-y-1">
-                 <h2 className="text-2xl font-black text-foreground">التقارير المالية والتحليلية</h2>
-                 <p className="text-muted-foreground text-sm font-bold">مقارنة الأداء الشهري وتتبع التدفق النقدي</p>
-               </div>
-
-               <div className="flex bg-muted/30 p-1.5 rounded-2xl border border-border">
-                  <button 
-                    onClick={() => setReportSubTab('monthly')}
-                    className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${reportSubTab === 'monthly' ? 'bg-card text-primary shadow-sm border border-border' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    التحليل الشهري
-                  </button>
-                  <button 
-                    onClick={() => setReportSubTab('period')}
-                    className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${reportSubTab === 'period' ? 'bg-card text-primary shadow-sm border border-border' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    تقرير الفترة المالية
-                  </button>
-               </div>
-               
-               {reportSubTab === 'monthly' && (
-                 <div className="flex flex-wrap items-center gap-3 bg-muted/20 p-2 rounded-2xl border border-border">
-                    <div className="flex items-center gap-2 px-3">
-                      <CalendarDays className="h-4 w-4 text-primary" />
-                      <span className="text-xs font-black text-muted-foreground uppercase">الفترة:</span>
-                    </div>
-                    <Select value={reportsMonth.toString()} onValueChange={(v) => setReportsMonth(parseInt(v))}>
-                    <SelectTrigger className="w-[140px] h-10 bg-card border-border rounded-xl font-bold">
-                      <SelectValue placeholder="الشهر" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-card border-border">
-                      {Array.from({ length: 12 }).map((_, i) => (
-                        <SelectItem key={i} value={i.toString()}>{safeFormatDate(new Date(2024, i), 'MMMM')}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={reportsYear.toString()} onValueChange={(v) => setReportsYear(parseInt(v))}>
-                    <SelectTrigger className="w-[100px] h-10 bg-card border-border rounded-xl font-bold">
-                      <SelectValue placeholder="السنة" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-card border-border">
-                      {[2023, 2024, 2025, 2026].map(y => (
-                        <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <div className="h-6 w-px bg-border mx-1" />
-
-                  <Select value={reportsSupplierType} onValueChange={(v: any) => setReportsSupplierType(v)}>
-                    <SelectTrigger className="w-[120px] h-10 bg-card border-border rounded-xl font-bold text-xs">
-                      <SelectValue placeholder="نوع المورد" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-card border-border">
-                       <SelectItem value="all">كل الموردين</SelectItem>
-                       <SelectItem value="office">مكاتب</SelectItem>
-                       <SelectItem value="warehouse">مذاخر</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={reportsSupplierId} onValueChange={setReportsSupplierId}>
-                    <SelectTrigger className="w-[200px] h-10 bg-card border-border rounded-xl font-bold text-xs">
-                      <SelectValue placeholder="اختيار المورد" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-card border-border">
-                       <SelectItem value="all">كل الموردين (إجمالي)</SelectItem>
-                       {entities.filter(e => e.type === 'office' || e.type === 'warehouse').map(e => (
-                         <SelectItem key={e.id} value={e.id!}>{e.name}</SelectItem>
-                       ))}
-                    </SelectContent>
-                  </Select>
-
-                  <div className="h-6 w-px bg-border mx-1" />
-
-                  <Select value={reportTypeFilter} onValueChange={(v: any) => setReportTypeFilter(v)}>
-                    <SelectTrigger className="w-[160px] h-10 bg-card border-border rounded-xl font-bold text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-card border-border">
-                       <SelectItem value="all">كل البيانات (حالي+قديم)</SelectItem>
-                       <SelectItem value="current">البيانات الحالية فقط</SelectItem>
-                       <SelectItem value="historical">البيانات القديمة فقط</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <div className="h-6 w-px bg-border mx-1" />
-
-                  <Button variant="outline" className="border-border bg-card hover:bg-muted text-foreground gap-2 h-10 px-4 rounded-xl whitespace-nowrap text-xs font-bold" onClick={() => window.print()}>
-                    <Printer className="h-4 w-4" />
-                    طباعة التقرير
-                  </Button>
-               </div>
-               )}
-             </div>
-
-             {reportSubTab === 'monthly' ? (
-               <>
-                 {/* Supplier Specific Detailed Report */}
-             {supplierPurchaseStats && (
-               <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 animate-in slide-in-from-top duration-500">
-                  <Card className="bg-primary/5 border-primary/20 p-5 rounded-2xl flex flex-col justify-center">
-                     <span className="text-[9px] font-black text-primary/60 uppercase mb-1">المورد المختار</span>
-                     <span className="text-sm font-black text-foreground truncate">{supplierPurchaseStats.entity?.name}</span>
-                     <span className="text-[10px] font-bold text-muted-foreground">{supplierPurchaseStats.entity?.type === 'office' ? 'مكتب' : 'مذخر'}</span>
-                  </Card>
-                  <Card className="bg-card border-border p-5 rounded-2xl">
-                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">إجمالي المشتريات</span>
-                     <div className="text-xl font-black text-foreground font-mono">{formatNumberWithCommas(supplierPurchaseStats.totalPurchases)}</div>
-                     <span className="text-[10px] font-bold text-muted-foreground">{supplierPurchaseStats.count} فاتورة</span>
-                  </Card>
-                  <Card className="bg-card border-border p-5 rounded-2xl">
-                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">المسدد</span>
-                     <div className="text-xl font-black text-emerald-600 font-mono">{formatNumberWithCommas(supplierPurchaseStats.totalPaid)}</div>
-                  </Card>
-                  <Card className="bg-card border-border p-5 rounded-2xl">
-                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">المتبقي</span>
-                     <div className="text-xl font-black text-rose-500 font-mono">{formatNumberWithCommas(supplierPurchaseStats.totalRemaining)}</div>
-                  </Card>
-                  <Card className="bg-card border-border p-5 rounded-2xl">
-                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">أعلى فاتورة</span>
-                     <div className="text-xl font-black text-indigo-600 font-mono">{formatNumberWithCommas(supplierPurchaseStats.highestInvoice)}</div>
-                  </Card>
-                  <Card className="bg-card border-border p-5 rounded-2xl">
-                     <span className="text-[9px] font-black text-muted-foreground uppercase mb-1">حالة الدين</span>
-                     <div className={`text-xs font-black p-1 rounded text-center mt-2 ${Number(supplierPurchaseStats.entity?.balance || 0) > 0 ? 'bg-rose-500/10 text-rose-600' : 'bg-emerald-500/10 text-emerald-600'}`}>
-                        {Number(supplierPurchaseStats.entity?.balance || 0) > 0 ? 'يوجد ديون مستحقة' : 'لا يوجد ديون'}
-                     </div>
-                  </Card>
-               </div>
-             )}
-
-             {/* Comparative Stats Cards */}
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {[
-                  { label: 'إجمالي الوارد', value: monthlyComparison.current.revenue, change: monthlyComparison.changes.revenue, icon: BarChart3, color: 'blue' },
-                  { label: 'صافي الربح', value: monthlyComparison.current.profit, change: monthlyComparison.changes.profit, icon: TrendingUp, color: 'emerald' },
-                  { label: 'إجمالي المشتريات للشهر', value: monthlyComparison.current.invoices, change: monthlyComparison.changes.invoices, icon: ShoppingCart, color: 'indigo' },
-                  { label: 'إجمالي المسدد', value: monthlyComparison.current.payments, change: monthlyComparison.changes.payments, icon: CheckCircle2, color: 'blue' },
-                  { label: 'الديون المتبقية', value: monthlyComparison.current.remaining, change: monthlyComparison.changes.remaining, icon: AlertCircle, color: 'rose' },
-                  { label: 'المصروفات العامة', value: monthlyComparison.current.expenses - monthlyComparison.current.losses, change: 0, icon: ArrowUpCircle, color: 'rose' },
-                  { label: 'خسائر (تالف/اكسباير)', value: monthlyComparison.current.losses, change: 0, icon: AlertTriangle, color: 'rose' },
-                  { label: 'صافي النتيجة', value: monthlyComparison.current.net, change: monthlyComparison.changes.net, icon: DollarSign, color: 'emerald' },
-                ].map((stat, i) => (
-                  <Card key={i} className="bg-card border-border p-6 rounded-2xl shadow-sm relative group overflow-hidden border-t-2 border-t-primary/20">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="p-2 bg-muted rounded-lg">
-                        <stat.icon className="h-5 w-5 opacity-70" />
-                      </div>
-                      <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none">{stat.label}</span>
-                    </div>
-                    <div className="text-2xl font-black text-foreground font-mono tracking-tighter mb-2">
-                       {formatNumberWithCommas(stat.value)}
-                    </div>
-                    {stat.label !== 'المصروفات العامة' && (
-                      <div className={`text-[10px] font-black flex items-center gap-1 ${stat.change >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                        {stat.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                        {Math.abs(stat.change).toFixed(1)}% {stat.change >= 0 ? 'زيادة' : 'انخفاض'}
-                      </div>
-                    )}
-                  </Card>
-                ))}
-             </div>
-
-             {/* Charts Section */}
-             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <Card className="bg-card border-border p-8 rounded-3xl overflow-hidden shadow-sm">
-                   <div className="flex justify-between items-center mb-8">
-                      <div>
-                        <h3 className="text-lg font-black text-foreground">مشتريات الأشهر</h3>
-                        <p className="text-xs text-muted-foreground font-bold">تحليل المشتريات خلال السنة</p>
-                      </div>
-                   </div>
-                   <div className="h-[300px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                         <AreaChart data={monthlyTimelineData}>
-                            <defs>
-                               <linearGradient id="colorPurch" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
-                                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                               </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.5} />
-                            <XAxis dataKey="monthName" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
-                            <YAxis fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
-                            <Tooltip contentStyle={{backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', textAlign: 'right'}} itemStyle={{fontWeight: '900', fontSize: '11px'}} />
-                            <Area type="monotone" dataKey="invoices" name="إجمالي المشتريات" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorPurch)" />
-                         </AreaChart>
-                      </ResponsiveContainer>
-                   </div>
-                </Card>
-                <Card className="bg-card border-border p-8 rounded-3xl overflow-hidden shadow-sm">
-                   <div className="flex justify-between items-center mb-8">
-                      <div>
-                        <h3 className="text-lg font-black text-foreground">أداء الوارد والأرباح</h3>
-                        <p className="text-xs text-muted-foreground font-bold">تتبع النمو المالي خلال السنة</p>
-                      </div>
-                   </div>
-                   <div className="h-[300px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                         <AreaChart data={monthlyTimelineData}>
-                            <defs>
-                               <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
-                                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                               </linearGradient>
-                               <linearGradient id="colorProf" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
-                                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                               </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.5} />
-                            <XAxis dataKey="monthName" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
-                            <YAxis fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : `${v/1000}k`} />
-                            <Tooltip contentStyle={{backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', textAlign: 'right'}} itemStyle={{fontWeight: '900', fontSize: '11px'}} />
-                            <Area type="monotone" dataKey="revenue" name="إجمالي الوارد" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorRev)" />
-                            <Area type="monotone" dataKey="profit" name="صافي الربح" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorProf)" />
-                         </AreaChart>
-                      </ResponsiveContainer>
-                   </div>
-                </Card>
-
-                <Card className="bg-card border-border p-8 rounded-3xl overflow-hidden shadow-sm">
-                   <div className="flex justify-between items-center mb-8">
-                      <div>
-                         <h3 className="text-lg font-black text-foreground">الفواتير والتسديدات</h3>
-                         <p className="text-xs text-muted-foreground font-bold">مقارنة المصوبات مع المبالغ المدفوعة</p>
-                      </div>
-                   </div>
-                   <div className="h-[300px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                         <BarChart data={monthlyTimelineData}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.5} />
-                            <XAxis dataKey="monthName" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
-                            <YAxis fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} tick={{fill: 'var(--muted-foreground)'}} />
-                            <Tooltip contentStyle={{backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '12px', textAlign: 'right'}} itemStyle={{fontWeight: '900', fontSize: '11px'}} />
-                            <Legend />
-                            <Bar dataKey="invoices" name="الفواتير" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                            <Bar dataKey="payments" name="التسديدات" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                         </BarChart>
-                      </ResponsiveContainer>
-                   </div>
-                </Card>
-             </div>
-
-             {supplierPurchaseStats && supplierPurchaseStats.invoices.length > 0 && (
-               <Card className="bg-card border-border rounded-3xl overflow-hidden shadow-sm mt-8 mb-8">
-                  <div className="p-8 border-b border-border bg-indigo-500/5 flex items-center justify-between">
-                     <div className="flex items-center gap-3">
-                        <FileText className="h-6 w-6 text-indigo-600" />
-                        <h3 className="text-xl font-black text-foreground">تفاصيل مشتريات الشهر ({supplierPurchaseStats.entity?.name})</h3>
-                     </div>
-                  </div>
-                  <div className="overflow-x-auto">
-                     <table className="w-full text-right border-collapse">
-                        <thead className="bg-muted/30 text-[10px] font-black text-muted-foreground uppercase border-b border-border">
-                           <tr>
-                              <th className="px-8 py-6">رقم الفاتورة</th>
-                              <th className="px-8 py-6">التاريخ</th>
-                              <th className="px-8 py-6">المبلغ</th>
-                              <th className="px-8 py-6">المسدد</th>
-                              <th className="px-8 py-6">المتبقي</th>
-                              <th className="px-8 py-6">الحالة</th>
-                              <th className="px-8 py-6 text-left">الإجراء</th>
-                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border/30">
-                           {supplierPurchaseStats.invoices.sort((a,b) => toValidDate(b.date).getTime() - toValidDate(a.date).getTime()).map((inv, idx) => (
-                             <tr key={idx} className="group hover:bg-indigo-50/30 transition-colors">
-                               <td className="px-8 py-6 font-bold text-foreground">#{inv.invoiceNumber || idx + 1}</td>
-                               <td className="px-8 py-6 text-sm text-muted-foreground font-bold">{safeFormatDate(toValidDate(inv.date), 'yyyy/MM/dd')}</td>
-                               <td className="px-8 py-6 font-mono font-black text-foreground">{formatNumberWithCommas(inv.amount)}</td>
-                               <td className="px-8 py-6 font-mono font-bold text-emerald-600">{formatNumberWithCommas(inv.paidAmount || 0)}</td>
-                               <td className="px-8 py-6 font-mono font-bold text-rose-500">{formatNumberWithCommas(inv.remainingAmount || 0)}</td>
-                               <td className="px-8 py-6">
-                                  <span className={`text-[10px] font-black px-2 py-1 rounded-full ${Number(inv.remainingAmount || 0) <= 0 ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>
-                                     {Number(inv.remainingAmount || 0) <= 0 ? 'مسدد بالكامل' : 'يوجد متبقي'}
-                                  </span>
-                               </td>
-                               <td className="px-8 py-6 text-left">
-                                  <Button 
-                                     variant="ghost" 
-                                     size="sm" 
-                                     className="h-8 px-3 gap-2 text-primary font-black hover:bg-primary/10 rounded-lg"
-                                     onClick={() => {
-                                       setViewingInvoice(inv);
-                                       setActiveTab('invoice-details');
-                                     }}
-                                  >
-                                     <Eye className="h-4 w-4" />
-                                     عرض
-                                  </Button>
-                               </td>
-                             </tr>
-                           ))}
-                        </tbody>
-                     </table>
-                  </div>
-               </Card>
-             )}
+             <ReportsSystem 
+                transactions={transactions}
+                ledgerEntries={allLedgerEntries}
+                historicalRecords={historicalRecords}
+                expiredLosses={expiredDamagedLosses}
+                openingCash={rawOpeningCash}
+                entities={entities}
+                attendance={employeeAttendance}
+                customerDebts={customerDebts}
+                loans={rawLoans}
+                branches={branches}
+                currentBranchId={currentBranchId}
+              />
+              {/* Extra tag removed */}
 
              <Card className="bg-card border-border rounded-3xl overflow-hidden shadow-sm">
                 <div className="p-8 border-b border-border bg-muted/10 flex items-center justify-between">
@@ -5815,8 +5872,12 @@ export default function App() {
                          </thead>
                          <tbody className="divide-y divide-border/30">
                             {branches.map(branch => {
-                              const bTx = transactions.filter(t => t.branchId === branch.id && new Date(t.date) >= startOfMonth(new Date(reportsYear, reportsMonth)) && new Date(t.date) <= endOfMonth(new Date(reportsYear, reportsMonth)));
-                              const bSalaries = employeeAttendance.filter(r => r.branchId === branch.id && new Date(r.date) >= startOfMonth(new Date(reportsYear, reportsMonth)) && new Date(r.date) <= endOfMonth(new Date(reportsYear, reportsMonth))).reduce((acc, r) => acc + r.dailyWage, 0);
+                              const baseDate = new Date(reportsYear, reportsMonth);
+                              const mStart = isValid(baseDate) ? startOfMonth(baseDate) : startOfMonth(new Date());
+                              const mEnd = endOfMonth(mStart);
+                              
+                              const bTx = transactions.filter(t => t.branchId === branch.id && toValidDate(t.date) >= mStart && toValidDate(t.date) <= mEnd);
+                              const bSalaries = employeeAttendance.filter(r => r.branchId === branch.id && toValidDate(r.date) >= mStart && toValidDate(r.date) <= mEnd).reduce((acc, r) => acc + r.dailyWage, 0);
                               const bRevenue = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.saleAmount || t.amount), 0);
                               const bProfit = bTx.filter(t => t.type === 'income').reduce((acc, t) => acc + (t.profitAmount || t.netProfit || 0), 0);
                               const bExpense = bTx.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0) + bSalaries;
@@ -5833,24 +5894,6 @@ export default function App() {
                       </table>
                   </div>
                 </Card>
-             )}
-               </>
-             ) : (
-               <FinancialPeriodReport 
-                  transactions={transactions}
-                  allLedgerEntries={allLedgerEntries}
-                  expiredDamagedLosses={expiredDamagedLosses}
-                  historicalRecords={historicalRecords}
-                  entities={entities}
-                  branches={branches}
-                  employeeAttendance={employeeAttendance}
-                  openingCash={rawOpeningCash}
-                  customerDebts={customerDebts}
-                  onViewRecord={handleViewRecordFromReport}
-                  onEditRecord={handleEditRecordFromReport}
-                  onDeleteRecord={handleDeleteRecordFromReport}
-                  onRefresh={() => window.location.reload()}
-               />
              )}
           </TabsContent>
 
@@ -5912,22 +5955,10 @@ export default function App() {
                </Card>
             </TabsContent>
 
-            <TabsContent value="historical" className="animate-in fade-in zoom-in-95 duration-300 pb-20 md:pb-0">
-               <HistoricalMigrationPage 
-                 branchId={currentBranchId} 
-                 ownerId={user?.uid || ''} 
-                 openingCash={rawOpeningCash}
-                 onDeleteOpeningCash={handleDeleteOpeningCash}
-                 onDeleteHistoricalRecord={handleDeleteHistoricalRecord}
-                 onImportExcel={() => setIsExcelImportOpen(true)}
-                 onMultiEntry={() => setIsMultiEntryOpen(true)}
-               />
-            </TabsContent>
-
             <TabsContent value="medicine-requests" className="animate-in fade-in zoom-in-95 duration-300 pb-20 md:pb-0">
                <MedicineRequestsPage 
                  branchId={currentBranchId} 
-                 ownerId={user?.uid || ''} 
+                 ownerId={user?.uid || 'demo-user'} 
                  onDeleteRequest={handleDeleteMedicineRequest}
                  onDeleteImage={handleDeleteRequestImage}
                />
@@ -5955,11 +5986,11 @@ export default function App() {
             <TabsContent value="settings" className="space-y-8 animate-in fade-in duration-500 pb-20 md:pb-0">
                <div>
                  <h2 className="text-2xl font-black text-foreground">إعدادات النظام</h2>
-                 <p className="text-muted-foreground text-sm">تخصيص الصيدلية، الأمان، وخيارات المزامنة</p>
+                 <p className="text-muted-foreground text-sm">تخصيص الصيدلية، الأمان، وإدارة البيانات</p>
                </div>
 
                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
-                  <Card className="bg-card border-border p-6 md:p-8 space-y-6 rounded-2xl">
+                  <Card className="bg-card border-border p-6 md:p-8 space-y-6 rounded-2xl shadow-sm">
                     <div className="flex items-center gap-4">
                       <div className="p-3 bg-blue-500/10 text-blue-500 rounded-2xl">
                         <Cloud className="h-6 w-6" />
@@ -6063,7 +6094,65 @@ export default function App() {
                     </div>
                   </Card>
 
-                  {/* Debug Panel as requested */}
+                  <Card className="bg-card border-border p-6 md:p-8 space-y-4 rounded-2xl border-dashed border-indigo-500/30">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-indigo-500/10 text-indigo-500 rounded-2xl">
+                        <RefreshCw className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-black text-foreground">صيانة البيانات العميقة</h3>
+                        <p className="text-xs text-muted-foreground">تنظيف السجلات المكررة وإصلاح التزامن المزدوج</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-4 pt-4 border-t border-border">
+                        <Button 
+                          className="w-full h-12 rounded-xl font-black gap-3 shadow-lg shadow-indigo-500/20 bg-indigo-600 hover:bg-indigo-700 text-white"
+                          onClick={async () => {
+                            const toastId = toast.loading('جاري فحص وتنظيف البيانات...');
+                            try {
+                              const count = await firebaseService.cleanupDuplicateInvoices();
+                              toast.dismiss(toastId);
+                              toast.success(`تم بنجاح تنظيف ${count} سجل مكرر من قاعدة البيانات`);
+                            } catch (err) {
+                              toast.dismiss(toastId);
+                              toast.error('فشل في عملية تنظيف البيانات');
+                              console.error(err);
+                            }
+                          }}
+                        >
+                          <Database className="h-5 w-5" />
+                          تنظيف الفواتير المكررة
+                        </Button>
+                        <p className="text-[10px] text-muted-foreground text-center">
+                          يساعد هذا الإجراء في حذف النسخ المكررة الناتجة عن أخطاء الحفظ المزدوج السابقة.
+                        </p>
+                    </div>
+                  </Card>
+
+                  <Card className="bg-card border-border p-6 md:p-8 space-y-4 rounded-2xl border-dashed border-amber-500/30">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-amber-500/10 text-amber-500 rounded-2xl">
+                        <RefreshCw className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-black text-foreground">تصفير الحسابات المالية</h3>
+                        <p className="text-xs text-muted-foreground">مسح كافة المعاملات المالية وتصفير الأرصدة</p>
+                      </div>
+                    </div>
+                    <div className="pt-4 border-t border-border">
+                      <Button 
+                        className="w-full h-12 rounded-xl font-black gap-2 bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/20"
+                        onClick={() => setShowFinancialResetModal(true)}
+                      >
+                        <Zap className="h-5 w-5" />
+                        <span>بدء عملية تصفير الحسابات</span>
+                      </Button>
+                      <p className="text-[10px] text-muted-foreground mt-3 text-center leading-relaxed">
+                        * ملاحظة: سيتم الاحتفاظ بأسماء الموردين والفروع والمستخدمين، ولكن سيتم حذف كل المعاملات المالية المرتبطة بهم وتصفير أرصدتهم.
+                      </p>
+                    </div>
+                  </Card>
+
                   <Card className="bg-card border-border p-6 md:p-8 space-y-4 rounded-2xl border-dashed border-primary/30">
                     <div className="flex items-center gap-4">
                       <div className="p-3 bg-rose-500/10 text-rose-500 rounded-2xl">
@@ -6071,30 +6160,34 @@ export default function App() {
                       </div>
                       <div>
                         <h3 className="text-lg font-black text-foreground">لوحة المطور (Debug)</h3>
-                        <p className="text-xs text-muted-foreground">تشخيص حالة النظام والربط</p>
+                        <p className="text-xs text-muted-foreground">تصفير وإدارة بيانات الاختبار</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border text-[10px] font-mono">
-                       <div className="space-y-1">
-                         <div className="text-muted-foreground uppercase">Number of Branches</div>
-                         <div className="font-bold text-foreground">{branches.length}</div>
-                       </div>
-                       <div className="space-y-1">
-                         <div className="text-muted-foreground uppercase">Selected Branch ID</div>
-                         <div className="font-bold text-primary truncate max-w-[100px]">{currentBranchId || 'NULL (Unified)'}</div>
-                       </div>
-                       <div className="space-y-1">
-                         <div className="text-muted-foreground uppercase">Selected Name</div>
-                         <div className="font-bold text-foreground">{branches.find(b => b.id === currentBranchId)?.name || 'N/A'}</div>
-                       </div>
-                       <div className="space-y-1">
-                         <div className="text-muted-foreground uppercase">Active Branches</div>
-                         <div className="font-bold text-emerald-500">{branches.filter(b => b.status === 'active').length}</div>
-                       </div>
-                       <div className="col-span-2 space-y-1 overflow-hidden">
-                         <div className="text-muted-foreground uppercase">LocalStorage Key</div>
-                         <div className="font-bold text-foreground break-all">{localStorage.getItem('pharma-current-branch-id') || 'EMPTY'}</div>
-                       </div>
+                    <div className="flex flex-col gap-4 pt-4 border-t border-border">
+                        <Button 
+                          variant="destructive" 
+                          className="w-full h-12 rounded-xl font-black gap-3 shadow-lg shadow-rose-500/20"
+                          onClick={async () => {
+                            setIsResetting(true);
+                            await DataPersistenceService.resetTestData();
+                            setIsResetting(false);
+                          }}
+                          disabled={isResetting}
+                        >
+                          {isResetting ? <RefreshCcw className="h-5 w-5 animate-spin" /> : <RefreshCcw className="h-5 w-5" />}
+                          تصفير كل بيانات الاختبار
+                        </Button>
+
+                        <div className="grid grid-cols-2 gap-4 text-[10px] font-mono">
+                           <div className="space-y-1">
+                             <div className="text-muted-foreground uppercase">Number of Branches</div>
+                             <div className="font-bold text-foreground">{branches.length}</div>
+                           </div>
+                           <div className="space-y-1">
+                             <div className="text-muted-foreground uppercase">Selected Branch ID</div>
+                             <div className="font-bold text-primary truncate max-w-[100px]">{currentBranchId || 'NULL (Unified)'}</div>
+                           </div>
+                        </div>
                     </div>
                   </Card>
                </div>
@@ -6216,14 +6309,21 @@ export default function App() {
         entities={entities} 
         currentBranchId={currentBranchId || undefined}
         appUser={appUser}
+        preSelectedEntityId={selectedEntity?.id}
       />
 
       <MultiInvoiceEntry
         open={isMultiEntryOpen}
-        onOpenChange={setIsMultiEntryOpen}
+        onOpenChange={(open) => {
+          setIsMultiEntryOpen(open);
+          if (!open) {
+            setSelectedEntity(null);
+          }
+        }}
         entities={entities}
         currentBranchId={currentBranchId || 'main'}
         appUser={appUser}
+        preselectedEntityId={selectedEntity?.id}
         onImportExcel={() => {
           setIsMultiEntryOpen(false);
           setIsExcelImportOpen(true);
@@ -6251,6 +6351,10 @@ export default function App() {
             onSubmit={handleAddInvoice}
             onClose={() => setIsAddInvoiceOpen(false)}
             onImagesChange={setInvImageFiles}
+            onAddEntityClick={() => {
+              setIsAddingFromInvoice(true);
+              setIsAddEntityOpen(true);
+            }}
           />
         </DialogContent>
       </Dialog>
@@ -6333,12 +6437,13 @@ export default function App() {
                   <Label className="text-muted-foreground font-black text-[10px] uppercase tracking-widest">التسديد مقابل</Label>
                   <Select value={paySource} onValueChange={(val: any) => {
                     setPaySource(val);
-                    if (val === 'opening_balance') setViewingInvoice(null);
+                    if (val !== 'invoice') setViewingInvoice(null);
                   }} disabled={paymentMode !== 'normal'}>
                     <SelectTrigger className="bg-muted border-border text-foreground h-14 rounded-xl font-bold">
                       <SelectValue placeholder="اختر نوع التسديد" />
                     </SelectTrigger>
                     <SelectContent className="bg-card border-border text-foreground">
+                       <SelectItem value="general">تسديد عام لحساب المورد (FIFO)</SelectItem>
                        <SelectItem value="invoice">تسديد قائمة / فاتورة محددة</SelectItem>
                        <SelectItem value="opening_balance">تسديد من الرصيد الافتتاحي</SelectItem>
                     </SelectContent>
@@ -6844,6 +6949,25 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      {/* Payment Deadlines Modals */}
+      <PaymentDeadlineForm 
+        isOpen={isDeadlineModalOpen}
+        onClose={() => setIsDeadlineModalOpen(false)}
+        onSave={handleSaveDeadline}
+        entities={entities}
+        allLedgerEntries={allLedgerEntries}
+        initialData={currentDeadline}
+        currentBranchId={currentBranchId}
+      />
+
+      <ExecutePaymentModal 
+        isOpen={isExecutePaymentOpen}
+        onClose={() => setIsExecutePaymentOpen(false)}
+        deadline={selectedDeadlineForPayment}
+        currentCash={stats.cashBalance}
+        onConfirm={handleExecuteDeadlinePayment}
+      />
+
       {/* Historical Import Wizard for Suppliers */}
       {viewingEntityDetail && (
         <SupplierHistoricalImportWizard 
@@ -6858,7 +6982,172 @@ export default function App() {
         />
       )}
 
-      {/* More dialogs will be added as we go... */}
+      {/* Report Detail Modal */}
+      <Dialog open={isReportDetailOpen} onOpenChange={setIsReportDetailOpen}>
+        <DialogContent dir="rtl" className="sm:max-w-4xl lg:max-w-6xl max-h-[90vh] overflow-hidden flex flex-col bg-card border-border rounded-3xl p-0">
+          <div className="p-6 border-b border-border bg-muted/20 flex justify-between items-center shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-primary/10 rounded-xl">
+                <ScrollText className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-black text-foreground">تفاصيل {reportDetailTitle}</DialogTitle>
+                <p className="text-xs text-muted-foreground font-bold mt-0.5">
+                  استعراض كافة السجلات المكونة لهذا الإجمالي للفترة من {safeFormatDate(isValid(new Date(reportsYear, reportsMonth)) ? startOfMonth(new Date(reportsYear, reportsMonth)) : new Date(), 'dd/MM/yyyy')} إلى {safeFormatDate(isValid(new Date(reportsYear, reportsMonth)) ? endOfMonth(new Date(reportsYear, reportsMonth)) : new Date(), 'dd/MM/yyyy')}
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-right border-collapse">
+                <thead className="bg-muted text-[10px] font-black text-muted-foreground uppercase sticky top-0 z-10">
+                  <tr>
+                    <th className="px-6 py-4 border-b border-border">التاريخ</th>
+                    <th className="px-6 py-4 border-b border-border">النوع</th>
+                    <th className="px-6 py-4 border-b border-border">البيان / التفاصيل</th>
+                    <th className="px-6 py-4 border-b border-border">الجهة / المورد</th>
+                    <th className="px-6 py-4 border-b border-border">المبلغ</th>
+                    <th className="px-6 py-4 border-b border-border text-center">الإجراءات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {reportDetailData.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-20 text-center text-muted-foreground font-bold italic">لا توجد سجلات لعرضها</td>
+                    </tr>
+                  ) : (
+                    reportDetailData.map((row, idx) => (
+                      <tr key={idx} className="hover:bg-primary/5 transition-colors group">
+                        <td className="px-6 py-4 text-xs font-mono font-bold text-muted-foreground">{safeFormatDate(row.date, 'yyyy/MM/dd')}</td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
+                            row.type === 'وارد' ? 'bg-emerald-500/10 text-emerald-600' :
+                            row.type === 'شراء' ? 'bg-indigo-500/10 text-indigo-600' :
+                            row.type === 'تسديد' ? 'bg-blue-500/10 text-blue-600' :
+                            row.type === 'مصروف' ? 'bg-rose-500/10 text-rose-600' :
+                            row.type === 'راتب' ? 'bg-amber-500/10 text-amber-600' :
+                            'bg-slate-500/10 text-slate-600'
+                          }`}>
+                            {row.type}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                           <div className="flex flex-col">
+                              <span className="font-bold text-sm text-foreground truncate max-w-[250px]">{row.description}</span>
+                              {row.sourceType === 'transaction' && <span className="text-[10px] text-muted-foreground">ID: {row.id?.substring(0, 8)}</span>}
+                           </div>
+                        </td>
+                        <td className="px-6 py-4 font-black text-sm text-foreground">{row.party}</td>
+                        <td className="px-6 py-4 font-mono font-black text-lg tracking-tighter">{formatNumberWithCommas(row.amount)}</td>
+                        <td className="px-6 py-4 text-left">
+                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-8 w-8 p-0 text-primary hover:bg-primary/10"
+                              onClick={() => {
+                                if (row.sourceType === 'transaction') {
+                                  setSelectedTransaction(transactions.find(t => t.id === row.id) || null);
+                                  setIsEditTransactionOpen(true);
+                                } else if (row.sourceType === 'ledger') {
+                                  const entry = allLedgerEntries.find(e => e.id === row.id);
+                                  if (entry) {
+                                    setViewingInvoice(entry);
+                                    if (entry.operationType === 'invoice') setIsEditInvoiceOpen(true);
+                                    else if (entry.operationType === 'payment') {
+                                      setSelectedEntity(entities.find(e => e.id === entry.accountId) || null);
+                                      setPayAmount(entry.amount);
+                                      toast.info('يمكنك تعديل الدفعات من خلال صفحة كشف حساب المورد');
+                                    }
+                                  }
+                                } else if (row.sourceType === 'entity') {
+                                  setViewingEntityDetail(entities.find(e => e.id === row.id) || null);
+                                  setIsReportDetailOpen(false);
+                                }
+                              }}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-8 w-8 p-0 text-rose-500 hover:bg-rose-500/10"
+                              onClick={() => {
+                                if (row.sourceType === 'transaction') {
+                                  handleDeleteTransaction(transactions.find(t => t.id === row.id)!);
+                                } else if (row.sourceType === 'ledger') {
+                                  const entry = allLedgerEntries.find(e => e.id === row.id);
+                                  if (entry) {
+                                    if (entry.operationType === 'invoice') {
+                                      setViewingInvoice(entry);
+                                      setIsDeleteInvoiceOpen(true);
+                                    } else {
+                                      toast.info('عملية الحذف لهذه الفئة تتم من صفحة السجل الخاص بها');
+                                    }
+                                  }
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="p-6 border-t border-border bg-muted/30 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0">
+             <div className="flex items-center gap-4">
+               <div className="flex flex-col">
+                 <span className="text-[10px] font-black text-muted-foreground uppercase">مجموع السجلات الحالية</span>
+                 <span className="text-2xl font-black font-mono text-primary">{formatNumberWithCommas(reportDetailData.reduce((s, r) => s + (r.amount || 0), 0))}</span>
+               </div>
+               <div className="h-10 w-px bg-border mx-2" />
+               <div className="flex flex-col">
+                 <span className="text-[10px] font-black text-muted-foreground uppercase">عدد العمليات</span>
+                 <span className="text-2xl font-black font-mono text-foreground">{reportDetailData.length}</span>
+               </div>
+             </div>
+             <div className="flex gap-2">
+                <Button variant="outline" className="rounded-xl font-bold h-11 px-6" onClick={() => setIsReportDetailOpen(false)}>إغلاق</Button>
+                <Button className="rounded-xl font-black gap-2 h-11 px-6 bg-primary text-white shadow-lg shadow-primary/20" onClick={() => window.print()}>
+                  <Printer className="h-4 w-4" />
+                  طباعة الكشف
+                </Button>
+             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAddLoanOpen} onOpenChange={setIsAddLoanOpen}>
+        <DialogContent dir="rtl" className="bg-card border-border text-foreground sm:max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-foreground text-xl font-black">تسجيل سلفة / أمانة مستردة</DialogTitle>
+          </DialogHeader>
+          <LoanForm 
+            loans={rawLoans}
+            onSubmit={handleAddLoan}
+            onClose={() => setIsAddLoanOpen(false)}
+            onImagesChange={setLoanImageFiles}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <DeadlineModal 
+        isOpen={isDeadlineModalOpen}
+        onClose={() => setIsDeadlineModalOpen(false)}
+        onSave={handleSaveDeadline}
+        onDelete={handleDeleteDeadline}
+        target={deadlineTarget}
+        currentDeadline={currentDeadline}
+      />
+
       </div>
     </div>
   );
